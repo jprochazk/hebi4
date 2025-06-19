@@ -1,7 +1,8 @@
-use proc_macro2::{Delimiter, Group, Punct, Spacing};
-use proc_macro2::{Literal, Span, TokenStream, TokenTree, token_stream::IntoIter};
+use proc_macro2::{
+    Delimiter, Group, Literal, Punct, Spacing, Span, TokenStream, TokenTree,
+    token_stream::IntoIter as TokenStreamIter,
+};
 use std::fmt::Write as _;
-use std::path::{Path, PathBuf};
 use std::str::FromStr as _;
 
 #[proc_macro]
@@ -63,7 +64,7 @@ fn try_globdir(input: TokenStream) -> Result<TokenStream> {
     Ok(fn_thing_wrapper)
 }
 
-fn expect_comma(input: &mut IntoIter) -> Result<()> {
+fn expect_comma(input: &mut TokenStreamIter) -> Result<()> {
     let tt = input.next().ok_or_else(invalid_arguments)?;
 
     let punct = match tt {
@@ -78,7 +79,7 @@ fn expect_comma(input: &mut IntoIter) -> Result<()> {
     Ok(())
 }
 
-fn parse_str_literal(input: &mut IntoIter) -> Result<String> {
+fn parse_str_literal(input: &mut TokenStreamIter) -> Result<String> {
     let tt = input.next().ok_or_else(invalid_arguments)?;
 
     let lit = match tt {
@@ -117,6 +118,9 @@ impl Error {
 }
 
 type Result<T, E = Error> = std::result::Result<T, E>;
+
+// code below is from:
+// https://github.com/upsuper/cstr/blob/e072e05f6ace9a37f7f9fb385ca2029cba6bd602/src/parse.rs
 
 macro_rules! unexpected_content {
     () => {
