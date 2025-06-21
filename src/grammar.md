@@ -226,9 +226,9 @@ the parser should still consume all "-" and "not" tokens, but emit a syntax erro
 if more than one appears in a row.
 ```
 expr_prefix =
-    "-" expr_postfix
-    "not" expr_postfix
-    expr_postfix
+    "-" expr_suffix
+    "not" expr_suffix
+    expr_suffix
 ```
 
 a postfix expression.
@@ -470,3 +470,4 @@ end)
 
 http.serve(svc)
 ```
+
