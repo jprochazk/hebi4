@@ -1,3 +1,6 @@
+pub mod node;
+pub mod visitor;
+
 use std::num::NonZeroU32;
 
 use crate::{intern::Interner, token::Tokens};
@@ -281,6 +284,12 @@ impl Stmt {
     }
 
     #[inline]
+    pub fn unpack<'ast, T: Node<NodeKind = Stmt>>(&self, ast: &'ast Ast) -> T::Output<'ast> {
+        assert!(self.base_tag() == T::TAG);
+        unsafe { self.unpack_unchecked::<T>(ast) }
+    }
+
+    #[inline]
     pub unsafe fn unpack_unchecked<'ast, T: Node<NodeKind = Stmt>>(
         &self,
         ast: &'ast Ast,
@@ -530,8 +539,8 @@ pub struct Ast {
 }
 
 impl Ast {
-    pub fn root(&self) -> Packed {
-        self.root
+    pub fn root(&self) -> node::Root<'_> {
+        unsafe { node::Root::unpack_unchecked(self.root, self) }
     }
 
     /// Retrieves a contiguous slice of [`Packed`].
@@ -653,6 +662,8 @@ pub trait Node: Sized + private::Sealed {
     /// The output type, used to assign `Self` an `'ast` lifetime.
     type Output<'ast>;
 
+    const TAG: Tag;
+
     /// Unpack the node into a struct.
     ///
     /// This does not mutate the AST, only retrieves references to nodes which constitute `Self`.
@@ -674,4 +685,8 @@ pub trait Node: Sized + private::Sealed {
     fn pack_into(&self, ast: &mut AstBuilder) -> Self::NodeKind;
 }
 
-pub mod node;
+impl std::fmt::Debug for Ast {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        todo!()
+    }
+}

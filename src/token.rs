@@ -237,12 +237,76 @@ fn lexeme(src: &str, kind: TokenKind) -> &str {
     }
 }
 
+#[rustfmt::skip]
+macro_rules! t {
+    (var) => ($crate::token::TokenKind::Var);
+    (fn) => ($crate::token::TokenKind::Fn);
+    (do) => ($crate::token::TokenKind::Do);
+    (loop) => ($crate::token::TokenKind::Loop);
+    (end) => ($crate::token::TokenKind::End);
+    (return) => ($crate::token::TokenKind::Return);
+    (break) => ($crate::token::TokenKind::Break);
+    (continue) => ($crate::token::TokenKind::Continue);
+    (if) => ($crate::token::TokenKind::If);
+    (else) => ($crate::token::TokenKind::Else);
+    ("(") => ($crate::token::TokenKind::ParenL);
+    (")") => ($crate::token::TokenKind::ParenR);
+    ("{") => ($crate::token::TokenKind::BraceL);
+    ("}") => ($crate::token::TokenKind::BraceR);
+    ("[") => ($crate::token::TokenKind::BracketL);
+    ("]") => ($crate::token::TokenKind::BracketR);
+    (.) => ($crate::token::TokenKind::Dot);
+    (=) => ($crate::token::TokenKind::Eq);
+    (+=) => ($crate::token::TokenKind::PlusEq);
+    (-=) => ($crate::token::TokenKind::MinusEq);
+    (*=) => ($crate::token::TokenKind::StarEq);
+    (/=) => ($crate::token::TokenKind::SlashEq);
+    (or) => ($crate::token::TokenKind::Or);
+    (and) => ($crate::token::TokenKind::And);
+    (==) => ($crate::token::TokenKind::EqEq);
+    (!=) => ($crate::token::TokenKind::NotEq);
+    (>) => ($crate::token::TokenKind::Gt);
+    (>=) => ($crate::token::TokenKind::Ge);
+    (<) => ($crate::token::TokenKind::Lt);
+    (<=) => ($crate::token::TokenKind::Le);
+    (+) => ($crate::token::TokenKind::Plus);
+    (-) => ($crate::token::TokenKind::Minus);
+    (*) => ($crate::token::TokenKind::Star);
+    (/) => ($crate::token::TokenKind::Slash);
+    (not) => ($crate::token::TokenKind::Not);
+
+    (ident) => ($crate::token::TokenKind::Ident);
+    (int) => ($crate::token::TokenKind::Integer);
+    (float) => ($crate::token::TokenKind::Float);
+    (str) => ($crate::token::TokenKind::String);
+}
+
 pub struct TokenCursor<'src, 'tokens> {
     tokens: &'tokens Tokens<'src>,
     index: usize,
 }
 
 impl<'src, 'tokens> TokenCursor<'src, 'tokens> {
+    #[inline]
+    pub fn kind(&self, token: Token) -> TokenKind {
+        self.tokens.kind(token)
+    }
+
+    #[inline]
+    pub fn lexeme(&self, token: Token) -> &'src str {
+        self.tokens.lexeme(token)
+    }
+
+    #[inline]
+    pub fn span(&self, token: Token) -> Span {
+        self.tokens.span(token)
+    }
+
+    #[inline]
+    pub fn advance(&mut self) {
+        let _ = self.next();
+    }
+
     #[inline]
     pub fn current(&self) -> Token {
         Token(self.index as u32)

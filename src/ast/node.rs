@@ -12,6 +12,12 @@ declare_node! {
     }
 }
 
+impl Root<'_> {
+    pub fn body(&self) -> impl ExactSizeIterator<Item = Stmt> + '_ {
+        self.body.iter().copied()
+    }
+}
+
 pub mod stmt {
     use super::*;
 
@@ -19,7 +25,7 @@ pub mod stmt {
         #[kind(Stmt), tag(StmtVar)]
         pub struct Var {
             pub name: Ident,
-            pub value: Expr,
+            pub value: super::Expr,
         }
     }
 
@@ -27,9 +33,30 @@ pub mod stmt {
         #[kind(Stmt), tag(StmtFn)]
         pub struct Fn<'a> {
             pub name: Ident,
-            pub body: Expr,
+            pub body: super::Expr,
             #[tail]
             pub params: &'a [Ident],
+        }
+    }
+
+    declare_node! {
+        #[kind(Stmt), tag(StmtLoop)]
+        pub struct Loop<'a> {
+            #[tail]
+            pub body: &'a [Stmt],
+        }
+    }
+
+    impl Loop<'_> {
+        pub fn body(&self) -> impl ExactSizeIterator<Item = Stmt> + '_ {
+            self.body.iter().copied()
+        }
+    }
+
+    declare_node! {
+        #[kind(Stmt), tag(StmtExpr)]
+        pub struct Expr {
+            pub inner: super::Expr,
         }
     }
 }
@@ -96,6 +123,8 @@ pub mod expr {
         type NodeKind = Expr;
 
         type Output<'ast> = Str;
+
+        const TAG: Tag = Tag::ExprStr;
 
         #[inline]
         unsafe fn unpack_unchecked<'ast>(

@@ -50,6 +50,8 @@ macro_rules! declare_node {
 
             type Output<'ast> = declare_node!(@replace_lifetime $name 'ast $($lifetime)?);
 
+            const TAG: Tag = Tag::$TagName;
+
             #[inline]
             unsafe fn unpack_unchecked<'ast>(node: Self::NodeKind, ast: &'ast $crate::ast::Ast) -> Self::Output<'ast> {
                 debug_assert!(node.base_tag() == Tag::$TagName);
@@ -84,7 +86,7 @@ macro_rules! declare_node {
     (@unpack($ast:ident, $node:ident) ; $tail:ident) => {
         let $tail = unsafe {
             $ast
-                .slice($node.index(), $node.length())
+                .slice($node._into_packed().index(), $node._into_packed().length())
                 .unwrap_unchecked()
         };
         let $tail = unsafe { $crate::ast::node::macros::_node_slice_from_packed_unchecked($tail) };
@@ -151,6 +153,7 @@ macro_rules! declare_node {
     // we store the index of the first field, so we need to separate the
     // list of fields into a head + tail
     (@pack_components($ast:ident, $self:ident) $first:ident $($rest:ident)*) => {{
+        #[allow(unused_mut)]
         let mut n = 1;
         let index = $ast.insert_packed($self.$first._into_packed());
         $(
