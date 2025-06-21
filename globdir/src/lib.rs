@@ -51,7 +51,7 @@ fn try_globdir(input: TokenStream) -> Result<TokenStream> {
         let path = path.map_err(|err| error(err.to_string(), Span::call_site()))?;
         write!(
             &mut output,
-            "#[test] fn {stem}() {{ let __callable = ({fn_thing}); __callable({path:?}); }}",
+            "#[test] fn {stem}() {{ let __callable: fn(&str) -> () = ({fn_thing}); __callable({path:?}); }}",
             stem = path.file_stem().unwrap().to_str().unwrap(),
             path = path.to_str().unwrap(),
         )
