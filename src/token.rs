@@ -206,6 +206,7 @@ fn lexeme(src: &str, kind: TokenKind) -> &str {
         TokenKind::BracketL => "[",
         TokenKind::BracketR => "]",
         TokenKind::Dot => ".",
+        TokenKind::Comma => ",",
         TokenKind::Eq => "=",
         TokenKind::PlusEq => "+=",
         TokenKind::MinusEq => "-=",
@@ -224,6 +225,9 @@ fn lexeme(src: &str, kind: TokenKind) -> &str {
         TokenKind::Star => "*",
         TokenKind::Slash => "/",
         TokenKind::Not => "not",
+        TokenKind::True => "true",
+        TokenKind::False => "false",
+        TokenKind::Nil => "nil",
 
         kind @ (TokenKind::Ident | TokenKind::Integer | TokenKind::Float | TokenKind::String) => {
             &src[tokenize_one(src, kind).span]
@@ -256,6 +260,7 @@ macro_rules! t {
     ("[") => ($crate::token::TokenKind::BracketL);
     ("]") => ($crate::token::TokenKind::BracketR);
     (.) => ($crate::token::TokenKind::Dot);
+    (,) => ($crate::token::TokenKind::Comma);
     (=) => ($crate::token::TokenKind::Eq);
     (+=) => ($crate::token::TokenKind::PlusEq);
     (-=) => ($crate::token::TokenKind::MinusEq);
@@ -279,6 +284,11 @@ macro_rules! t {
     (int) => ($crate::token::TokenKind::Integer);
     (float) => ($crate::token::TokenKind::Float);
     (str) => ($crate::token::TokenKind::String);
+    (true) => ($crate::token::TokenKind::True);
+    (false) => ($crate::token::TokenKind::False);
+    (nil) => ($crate::token::TokenKind::Nil);
+
+    (EOF) => ($crate::token::TokenKind::Eof);
 }
 
 pub struct TokenCursor<'src, 'tokens> {
@@ -467,6 +477,8 @@ pub enum TokenKind {
     BracketR,
     #[token(".")]
     Dot,
+    #[token(",")]
+    Comma,
 
     #[token("=")]
     Eq,
@@ -513,6 +525,12 @@ pub enum TokenKind {
     Float,
     #[regex(r#""([^"\\]|\\.)*""#)]
     String,
+    #[token("true")]
+    True,
+    #[token("false")]
+    False,
+    #[token("nil")]
+    Nil,
 
     #[regex(r"\t+")]
     Tabs,

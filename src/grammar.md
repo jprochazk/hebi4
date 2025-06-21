@@ -236,7 +236,7 @@ this includes calls, indexing, and field access, all of which may be chained arb
 ```
 expr_suffix =
     suffix_target suffix+
-    expr_literal
+    expr_primary
 
 suffix =
     suffix_call

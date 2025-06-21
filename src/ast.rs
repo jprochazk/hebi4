@@ -20,9 +20,20 @@ pub struct Packed {
 ///
 /// This should be implemented for `Packed` wrapper types,
 /// but those types must be `#[repr(transparent)]`.
-unsafe trait PackedAbiCompatible {}
+pub unsafe trait PackedAbi: private::Sealed {
+    unsafe fn _from_packed_unchecked(v: Packed) -> Self;
+    fn _into_packed(self) -> Packed;
+}
 
-unsafe impl PackedAbiCompatible for Packed {}
+unsafe impl PackedAbi for Packed {
+    unsafe fn _from_packed_unchecked(v: Packed) -> Self {
+        v
+    }
+
+    fn _into_packed(self) -> Packed {
+        self
+    }
+}
 
 #[derive(Default, Clone, Copy, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
 #[repr(transparent)]
@@ -44,8 +55,9 @@ pub enum DebugNodeKind {
 
 const TAG_MASK: u32 = 0b11111111_00000000_00000000_00000000;
 const LEN_MASK: u32 = 0b00000000_11111111_11111111_11111111;
-const U24_MAX: u32 = (2u64.pow(24) - 1) as u32;
-const U56_MAX: u64 = 2u64.pow(56) - 1;
+
+pub const U24_MAX: u32 = (2u64.pow(24) - 1) as u32;
+pub const U56_MAX: u64 = 2u64.pow(56) - 1;
 
 impl Packed {
     #[inline]
@@ -54,7 +66,7 @@ impl Packed {
         assert!(length <= U24_MAX);
 
         // SAFETY: `tag` can never be 0, so neither can this whole expression:
-        let tag_and_length = unsafe { NonZeroU32::new_unchecked(((tag as u32) << 24) & length) };
+        let tag_and_length = unsafe { NonZeroU32::new_unchecked(((tag as u32) << 24) | length) };
 
         Self {
             tag_and_length,
@@ -90,7 +102,7 @@ impl Packed {
         let lo = (value & 0x00000000FFFFFFFF) as u32;
 
         // SAFETY: `tag` can never be 0, so neither can this whole expression:
-        let tag_and_length = unsafe { NonZeroU32::new_unchecked(((tag as u32) << 24) & hi) };
+        let tag_and_length = unsafe { NonZeroU32::new_unchecked(((tag as u32) << 24) | hi) };
         let payload = lo;
 
         Self {
@@ -157,7 +169,7 @@ impl Packed {
         let hi = (self.tag_and_length.get() & LEN_MASK) as u64;
         let lo = (self.payload) as u64;
 
-        (hi << 32) & lo
+        (hi << 32) | lo
     }
 }
 
@@ -166,11 +178,6 @@ impl Packed {
     #[inline]
     unsafe fn _from_packed_unchecked(v: Packed) -> Self {
         v
-    }
-
-    #[inline]
-    fn _try_from_packed(v: Packed) -> Option<Self> {
-        Some(v)
     }
 
     #[inline]
@@ -253,6 +260,7 @@ pub enum Tag {
     // Misc
     Ident = 245,
     // reserved: 246-255
+    None = 255,
 }
 
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
@@ -273,7 +281,16 @@ const STMT_MAX: u8 = StmtKind::Expr as u8;
 #[repr(transparent)]
 pub struct Stmt(Packed);
 
-unsafe impl PackedAbiCompatible for Stmt {}
+unsafe impl PackedAbi for Stmt {
+    unsafe fn _from_packed_unchecked(v: Packed) -> Self {
+        debug_assert!(v.tag() as u8 >= STMT_MIN && v.tag() as u8 <= STMT_MAX);
+        Self(v)
+    }
+
+    fn _into_packed(self) -> Packed {
+        self.0
+    }
+}
 
 impl Stmt {
     #[inline]
@@ -306,15 +323,6 @@ impl Stmt {
     unsafe fn _from_packed_unchecked(v: Packed) -> Self {
         debug_assert!(v.tag() as u8 >= STMT_MIN && v.tag() as u8 <= STMT_MAX);
         Self(v)
-    }
-
-    #[inline]
-    fn _try_from_packed(v: Packed) -> Option<Self> {
-        if (v.tag() as u8) < STMT_MIN && (v.tag() as u8) > STMT_MAX {
-            return None;
-        }
-
-        Some(unsafe { Self::_from_packed_unchecked(v) })
     }
 }
 
@@ -380,7 +388,18 @@ const EXPR_MAX: u8 = ExprKind::Use as u8;
 #[repr(transparent)]
 pub struct Expr(Packed);
 
-unsafe impl PackedAbiCompatible for Expr {}
+unsafe impl PackedAbi for Expr {
+    #[inline]
+    unsafe fn _from_packed_unchecked(v: Packed) -> Self {
+        debug_assert!(v.tag() as u8 >= EXPR_MIN && v.tag() as u8 <= EXPR_MAX);
+        Self(v)
+    }
+
+    #[inline]
+    fn _into_packed(self) -> Packed {
+        self.0
+    }
+}
 
 impl Expr {
     #[inline]
@@ -396,26 +415,6 @@ impl Expr {
         ast: &'ast Ast,
     ) -> T::Output<'ast> {
         unsafe { T::unpack_unchecked(*self, ast) }
-    }
-
-    #[inline]
-    fn _into_packed(self) -> Packed {
-        self.0
-    }
-
-    #[inline]
-    unsafe fn _from_packed_unchecked(v: Packed) -> Self {
-        debug_assert!(v.tag() as u8 >= EXPR_MIN && v.tag() as u8 <= EXPR_MAX);
-        Self(v)
-    }
-
-    #[inline]
-    fn _try_from_packed(v: Packed) -> Option<Self> {
-        if (v.tag() as u8) < EXPR_MIN && (v.tag() as u8) > EXPR_MAX {
-            return None;
-        }
-
-        Some(unsafe { Self::_from_packed_unchecked(v) })
     }
 }
 
@@ -456,7 +455,18 @@ const MISC_MAX: u8 = MiscKind::Ident as u8;
 #[repr(transparent)]
 pub struct Misc(Packed);
 
-unsafe impl PackedAbiCompatible for Misc {}
+unsafe impl PackedAbi for Misc {
+    #[inline]
+    unsafe fn _from_packed_unchecked(v: Packed) -> Self {
+        debug_assert!(v.tag() as u8 >= MISC_MIN && v.tag() as u8 <= MISC_MIN);
+        Self(v)
+    }
+
+    #[inline]
+    fn _into_packed(self) -> Packed {
+        self.0
+    }
+}
 
 impl Misc {
     #[inline]
@@ -472,26 +482,6 @@ impl Misc {
         ast: &'ast Ast,
     ) -> T::Output<'ast> {
         unsafe { T::unpack_unchecked(*self, ast) }
-    }
-
-    #[inline]
-    fn _into_packed(self) -> Packed {
-        self.0
-    }
-
-    #[inline]
-    unsafe fn _from_packed_unchecked(v: Packed) -> Self {
-        debug_assert!(v.tag() as u8 >= MISC_MIN && v.tag() as u8 <= MISC_MIN);
-        Self(v)
-    }
-
-    #[inline]
-    fn _try_from_packed(v: Packed) -> Option<Self> {
-        if (v.tag() as u8) < MISC_MIN && (v.tag() as u8) > MISC_MAX {
-            return None;
-        }
-
-        Some(unsafe { Self::_from_packed_unchecked(v) })
     }
 }
 
