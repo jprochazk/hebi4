@@ -21,16 +21,16 @@ pub struct Packed {
 /// This should be implemented for `Packed` wrapper types,
 /// but those types must be `#[repr(transparent)]`.
 pub unsafe trait PackedAbi: private::Sealed {
-    unsafe fn _from_packed_unchecked(v: Packed) -> Self;
-    fn _into_packed(self) -> Packed;
+    unsafe fn from_packed_unchecked(v: Packed) -> Self;
+    fn into_packed(self) -> Packed;
 }
 
 unsafe impl PackedAbi for Packed {
-    unsafe fn _from_packed_unchecked(v: Packed) -> Self {
+    unsafe fn from_packed_unchecked(v: Packed) -> Self {
         v
     }
 
-    fn _into_packed(self) -> Packed {
+    fn into_packed(self) -> Packed {
         self
     }
 }
@@ -173,19 +173,6 @@ impl Packed {
     }
 }
 
-// These are no-ops which exist to make `declare_node!` work.
-impl Packed {
-    #[inline]
-    unsafe fn _from_packed_unchecked(v: Packed) -> Self {
-        v
-    }
-
-    #[inline]
-    fn _into_packed(self) -> Self {
-        self
-    }
-}
-
 impl private::Sealed for Packed {}
 impl Tagged for Packed {
     #[inline]
@@ -282,12 +269,12 @@ const STMT_MAX: u8 = StmtKind::Expr as u8;
 pub struct Stmt(Packed);
 
 unsafe impl PackedAbi for Stmt {
-    unsafe fn _from_packed_unchecked(v: Packed) -> Self {
+    unsafe fn from_packed_unchecked(v: Packed) -> Self {
         debug_assert!(v.tag() as u8 >= STMT_MIN && v.tag() as u8 <= STMT_MAX);
         Self(v)
     }
 
-    fn _into_packed(self) -> Packed {
+    fn into_packed(self) -> Packed {
         self.0
     }
 }
@@ -311,18 +298,8 @@ impl Stmt {
         &self,
         ast: &'ast Ast,
     ) -> T::Output<'ast> {
+        debug_assert!(self.base_tag() == T::TAG);
         unsafe { T::unpack_unchecked(*self, ast) }
-    }
-
-    #[inline]
-    fn _into_packed(self) -> Packed {
-        self.0
-    }
-
-    #[inline]
-    unsafe fn _from_packed_unchecked(v: Packed) -> Self {
-        debug_assert!(v.tag() as u8 >= STMT_MIN && v.tag() as u8 <= STMT_MAX);
-        Self(v)
     }
 }
 
@@ -390,13 +367,13 @@ pub struct Expr(Packed);
 
 unsafe impl PackedAbi for Expr {
     #[inline]
-    unsafe fn _from_packed_unchecked(v: Packed) -> Self {
+    unsafe fn from_packed_unchecked(v: Packed) -> Self {
         debug_assert!(v.tag() as u8 >= EXPR_MIN && v.tag() as u8 <= EXPR_MAX);
         Self(v)
     }
 
     #[inline]
-    fn _into_packed(self) -> Packed {
+    fn into_packed(self) -> Packed {
         self.0
     }
 }
@@ -407,6 +384,12 @@ impl Expr {
         let tag = self.0.tag();
         debug_assert!(tag as u8 >= EXPR_MIN && tag as u8 <= EXPR_MAX);
         unsafe { std::mem::transmute::<Tag, ExprKind>(tag) }
+    }
+
+    #[inline]
+    pub fn unpack<'ast, T: Node<NodeKind = Expr>>(&self, ast: &'ast Ast) -> T::Output<'ast> {
+        assert!(self.base_tag() == T::TAG);
+        unsafe { self.unpack_unchecked::<T>(ast) }
     }
 
     #[inline]
@@ -457,13 +440,13 @@ pub struct Misc(Packed);
 
 unsafe impl PackedAbi for Misc {
     #[inline]
-    unsafe fn _from_packed_unchecked(v: Packed) -> Self {
+    unsafe fn from_packed_unchecked(v: Packed) -> Self {
         debug_assert!(v.tag() as u8 >= MISC_MIN && v.tag() as u8 <= MISC_MIN);
         Self(v)
     }
 
     #[inline]
-    fn _into_packed(self) -> Packed {
+    fn into_packed(self) -> Packed {
         self.0
     }
 }
@@ -530,18 +513,21 @@ pub struct Ast {
 
 impl Ast {
     pub fn root(&self) -> node::Root<'_> {
+        assert!(self.root.tag() == Tag::Root);
         unsafe { node::Root::unpack_unchecked(self.root, self) }
     }
 
     /// Retrieves a contiguous slice of [`Packed`].
     #[inline]
     fn slice(&self, index: NodeIndex, length: u32) -> Option<&[Packed]> {
-        self.nodes.get(index.0 as usize..length as usize)
+        let start = index.0 as usize;
+        self.nodes.get(start..start + length as usize)
     }
 
     #[inline]
     fn components<const N: usize>(&self, index: NodeIndex) -> Option<[Packed; N]> {
-        match self.nodes.get(index.get() as usize..N) {
+        let start = index.get() as usize;
+        match self.nodes.get(start..start + N) {
             Some(slice) => Some(unsafe { slice.try_into().unwrap_unchecked() }),
             None => None,
         }
@@ -553,10 +539,8 @@ impl Ast {
         index: NodeIndex,
         tail_length: u32,
     ) -> Option<([Packed; N], &[Packed])> {
-        match self
-            .nodes
-            .get(index.get() as usize..N + tail_length as usize)
-        {
+        let start = index.get() as usize;
+        match self.nodes.get(start..start + N + tail_length as usize) {
             Some(slice) => {
                 let components = unsafe { slice[..N].try_into().unwrap_unchecked() };
                 let tail = &slice[N..];
@@ -675,8 +659,4 @@ pub trait Node: Sized + private::Sealed {
     fn pack_into(&self, ast: &mut AstBuilder) -> Self::NodeKind;
 }
 
-impl std::fmt::Debug for Ast {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        todo!()
-    }
-}
+mod debug;

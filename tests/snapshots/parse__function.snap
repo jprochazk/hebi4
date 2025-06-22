@@ -1,0 +1,11 @@
+---
+source: tests/parse.rs
+expression: parse(&tokens).unwrap()
+---
+stmt.Fn(
+    "test",
+    [],
+    Do(
+        [],
+    ),
+)

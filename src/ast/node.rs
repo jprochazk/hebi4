@@ -1,6 +1,6 @@
 use std::marker::PhantomData;
 
-use super::{AstBuilder, Expr, Node, Packed, PackedAbi, Stmt, Tag, Tagged, private};
+use super::{Ast, AstBuilder, Expr, Node, Packed, PackedAbi, Stmt, Tag, Tagged, private};
 use crate::intern::Intern as _;
 
 #[macro_use]
@@ -38,6 +38,12 @@ pub mod stmt {
             pub body: super::Expr,
             #[tail]
             pub params: &'a [Ident],
+        }
+    }
+
+    impl Fn<'_> {
+        pub fn params(&self) -> impl ExactSizeIterator<Item = Ident> + '_ {
+            self.params.iter().copied()
         }
     }
 
@@ -99,6 +105,20 @@ pub mod expr {
         }
     }
 
+    declare_node! {
+        #[kind(Expr), tag(ExprDo)]
+        pub struct Do<'a> {
+            #[tail]
+            pub body: &'a [Stmt],
+        }
+    }
+
+    impl Do<'_> {
+        pub fn body(&self) -> impl ExactSizeIterator<Item = Stmt> + '_ {
+            self.body.iter().copied()
+        }
+    }
+
     pub struct Infix {
         pub lhs: Expr,
         pub rhs: Expr,
@@ -146,10 +166,10 @@ pub mod expr {
         ) -> Self::Output<'ast> {
             debug_assert!(node.base_tag() == Tag::ExprInfix);
 
-            let packed = node._into_packed();
+            let packed = node.into_packed();
             let [lhs, rhs] = unsafe { ast.components(packed.index()).unwrap_unchecked() };
-            let lhs = unsafe { <Expr>::_from_packed_unchecked(lhs) };
-            let rhs = unsafe { <Expr>::_from_packed_unchecked(rhs) };
+            let lhs = unsafe { <Expr>::from_packed_unchecked(lhs) };
+            let rhs = unsafe { <Expr>::from_packed_unchecked(rhs) };
             let op = unsafe { InfixOp::from_raw(packed.length()) };
 
             Infix { lhs, rhs, op }
@@ -159,10 +179,10 @@ pub mod expr {
             let tag = Tag::ExprInfix;
 
             unsafe {
-                Expr::_from_packed_unchecked({
+                Expr::from_packed_unchecked({
                     let index = {
-                        let index = ast.insert_packed(self.lhs._into_packed());
-                        ast.insert_packed(self.rhs._into_packed());
+                        let index = ast.insert_packed(self.lhs.into_packed());
+                        ast.insert_packed(self.rhs.into_packed());
                         index
                     };
                     let length = self.op.into_raw();
@@ -208,9 +228,9 @@ pub mod expr {
         ) -> Self::Output<'ast> {
             debug_assert!(node.base_tag() == Tag::ExprPrefix);
 
-            let packed = node._into_packed();
+            let packed = node.into_packed();
             let [rhs] = unsafe { ast.components(packed.index()).unwrap_unchecked() };
-            let rhs = unsafe { <Expr>::_from_packed_unchecked(rhs) };
+            let rhs = unsafe { <Expr>::from_packed_unchecked(rhs) };
             let op = unsafe { PrefixOp::from_raw(packed.length()) };
 
             Prefix { rhs, op }
@@ -220,8 +240,8 @@ pub mod expr {
             let tag = Tag::ExprPrefix;
 
             unsafe {
-                Expr::_from_packed_unchecked({
-                    let index = ast.insert_packed(self.rhs._into_packed());
+                Expr::from_packed_unchecked({
+                    let index = ast.insert_packed(self.rhs.into_packed());
                     let length = self.op.into_raw();
                     Packed::with_length_index(tag, length, index)
                 })
@@ -236,26 +256,26 @@ pub mod expr {
 
     unsafe impl PackedAbi for Str {
         #[inline]
-        unsafe fn _from_packed_unchecked(v: Packed) -> Self {
+        unsafe fn from_packed_unchecked(v: Packed) -> Self {
             debug_assert!(v.tag() == Tag::ExprStr);
             debug_assert!(TryInto::<u32>::try_into(v.value()).is_ok());
             Str(v)
         }
 
         #[inline]
-        fn _into_packed(self) -> Packed {
+        fn into_packed(self) -> Packed {
             self.0
         }
     }
 
     impl Str {
         #[inline]
-        pub fn as_str<'ast>(&self, ast: &'ast AstBuilder) -> Option<&'ast str> {
+        pub fn as_str<'ast>(&self, ast: &'ast Ast) -> Option<&'ast str> {
             ast.strings.get(self.id())
         }
 
         #[inline]
-        pub unsafe fn as_str_unchecked<'ast>(&self, ast: &'ast AstBuilder) -> &'ast str {
+        pub unsafe fn as_str_unchecked<'ast>(&self, ast: &'ast Ast) -> &'ast str {
             debug_assert!(ast.strings.get(self.id()).is_some());
             unsafe { ast.strings.get(self.id()).unwrap_unchecked() }
         }
@@ -298,12 +318,12 @@ pub mod expr {
             _: &'ast crate::ast::Ast,
         ) -> Self::Output<'ast> {
             debug_assert!(node.base_tag() == Tag::ExprStr);
-            Self(node._into_packed())
+            Self(node.into_packed())
         }
 
         #[inline]
         fn pack_into(&self, _: &mut AstBuilder) -> Self::NodeKind {
-            unsafe { Expr::_from_packed_unchecked(self.0) }
+            unsafe { Expr::from_packed_unchecked(self.0) }
         }
     }
 
@@ -344,13 +364,13 @@ pub mod expr {
 
     unsafe impl PackedAbi for Int {
         #[inline]
-        unsafe fn _from_packed_unchecked(v: Packed) -> Self {
+        unsafe fn from_packed_unchecked(v: Packed) -> Self {
             debug_assert!(v.tag() == Tag::ExprInt);
             Int(v)
         }
 
         #[inline]
-        fn _into_packed(self) -> Packed {
+        fn into_packed(self) -> Packed {
             self.0
         }
     }
@@ -381,12 +401,12 @@ pub mod expr {
             _: &'ast crate::ast::Ast,
         ) -> Self::Output<'ast> {
             debug_assert!(node.base_tag() == Tag::ExprInt);
-            Self(node._into_packed())
+            Self(node.into_packed())
         }
 
         #[inline]
         fn pack_into(&self, _: &mut AstBuilder) -> Self::NodeKind {
-            unsafe { Expr::_from_packed_unchecked(self.0) }
+            unsafe { Expr::from_packed_unchecked(self.0) }
         }
     }
 }
@@ -404,26 +424,27 @@ pub struct Ident(Packed);
 
 unsafe impl PackedAbi for Ident {
     #[inline]
-    unsafe fn _from_packed_unchecked(v: Packed) -> Self {
+    unsafe fn from_packed_unchecked(v: Packed) -> Self {
         debug_assert!(v.tag() == Tag::Ident);
         debug_assert!(TryInto::<u32>::try_into(v.value()).is_ok());
         Ident(v)
     }
 
     #[inline]
-    fn _into_packed(self) -> Packed {
+    fn into_packed(self) -> Packed {
         self.0
     }
 }
 
 impl Ident {
     #[inline]
-    pub fn as_str<'ast>(&self, ast: &'ast AstBuilder) -> Option<&'ast str> {
-        ast.idents.get(self.id())
+    pub fn as_str<'ast>(&self, ast: &'ast Ast) -> Option<&'ast str> {
+        let id = self.id();
+        ast.idents.get(id)
     }
 
     #[inline]
-    pub unsafe fn as_str_unchecked<'ast>(&self, ast: &'ast AstBuilder) -> &'ast str {
+    pub unsafe fn as_str_unchecked<'ast>(&self, ast: &'ast Ast) -> &'ast str {
         debug_assert!(ast.idents.get(self.id()).is_some());
         unsafe { ast.idents.get(self.id()).unwrap_unchecked() }
     }
@@ -490,7 +511,7 @@ impl<T: PackedAbi + Copy> From<Option<T>> for Opt<T> {
 impl<T: PackedAbi + Copy> From<Opt<T>> for Option<T> {
     fn from(value: Opt<T>) -> Self {
         if value.is_some() {
-            Some(unsafe { T::_from_packed_unchecked(value.0) })
+            Some(unsafe { T::from_packed_unchecked(value.0) })
         } else {
             None
         }
@@ -500,7 +521,7 @@ impl<T: PackedAbi + Copy> From<Opt<T>> for Option<T> {
 impl<T> private::Sealed for Opt<T> {}
 impl<T: PackedAbi + Copy> Opt<T> {
     pub fn some(v: T) -> Self {
-        Self(v._into_packed(), PhantomData)
+        Self(v.into_packed(), PhantomData)
     }
 
     pub fn none() -> Self {
@@ -509,11 +530,11 @@ impl<T: PackedAbi + Copy> Opt<T> {
 }
 
 unsafe impl<T: PackedAbi + Copy> PackedAbi for Opt<T> {
-    unsafe fn _from_packed_unchecked(v: Packed) -> Self {
+    unsafe fn from_packed_unchecked(v: Packed) -> Self {
         Opt(v, PhantomData)
     }
 
-    fn _into_packed(self) -> Packed {
+    fn into_packed(self) -> Packed {
         self.0
     }
 }

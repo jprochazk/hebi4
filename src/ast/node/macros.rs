@@ -66,7 +66,7 @@ macro_rules! declare_node {
                 let tag = Tag::$TagName;
 
                 unsafe {
-                    $NodeKind::_from_packed_unchecked(
+                    $NodeKind::from_packed_unchecked(
                         declare_node!(@pack(ast, self, tag) $($field)* $(; $tail)?)
                     )
                 }
@@ -86,7 +86,7 @@ macro_rules! declare_node {
     (@unpack($ast:ident, $node:ident) ; $tail:ident) => {
         let $tail = unsafe {
             $ast
-                .slice($node._into_packed().index(), $node._into_packed().length())
+                .slice($node.into_packed().index(), $node.into_packed().length())
                 .unwrap_unchecked()
         };
         let $tail = unsafe { $crate::ast::node::macros::_node_slice_from_packed_unchecked($tail) };
@@ -94,26 +94,26 @@ macro_rules! declare_node {
     // components + tail
     (@unpack($ast:ident, $node:ident) $($field:ident : $field_ty:ty)+ ; $tail:ident) => {
         let ([$($field),*], $tail) = unsafe {
-            let packed = $node._into_packed();
+            let packed = $node.into_packed();
             $ast
                 .components_with_tail(packed.index(), packed.length())
                 .unwrap_unchecked()
         };
         $(
-            let $field = unsafe { <$field_ty>::_from_packed_unchecked($field) };
+            let $field = unsafe { <$field_ty>::from_packed_unchecked($field) };
         )*
         let $tail = unsafe { $crate::ast::node::macros::_node_slice_from_packed_unchecked($tail) };
     };
     // components only
     (@unpack($ast:ident, $node:ident) $($field:ident : $field_ty:ty)+) => {
         let [$($field),*] = unsafe {
-            let packed = $node._into_packed();
+            let packed = $node.into_packed();
             $ast
                 .components(packed.index())
                 .unwrap_unchecked()
         };
         $(
-            let $field = unsafe { $crate::ast::PackedAbi::_from_packed_unchecked($field) };
+            let $field = unsafe { $crate::ast::PackedAbi::from_packed_unchecked($field) };
         )*
     };
     // empty
@@ -132,17 +132,17 @@ macro_rules! declare_node {
     }};
     // components + tail
     (@pack($ast:ident, $self:ident, $tag:ident) $($field:ident)+ ; $tail:ident) => {{
-        let (index, n) = declare_node!(@pack_components($ast, $self) $($field)*);
+        let index = declare_node!(@pack_components($ast, $self) $($field)*);
         let tail = $crate::ast::node::macros::_node_slice_into_packed($self.$tail);
         let (_, length) = $ast
             .insert_packed_contiguous(tail)
             .unwrap_or_default();
 
-        Packed::with_length_index($tag, n + length, index)
+        Packed::with_length_index($tag, length, index)
     }};
     // components only
     (@pack($ast:ident, $self:ident, $tag:ident) $($field:ident)+) => {{
-        let (index, _) = declare_node!(@pack_components($ast, $self) $($field)*);
+        let index = declare_node!(@pack_components($ast, $self) $($field)*);
 
         Packed::with_index($tag, index)
     }};
@@ -155,13 +155,10 @@ macro_rules! declare_node {
     // we store the index of the first field, so we need to separate the
     // list of fields into a head + tail
     (@pack_components($ast:ident, $self:ident) $first:ident $($rest:ident)*) => {{
-        #[allow(unused_mut)]
-        let mut n = 1;
-        let index = $ast.insert_packed($self.$first._into_packed());
+        let index = $ast.insert_packed($self.$first.into_packed());
         $(
-            $ast.insert_packed($self.$rest._into_packed());
-            n += 1;
+            $ast.insert_packed($self.$rest.into_packed());
         )*
-        (index, n)
+        index
     }};
 }

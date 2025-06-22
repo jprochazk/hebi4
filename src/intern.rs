@@ -235,9 +235,8 @@ impl<Id: Intern + Copy, S: BuildHasher> Interner<Id, S> {
             RawEntryMut::Occupied(entry) => entry.into_key_value(),
             RawEntryMut::Vacant(entry) => {
                 let span = insert_substring(&mut self.span_to_string, s);
-                self.symbol_to_span.push(span);
-
                 let symbol = unsafe { Id::from_index(self.symbol_to_span.len() as u32) };
+                self.symbol_to_span.push(span);
 
                 entry.insert_with_hasher(hash, Opaque(symbol), (), |&Opaque(symbol)| {
                     let span =

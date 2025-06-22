@@ -1,0 +1,10 @@
+---
+source: tests/parse.rs
+expression: parse(&tokens).unwrap()
+---
+Var(
+    "x",
+    Int(
+        0,
+    ),
+)

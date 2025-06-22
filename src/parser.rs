@@ -162,7 +162,7 @@ fn parse_stmt_loop(p: &mut Parser, buf: &Bump) -> Result<Stmt> {
     assert!(p.eat(t![loop]));
 
     let mut body = temp(buf);
-    while !p.at(t![end]) && !p.at(t![EOF]) {
+    while !p.end() && !p.at(t![end]) {
         body.push(parse_stmt(p, buf)?);
     }
     p.must(t![end])?;
@@ -229,7 +229,15 @@ fn parse_expr_if(p: &mut Parser, buf: &Bump) -> Result<Expr> {
 fn parse_expr_do(p: &mut Parser, buf: &Bump) -> Result<Expr> {
     assert!(p.eat(t![do]));
 
-    todo!()
+    let mut body = temp(buf);
+    while !p.end() && !p.at(t![end]) {
+        body.push(parse_stmt(p, buf)?);
+    }
+    p.must(t![end])?;
+
+    Ok(p.pack(expr::Do {
+        body: body.as_slice(),
+    }))
 }
 
 fn parse_expr_fn(p: &mut Parser, buf: &Bump) -> Result<Expr> {
