@@ -12,4 +12,4 @@ rustc-hash = "2.1.1"
 bumpalo = { version = "3.18.1", features = ["collections", "std"] }
 
 [workspace]
-members = ["globdir"]
+members = ["astgen", "globdir"]

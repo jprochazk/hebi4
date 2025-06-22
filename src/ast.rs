@@ -1,6 +1,3 @@
-pub mod node;
-pub mod visitor;
-
 use std::num::NonZeroU32;
 
 use crate::{intern::Interner, token::Tokens};
@@ -512,6 +509,7 @@ pub struct Ast {
 }
 
 impl Ast {
+    #[inline]
     pub fn root(&self) -> node::Root<'_> {
         assert!(self.root.tag() == Tag::Root);
         unsafe { node::Root::unpack_unchecked(self.root, self) }
@@ -624,39 +622,6 @@ impl AstBuilder {
 
         Some((index, nodes.len() as u32))
     }
-}
-
-/// ## Safety
-///
-/// - `Unpack::TAG` must be correctly set to the tag which represents `Self`.
-pub trait Node: Sized + private::Sealed {
-    /// The type of packed node to unpack from.
-    type NodeKind: Tagged;
-
-    /// The output type, used to assign `Self` an `'ast` lifetime.
-    type Output<'ast>;
-
-    const TAG: Tag;
-
-    /// Unpack the node into a struct.
-    ///
-    /// This does not mutate the AST, only retrieves references to nodes which constitute `Self`.
-    ///
-    /// ## Safety
-    ///
-    /// - `node` must be the right kind for `Self`
-    /// - `ast` must contain all required components for `Self` in the right order
-    ///
-    /// Don't use this directly, instead call the `as_<node>` functions on specific node kinds.
-    unsafe fn unpack_unchecked<'ast>(node: Self::NodeKind, ast: &'ast Ast) -> Self::Output<'ast>;
-
-    /// Pack the struct into the AST.
-    ///
-    /// This mutates the AST, appending components of `Self` to it.
-    ///
-    /// [`Self`] is packed into a [`Self::NodeKind`] and returned,
-    /// it is not appended to the AST.
-    fn pack_into(&self, ast: &mut AstBuilder) -> Self::NodeKind;
 }
 
 mod debug;

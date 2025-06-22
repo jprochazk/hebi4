@@ -2,9 +2,9 @@
 source: tests/parse.rs
 expression: parse(&tokens).unwrap()
 ---
-Var(
-    "x",
-    Int(
+[
+    Var(
+        "x",
         0,
     ),
-)
+]

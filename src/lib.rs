@@ -1,3 +1,5 @@
+pub mod span;
+
 #[macro_use]
 mod intern;
 

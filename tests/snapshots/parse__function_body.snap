@@ -3,5 +3,7 @@ source: tests/parse.rs
 expression: parse(&tokens).unwrap()
 ---
 [
-    stmt.Fn(test, [], Do([])),
+    stmt.Fn(test, [], Do([
+        (1 + 1),
+    ])),
 ]

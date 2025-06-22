@@ -2,7 +2,7 @@ use bumpalo::{Bump, collections::Vec};
 
 use crate::{
     ast::{
-        Ast, AstBuilder, Expr, Node, Stmt,
+        Ast, AstBuilder, Expr, ExprKind, Node, Stmt,
         node::{self, expr, stmt},
     },
     token::{Token, TokenCursor, TokenKind, Tokens},
@@ -16,7 +16,7 @@ pub struct Error {}
 impl std::error::Error for Error {}
 impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        todo!()
+        todo!("display error")
     }
 }
 
@@ -112,11 +112,11 @@ fn parse_root(mut p: Parser) -> Result<Ast> {
     let buf = Bump::new();
 
     let mut body = temp(&buf);
-    body.push(parse_stmt(&mut p, &buf)?);
+    while !p.end() {
+        body.push(parse_stmt(&mut p, &buf)?);
+    }
 
-    let root = p.pack(node::Root {
-        body: body.as_slice(),
-    });
+    let root = p.pack(node::Root::new(body.as_slice()));
 
     Ok(p.ast.build(root))
 }
@@ -140,7 +140,7 @@ fn parse_stmt_var(p: &mut Parser, buf: &Bump) -> Result<Stmt> {
     p.must(t![=])?;
     let value = parse_expr(p, buf)?;
 
-    Ok(p.pack(stmt::Var { name, value }))
+    Ok(p.pack(stmt::Var::new(name, value)))
 }
 
 /// `"fn" name:IDENT "(" param:IDENT,* ")" "do" stmt* "end"`
@@ -151,11 +151,7 @@ fn parse_stmt_fn(p: &mut Parser, buf: &Bump) -> Result<Stmt> {
     let params = paren_list(p, buf, parse_ident)?;
     let body = parse_expr_do(p, buf)?;
 
-    Ok(p.pack(stmt::Fn {
-        name,
-        body,
-        params: params.as_slice(),
-    }))
+    Ok(p.pack(stmt::Fn::new(name, body, params.as_slice())))
 }
 
 fn parse_stmt_loop(p: &mut Parser, buf: &Bump) -> Result<Stmt> {
@@ -167,15 +163,13 @@ fn parse_stmt_loop(p: &mut Parser, buf: &Bump) -> Result<Stmt> {
     }
     p.must(t![end])?;
 
-    Ok(p.pack(stmt::Loop {
-        body: body.as_slice(),
-    }))
+    Ok(p.pack(stmt::Loop::new(body.as_slice())))
 }
 
 fn parse_stmt_expr(p: &mut Parser, buf: &Bump) -> Result<Stmt> {
     let inner = parse_expr_top_level(p, buf)?;
 
-    Ok(p.pack(stmt::Expr { inner }))
+    Ok(p.pack(stmt::Expr::new(inner)))
 }
 
 fn parse_ident(p: &mut Parser, _: &Bump) -> Result<node::Ident> {
@@ -205,25 +199,25 @@ fn parse_expr_return(p: &mut Parser, buf: &Bump) -> Result<Expr> {
         node::Opt::none()
     };
 
-    Ok(p.pack(expr::Return { value }))
+    Ok(p.pack(expr::Return::new(value)))
 }
 
 fn parse_expr_break(p: &mut Parser, buf: &Bump) -> Result<Expr> {
     assert!(p.eat(t![break]));
 
-    Ok(p.pack(expr::Break {}))
+    Ok(p.pack(expr::Break::new()))
 }
 
 fn parse_expr_continue(p: &mut Parser, buf: &Bump) -> Result<Expr> {
     assert!(p.eat(t![continue]));
 
-    Ok(p.pack(expr::Continue {}))
+    Ok(p.pack(expr::Continue::new()))
 }
 
 fn parse_expr_if(p: &mut Parser, buf: &Bump) -> Result<Expr> {
     assert!(p.eat(t![if]));
 
-    todo!()
+    todo!("if expr")
 }
 
 fn parse_expr_do(p: &mut Parser, buf: &Bump) -> Result<Expr> {
@@ -235,19 +229,35 @@ fn parse_expr_do(p: &mut Parser, buf: &Bump) -> Result<Expr> {
     }
     p.must(t![end])?;
 
-    Ok(p.pack(expr::Do {
-        body: body.as_slice(),
-    }))
+    Ok(p.pack(expr::Do::new(body.as_slice())))
 }
 
 fn parse_expr_fn(p: &mut Parser, buf: &Bump) -> Result<Expr> {
     assert!(p.eat(t![fn]));
 
-    todo!()
+    todo!("fn expr")
 }
 
 fn parse_expr_assign(p: &mut Parser, buf: &Bump) -> Result<Expr> {
-    todo!()
+    let lhs = parse_expr(p, buf)?;
+    let op = match p.current() {
+        t![=] => None,
+        t![+=] => Some(expr::InfixOp::Add),
+        t![-=] => Some(expr::InfixOp::Sub),
+        t![*=] => Some(expr::InfixOp::Mul),
+        t![/=] => Some(expr::InfixOp::Div),
+        _ => return Ok(lhs),
+    };
+    p.advance(); // eat op
+    let value = parse_expr(p, buf)?;
+
+    use ExprKind as E;
+    match lhs.kind() {
+        E::Index => todo!("index assignment"),
+        E::Field => todo!("field assignment"),
+        E::Use => todo!("variable assignment"),
+        _ => todo!("invalid assignment target error"),
+    }
 }
 
 fn parse_expr(p: &mut Parser, buf: &Bump) -> Result<Expr> {
@@ -276,7 +286,7 @@ where
         };
         p.advance(); // eat op
         let rhs = next(p, buf)?;
-        lhs = p.pack(expr::Infix { lhs, rhs, op });
+        lhs = p.pack(expr::Infix::new(lhs, rhs, op));
     }
     Ok(lhs)
 }
@@ -352,7 +362,7 @@ fn parse_expr_prefix(p: &mut Parser, buf: &Bump) -> Result<Expr> {
     };
     p.advance(); // eat op
     let rhs = parse_expr_prefix(p, buf)?;
-    Ok(p.pack(expr::Prefix { rhs, op }))
+    Ok(p.pack(expr::Prefix::new(rhs, op)))
 }
 
 fn parse_expr_postfix(p: &mut Parser, buf: &Bump) -> Result<Expr> {
@@ -370,11 +380,11 @@ fn parse_expr_postfix(p: &mut Parser, buf: &Bump) -> Result<Expr> {
 }
 
 fn parse_expr_call(p: &mut Parser, buf: &Bump) -> Result<Expr> {
-    todo!()
+    todo!("call expr")
 }
 
 fn parse_expr_call_object(p: &mut Parser, buf: &Bump) -> Result<Expr> {
-    todo!()
+    todo!("call object expr")
 }
 
 fn parse_expr_index(p: &mut Parser, buf: &Bump) -> Result<Expr> {
@@ -382,14 +392,14 @@ fn parse_expr_index(p: &mut Parser, buf: &Bump) -> Result<Expr> {
     let key = parse_expr(p, buf)?;
     p.must(t!["]"])?;
 
-    Ok(p.pack(expr::Index { key }))
+    Ok(p.pack(expr::Index::new(key)))
 }
 
 fn parse_expr_field(p: &mut Parser, buf: &Bump) -> Result<Expr> {
     assert!(p.eat(t![.]));
     let key = parse_ident(p, buf)?;
 
-    Ok(p.pack(expr::Field { key }))
+    Ok(p.pack(expr::Field::new(key)))
 }
 
 fn parse_expr_primary(p: &mut Parser, buf: &Bump) -> Result<Expr> {
@@ -408,11 +418,11 @@ fn parse_expr_primary(p: &mut Parser, buf: &Bump) -> Result<Expr> {
 }
 
 fn parse_expr_array(p: &mut Parser, buf: &Bump) -> Result<Expr> {
-    todo!()
+    todo!("array expr")
 }
 
 fn parse_expr_object(p: &mut Parser, buf: &Bump) -> Result<Expr> {
-    todo!()
+    todo!("object expr")
 }
 
 fn parse_expr_int(p: &mut Parser, buf: &Bump) -> Result<Expr> {
@@ -423,27 +433,27 @@ fn parse_expr_int(p: &mut Parser, buf: &Bump) -> Result<Expr> {
 }
 
 fn parse_expr_float(p: &mut Parser, buf: &Bump) -> Result<Expr> {
-    todo!()
+    todo!("float expr")
 }
 
 fn parse_expr_bool(p: &mut Parser, buf: &Bump) -> Result<Expr> {
-    todo!()
+    todo!("bool expr")
 }
 
 fn parse_expr_str(p: &mut Parser, buf: &Bump) -> Result<Expr> {
-    todo!()
+    todo!("str expr")
 }
 
 fn parse_expr_nil(p: &mut Parser, buf: &Bump) -> Result<Expr> {
-    todo!()
+    todo!("nil expr")
 }
 
 fn parse_expr_use(p: &mut Parser, buf: &Bump) -> Result<Expr> {
-    todo!()
+    todo!("variable use expr")
 }
 
 fn parse_expr_group(p: &mut Parser, buf: &Bump) -> Result<Expr> {
-    todo!()
+    todo!("group expr")
 }
 
 fn paren_list<'bump, F, T>(p: &mut Parser, buf: &'bump Bump, f: F) -> Result<Vec<'bump, T>>
@@ -463,5 +473,5 @@ where
 }
 
 fn can_begin_expr(p: &mut Parser) -> bool {
-    todo!()
+    todo!("can begin expr check")
 }

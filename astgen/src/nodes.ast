@@ -1,0 +1,117 @@
+
+stmt var {
+	name: ident,
+	value: expr,
+};
+
+stmt loop {
+	body: [stmt],
+};
+
+stmt expr {
+	inner: expr,
+};
+
+expr return {
+	value: expr?,
+};
+
+expr break;
+expr continue;
+
+expr if_simple {
+	cond: expr,
+	then: expr,
+	else: expr?,
+};
+
+expr if_multi {
+	tail: block,
+	branches: [branch],
+};
+
+data branch {
+	cond: expr,
+	then: expr,
+};
+
+expr block {
+	body: [stmt],	
+};
+
+expr fn {
+	name: ident,
+	body: block,
+	params: [ident],
+};
+
+expr get_var {
+	name: ident,
+};
+
+expr get_field {
+	parent: expr,
+	key: ident,
+};
+
+expr get_index {
+	parent: expr,
+	key: expr,
+};
+
+expr call {
+	callee: expr,
+	args: [expr],
+};
+
+expr set_var(op: AssignOp as u24) {
+	name: ident,
+	value: expr,
+};
+
+expr set_field(op: AssignOp as u24) {
+	parent: expr,
+	key: ident,
+	value: expr,
+};
+
+expr set_index(op: AssignOp as u24) {
+	parent: expr,
+	key: expr,
+	value: expr,
+};
+
+expr infix(op: InfixOp as u24) {
+	lhs: expr,
+	rhs: expr,
+};
+
+expr prefix(op: PrefixOp as u24) {
+	rhs: expr,
+};
+
+expr array {
+	items: [expr],
+};
+
+expr object {
+	entries: [object_entry],
+};
+
+data object_entry {
+	key: expr,
+	value: expr,
+};
+
+expr int(value: U56 as u56);
+
+expr float32(value: F32 as u32);
+expr float64(value: FloatId as u32);
+
+expr bool(value: Bool as u32);
+
+expr str(value: StrId as u32);
+
+expr nil;
+
+data ident(id: IdentId as u32);
