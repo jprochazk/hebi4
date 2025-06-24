@@ -15,6 +15,7 @@ macro_rules! index_unchecked {
 }
 
 mod iter;
+pub mod simple;
 
 pub use iter::Iter;
 
@@ -55,10 +56,10 @@ impl Span {
 pub trait Intern {
     /// Convert the symbol into a `u32` index.
     ///
-    /// It may be converted back to a [`Symbol`] via [`Symbol::from_index`]
+    /// It may be converted back to [`Self`] via [`Intern::from_index`]
     fn index(self) -> u32;
 
-    /// Converts an index acquired from [`Symbol::index`] back to a [`Symbol`].
+    /// Converts an index acquired from [`Intern::index`] back to [`Self`].
     ///
     /// ## Safety
     ///

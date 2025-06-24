@@ -22,7 +22,7 @@ expr continue;
 expr if_simple {
 	cond: expr,
 	then: expr,
-	else: expr?,
+	else_: expr?,
 };
 
 expr if_multi {
@@ -108,7 +108,7 @@ expr int(value: u56 as u56);
 expr float32(value: f32 as u32);
 expr float64(value: FloatId as u32);
 
-expr bool(value: Bool as u32);
+expr bool(value: bool as u32);
 
 expr str(value: StrId as u32);
 

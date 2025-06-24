@@ -1,5 +1,7 @@
 use logos::Logos as _;
 
+use crate::span::Span;
+
 pub fn tokenize(src: &str) -> Tokens<'_> {
     let lexer = Lexer::new(src);
     let mut tokens = Tokens::new(src);
