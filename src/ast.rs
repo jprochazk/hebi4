@@ -2,6 +2,7 @@ pub mod nodes;
 
 use crate::{
     intern::{Interner, simple::SimpleInterner},
+    span::Span,
     token::Tokens,
 };
 use nodes::{Packed, u24, u56};
@@ -61,6 +62,7 @@ declare_intern_id!(pub FloatId);
 pub struct Ast {
     root: Packed,
     nodes: Vec<Packed>,
+    spans: Vec<Span>,
     strings: Interner<StrId>,
     idents: Interner<IdentId>,
     floats: SimpleInterner<FloatId, f64>,
@@ -68,6 +70,7 @@ pub struct Ast {
 
 pub struct AstBuilder {
     nodes: Vec<Packed>,
+    spans: Vec<Span>,
     strings: Interner<StrId>,
     idents: Interner<IdentId>,
     floats: SimpleInterner<FloatId, f64>,
@@ -78,6 +81,7 @@ impl AstBuilder {
         Self {
             // le shrug
             nodes: Vec::with_capacity(tokens.len() / 2),
+            spans: Vec::with_capacity(tokens.len() / 2),
             strings: Interner::with_capacity(tokens.len() / 16),
             idents: Interner::with_capacity(tokens.len() / 8),
 
@@ -87,7 +91,21 @@ impl AstBuilder {
     }
 
     pub(crate) fn build(self, root: Packed) -> Ast {
-        todo!()
+        let Self {
+            nodes,
+            spans,
+            strings,
+            idents,
+            floats,
+        } = self;
+        Ast {
+            root,
+            nodes,
+            spans,
+            strings,
+            idents,
+            floats,
+        }
     }
 
     fn append(&mut self, nodes: &[Packed]) -> u32 {

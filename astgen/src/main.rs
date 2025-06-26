@@ -926,3 +926,14 @@ fn emit_unpack_impls(nodes: &Nodes, out: &mut String) {
         ln!(out, "}}\n");
     }
 }
+
+/*
+TODO: spans
+
+
+impl Var {
+    pub fn name_span(&self, ast: &Ast) -> Span {
+        ast.spans[self.index + FIELD_NUM]
+    }
+}
+*/
