@@ -55,14 +55,6 @@ impl u24 {
         let [a, b, c] = self.0;
         u32::from_le_bytes([a, b, c, 0])
     }
-
-    fn from_u24(v: u24) -> Self {
-        v
-    }
-
-    fn into_u24(self) -> u24 {
-        self
-    }
 }
 
 impl PartialEq for u24 {
@@ -155,15 +147,31 @@ trait IntoU56 {
     fn into_u56(self) -> u56;
 }
 
+trait FromU56 {
+    fn from_u56(v: u56) -> Self;
+}
+
 impl IntoU56 for bool {
     fn into_u56(self) -> u56 {
         unsafe { u56::new_unchecked(self as u64) }
     }
 }
 
+impl FromU56 for bool {
+    fn from_u56(v: u56) -> Self {
+        unsafe { core::mem::transmute(v.get() as u8) }
+    }
+}
+
 impl IntoU56 for f32 {
     fn into_u56(self) -> u56 {
         unsafe { u56::new_unchecked(self.to_bits() as u64) }
+    }
+}
+
+impl FromU56 for f32 {
+    fn from_u56(v: u56) -> Self {
+        f32::from_bits(v.get() as u32)
     }
 }
 
@@ -215,12 +223,12 @@ impl Packed {
     }
 
     #[inline]
-    fn fixed_arity_inline(kind: NodeKind, inline: u24, index: u32) -> Self {
+    fn fixed_arity_inline(kind: NodeKind, value: u24, index: u32) -> Self {
         Self {
             repr: PackedRepr {
                 fixed_arity_inline: FixedArity_Inline {
                     kind: unsafe { core::num::NonZero::new_unchecked(kind as u8) },
-                    inline,
+                    value,
                     index,
                 },
             },
@@ -248,7 +256,7 @@ impl Packed {
             repr: PackedRepr {
                 mixed_arity: MixedArity {
                     kind: unsafe { core::num::NonZero::new_unchecked(kind as u8) },
-                    length,
+                    tail_length: length,
                     index,
                 },
             },
@@ -268,6 +276,42 @@ impl Packed {
             debug_tag: DebugPackedReprTag::FixedArity_Inline,
         }
     }
+
+    #[inline]
+    unsafe fn as_kind_only(&self) -> &KindOnly {
+        debug_assert!(self.debug_tag == DebugPackedReprTag::KindOnly);
+        unsafe { &self.repr.kind_only }
+    }
+
+    #[inline]
+    unsafe fn as_fixed_arity(&self) -> &FixedArity {
+        debug_assert!(self.debug_tag == DebugPackedReprTag::FixedArity);
+        unsafe { &self.repr.fixed_arity }
+    }
+
+    #[inline]
+    unsafe fn as_fixed_arity_inline(&self) -> &FixedArity_Inline {
+        debug_assert!(self.debug_tag == DebugPackedReprTag::FixedArity_Inline);
+        unsafe { &self.repr.fixed_arity_inline }
+    }
+
+    #[inline]
+    unsafe fn as_variable_arity(&self) -> &VariableArity {
+        debug_assert!(self.debug_tag == DebugPackedReprTag::VariableArity);
+        unsafe { &self.repr.variable_arity }
+    }
+
+    #[inline]
+    unsafe fn as_mixed_arity(&self) -> &MixedArity {
+        debug_assert!(self.debug_tag == DebugPackedReprTag::MixedArity);
+        unsafe { &self.repr.mixed_arity }
+    }
+
+    #[inline]
+    unsafe fn as_inline(&self) -> &Inline {
+        debug_assert!(self.debug_tag == DebugPackedReprTag::Inline);
+        unsafe { &self.repr.inline }
+    }
 }
 
 const _: () = {
@@ -276,7 +320,7 @@ const _: () = {
 
 #[allow(non_camel_case_types)]
 #[cfg(debug_assertions)]
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 enum DebugPackedReprTag {
     KindOnly,
     FixedArity,
@@ -318,7 +362,7 @@ struct FixedArity {
 #[repr(C)]
 struct FixedArity_Inline {
     kind: RawKind,
-    inline: u24,
+    value: u24,
     index: u32,
 }
 
@@ -334,7 +378,7 @@ struct VariableArity {
 #[repr(C)]
 struct MixedArity {
     kind: RawKind,
-    length: u24,
+    tail_length: u24,
     index: u32,
 }
 
@@ -346,7 +390,7 @@ struct Inline {
 }
 
 /// Marker for types which are transparent wrappers over [`Packed`].
-pub trait PackedAbi: Sealed + Sized + Copy {}
+pub unsafe trait PackedAbi: Sealed + Sized + Copy {}
 
 /// Conversion traits to/from [`Packed`].
 pub trait PackedNode: PackedAbi {
@@ -384,10 +428,8 @@ pub trait Pack {
     fn pack<'a>(parts: Self::Parts<'a>, ast: &mut AstBuilder) -> Self;
 }
 
-pub trait Unpack {
-    type Parts<'a>;
-
-    fn unpack<'a>(self, ast: &'a Ast) -> Self::Parts<'a>;
+pub trait Unpack: Pack {
+    unsafe fn unpack<'a>(self, ast: &'a Ast) -> Self::Parts<'a>;
 }
 
 #[derive(Clone, Copy)]
@@ -395,7 +437,8 @@ pub trait Unpack {
 pub struct Opt<T>(Packed, PhantomData<T>);
 
 impl<T: Sealed> Sealed for Opt<T> {}
-impl<T: PackedAbi> PackedAbi for Opt<T> {}
+/// SAFETY: `Opt` is a transparent wrapper over `Packed`.
+unsafe impl<T: PackedAbi> PackedAbi for Opt<T> {}
 
 impl<T: PackedAbi> Opt<T> {
     #[inline]

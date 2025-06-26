@@ -8,7 +8,7 @@ use nodes::{Packed, u24, u56};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
-enum AssignOp {
+pub enum AssignOp {
     None,
     Add,
     Sub,
@@ -54,9 +54,9 @@ roundtrip_u24_op!(AssignOp);
 roundtrip_u24_op!(InfixOp);
 roundtrip_u24_op!(PrefixOp);
 
-declare_intern_id!(StrId);
-declare_intern_id!(IdentId);
-declare_intern_id!(FloatId);
+declare_intern_id!(pub StrId);
+declare_intern_id!(pub IdentId);
+declare_intern_id!(pub FloatId);
 
 pub struct Ast {
     root: Packed,
@@ -106,7 +106,7 @@ macro_rules! roundtrip_u56_id {
 
             fn into_u56(self) -> u56 {
                 use crate::intern::Intern as _;
-                let v = v.index();
+                let v = self.index();
                 unsafe { u56::new_unchecked(v as u64) }
             }
         }

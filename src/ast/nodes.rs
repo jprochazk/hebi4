@@ -37,14 +37,6 @@ impl u24 {
         let [a, b, c] = self.0;
         u32::from_le_bytes([a, b, c, 0])
     }
-
-    fn from_u24(v: u24) -> Self {
-        v
-    }
-
-    fn into_u24(self) -> u24 {
-        self
-    }
 }
 
 impl PartialEq for u24 {
@@ -137,15 +129,31 @@ trait IntoU56 {
     fn into_u56(self) -> u56;
 }
 
+trait FromU56 {
+    fn from_u56(v: u56) -> Self;
+}
+
 impl IntoU56 for bool {
     fn into_u56(self) -> u56 {
         unsafe { u56::new_unchecked(self as u64) }
     }
 }
 
+impl FromU56 for bool {
+    fn from_u56(v: u56) -> Self {
+        unsafe { core::mem::transmute(v.get() as u8) }
+    }
+}
+
 impl IntoU56 for f32 {
     fn into_u56(self) -> u56 {
         unsafe { u56::new_unchecked(self.to_bits() as u64) }
+    }
+}
+
+impl FromU56 for f32 {
+    fn from_u56(v: u56) -> Self {
+        f32::from_bits(v.get() as u32)
     }
 }
 
@@ -197,12 +205,12 @@ impl Packed {
     }
 
     #[inline]
-    fn fixed_arity_inline(kind: NodeKind, inline: u24, index: u32) -> Self {
+    fn fixed_arity_inline(kind: NodeKind, value: u24, index: u32) -> Self {
         Self {
             repr: PackedRepr {
                 fixed_arity_inline: FixedArity_Inline {
                     kind: unsafe { core::num::NonZero::new_unchecked(kind as u8) },
-                    inline,
+                    value,
                     index,
                 },
             },
@@ -230,7 +238,7 @@ impl Packed {
             repr: PackedRepr {
                 mixed_arity: MixedArity {
                     kind: unsafe { core::num::NonZero::new_unchecked(kind as u8) },
-                    length,
+                    tail_length: length,
                     index,
                 },
             },
@@ -250,6 +258,42 @@ impl Packed {
             debug_tag: DebugPackedReprTag::FixedArity_Inline,
         }
     }
+
+    #[inline]
+    unsafe fn as_kind_only(&self) -> &KindOnly {
+        debug_assert!(self.debug_tag == DebugPackedReprTag::KindOnly);
+        unsafe { &self.repr.kind_only }
+    }
+
+    #[inline]
+    unsafe fn as_fixed_arity(&self) -> &FixedArity {
+        debug_assert!(self.debug_tag == DebugPackedReprTag::FixedArity);
+        unsafe { &self.repr.fixed_arity }
+    }
+
+    #[inline]
+    unsafe fn as_fixed_arity_inline(&self) -> &FixedArity_Inline {
+        debug_assert!(self.debug_tag == DebugPackedReprTag::FixedArity_Inline);
+        unsafe { &self.repr.fixed_arity_inline }
+    }
+
+    #[inline]
+    unsafe fn as_variable_arity(&self) -> &VariableArity {
+        debug_assert!(self.debug_tag == DebugPackedReprTag::VariableArity);
+        unsafe { &self.repr.variable_arity }
+    }
+
+    #[inline]
+    unsafe fn as_mixed_arity(&self) -> &MixedArity {
+        debug_assert!(self.debug_tag == DebugPackedReprTag::MixedArity);
+        unsafe { &self.repr.mixed_arity }
+    }
+
+    #[inline]
+    unsafe fn as_inline(&self) -> &Inline {
+        debug_assert!(self.debug_tag == DebugPackedReprTag::Inline);
+        unsafe { &self.repr.inline }
+    }
 }
 
 const _: () = {
@@ -258,7 +302,7 @@ const _: () = {
 
 #[allow(non_camel_case_types)]
 #[cfg(debug_assertions)]
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 enum DebugPackedReprTag {
     KindOnly,
     FixedArity,
@@ -300,7 +344,7 @@ struct FixedArity {
 #[repr(C)]
 struct FixedArity_Inline {
     kind: RawKind,
-    inline: u24,
+    value: u24,
     index: u32,
 }
 
@@ -316,7 +360,7 @@ struct VariableArity {
 #[repr(C)]
 struct MixedArity {
     kind: RawKind,
-    length: u24,
+    tail_length: u24,
     index: u32,
 }
 
@@ -328,7 +372,7 @@ struct Inline {
 }
 
 /// Marker for types which are transparent wrappers over [`Packed`].
-pub trait PackedAbi: Sealed + Sized + Copy {}
+pub unsafe trait PackedAbi: Sealed + Sized + Copy {}
 
 /// Conversion traits to/from [`Packed`].
 pub trait PackedNode: PackedAbi {
@@ -366,10 +410,8 @@ pub trait Pack {
     fn pack<'a>(parts: Self::Parts<'a>, ast: &mut AstBuilder) -> Self;
 }
 
-pub trait Unpack {
-    type Parts<'a>;
-
-    fn unpack<'a>(self, ast: &'a Ast) -> Self::Parts<'a>;
+pub trait Unpack: Pack {
+    unsafe fn unpack<'a>(self, ast: &'a Ast) -> Self::Parts<'a>;
 }
 
 #[derive(Clone, Copy)]
@@ -377,7 +419,8 @@ pub trait Unpack {
 pub struct Opt<T>(Packed, PhantomData<T>);
 
 impl<T: Sealed> Sealed for Opt<T> {}
-impl<T: PackedAbi> PackedAbi for Opt<T> {}
+/// SAFETY: `Opt` is a transparent wrapper over `Packed`.
+unsafe impl<T: PackedAbi> PackedAbi for Opt<T> {}
 
 impl<T: PackedAbi> Opt<T> {
     #[inline]
@@ -523,193 +566,225 @@ pub enum ExprKind {
 #[repr(transparent)]
 pub struct Stmt(Packed);
 impl Sealed for Stmt {}
-impl PackedAbi for Stmt {}
+/// SAFETY: `self` is a transparent wrapper over `Packed`.
+unsafe impl PackedAbi for Stmt {}
 
 #[derive(Clone, Copy)]
 #[repr(transparent)]
 pub struct Expr(Packed);
 impl Sealed for Expr {}
-impl PackedAbi for Expr {}
+/// SAFETY: `self` is a transparent wrapper over `Packed`.
+unsafe impl PackedAbi for Expr {}
 
 #[derive(Clone, Copy)]
 #[repr(transparent)]
 pub struct Var(Packed);
 impl Sealed for Var {}
-impl PackedAbi for Var {}
+/// SAFETY: `self` is a transparent wrapper over `Packed`.
+unsafe impl PackedAbi for Var {}
 
 #[derive(Clone, Copy)]
 #[repr(transparent)]
 pub struct Loop(Packed);
 impl Sealed for Loop {}
-impl PackedAbi for Loop {}
+/// SAFETY: `self` is a transparent wrapper over `Packed`.
+unsafe impl PackedAbi for Loop {}
 
 #[derive(Clone, Copy)]
 #[repr(transparent)]
 pub struct StmtExpr(Packed);
 impl Sealed for StmtExpr {}
-impl PackedAbi for StmtExpr {}
+/// SAFETY: `self` is a transparent wrapper over `Packed`.
+unsafe impl PackedAbi for StmtExpr {}
 
 #[derive(Clone, Copy)]
 #[repr(transparent)]
 pub struct Return(Packed);
 impl Sealed for Return {}
-impl PackedAbi for Return {}
+/// SAFETY: `self` is a transparent wrapper over `Packed`.
+unsafe impl PackedAbi for Return {}
 
 #[derive(Clone, Copy)]
 #[repr(transparent)]
 pub struct Break(Packed);
 impl Sealed for Break {}
-impl PackedAbi for Break {}
+/// SAFETY: `self` is a transparent wrapper over `Packed`.
+unsafe impl PackedAbi for Break {}
 
 #[derive(Clone, Copy)]
 #[repr(transparent)]
 pub struct Continue(Packed);
 impl Sealed for Continue {}
-impl PackedAbi for Continue {}
+/// SAFETY: `self` is a transparent wrapper over `Packed`.
+unsafe impl PackedAbi for Continue {}
 
 #[derive(Clone, Copy)]
 #[repr(transparent)]
 pub struct IfSimple(Packed);
 impl Sealed for IfSimple {}
-impl PackedAbi for IfSimple {}
+/// SAFETY: `self` is a transparent wrapper over `Packed`.
+unsafe impl PackedAbi for IfSimple {}
 
 #[derive(Clone, Copy)]
 #[repr(transparent)]
 pub struct IfMulti(Packed);
 impl Sealed for IfMulti {}
-impl PackedAbi for IfMulti {}
+/// SAFETY: `self` is a transparent wrapper over `Packed`.
+unsafe impl PackedAbi for IfMulti {}
 
 #[derive(Clone, Copy)]
 #[repr(transparent)]
 pub struct Block(Packed);
 impl Sealed for Block {}
-impl PackedAbi for Block {}
+/// SAFETY: `self` is a transparent wrapper over `Packed`.
+unsafe impl PackedAbi for Block {}
 
 #[derive(Clone, Copy)]
 #[repr(transparent)]
 pub struct Fn(Packed);
 impl Sealed for Fn {}
-impl PackedAbi for Fn {}
+/// SAFETY: `self` is a transparent wrapper over `Packed`.
+unsafe impl PackedAbi for Fn {}
 
 #[derive(Clone, Copy)]
 #[repr(transparent)]
 pub struct GetVar(Packed);
 impl Sealed for GetVar {}
-impl PackedAbi for GetVar {}
+/// SAFETY: `self` is a transparent wrapper over `Packed`.
+unsafe impl PackedAbi for GetVar {}
 
 #[derive(Clone, Copy)]
 #[repr(transparent)]
 pub struct GetField(Packed);
 impl Sealed for GetField {}
-impl PackedAbi for GetField {}
+/// SAFETY: `self` is a transparent wrapper over `Packed`.
+unsafe impl PackedAbi for GetField {}
 
 #[derive(Clone, Copy)]
 #[repr(transparent)]
 pub struct GetIndex(Packed);
 impl Sealed for GetIndex {}
-impl PackedAbi for GetIndex {}
+/// SAFETY: `self` is a transparent wrapper over `Packed`.
+unsafe impl PackedAbi for GetIndex {}
 
 #[derive(Clone, Copy)]
 #[repr(transparent)]
 pub struct Call(Packed);
 impl Sealed for Call {}
-impl PackedAbi for Call {}
+/// SAFETY: `self` is a transparent wrapper over `Packed`.
+unsafe impl PackedAbi for Call {}
 
 #[derive(Clone, Copy)]
 #[repr(transparent)]
 pub struct SetVar(Packed);
 impl Sealed for SetVar {}
-impl PackedAbi for SetVar {}
+/// SAFETY: `self` is a transparent wrapper over `Packed`.
+unsafe impl PackedAbi for SetVar {}
 
 #[derive(Clone, Copy)]
 #[repr(transparent)]
 pub struct SetField(Packed);
 impl Sealed for SetField {}
-impl PackedAbi for SetField {}
+/// SAFETY: `self` is a transparent wrapper over `Packed`.
+unsafe impl PackedAbi for SetField {}
 
 #[derive(Clone, Copy)]
 #[repr(transparent)]
 pub struct SetIndex(Packed);
 impl Sealed for SetIndex {}
-impl PackedAbi for SetIndex {}
+/// SAFETY: `self` is a transparent wrapper over `Packed`.
+unsafe impl PackedAbi for SetIndex {}
 
 #[derive(Clone, Copy)]
 #[repr(transparent)]
 pub struct Infix(Packed);
 impl Sealed for Infix {}
-impl PackedAbi for Infix {}
+/// SAFETY: `self` is a transparent wrapper over `Packed`.
+unsafe impl PackedAbi for Infix {}
 
 #[derive(Clone, Copy)]
 #[repr(transparent)]
 pub struct Prefix(Packed);
 impl Sealed for Prefix {}
-impl PackedAbi for Prefix {}
+/// SAFETY: `self` is a transparent wrapper over `Packed`.
+unsafe impl PackedAbi for Prefix {}
 
 #[derive(Clone, Copy)]
 #[repr(transparent)]
 pub struct Array(Packed);
 impl Sealed for Array {}
-impl PackedAbi for Array {}
+/// SAFETY: `self` is a transparent wrapper over `Packed`.
+unsafe impl PackedAbi for Array {}
 
 #[derive(Clone, Copy)]
 #[repr(transparent)]
 pub struct Object(Packed);
 impl Sealed for Object {}
-impl PackedAbi for Object {}
+/// SAFETY: `self` is a transparent wrapper over `Packed`.
+unsafe impl PackedAbi for Object {}
 
 #[derive(Clone, Copy)]
 #[repr(transparent)]
 pub struct Int(Packed);
 impl Sealed for Int {}
-impl PackedAbi for Int {}
+/// SAFETY: `self` is a transparent wrapper over `Packed`.
+unsafe impl PackedAbi for Int {}
 
 #[derive(Clone, Copy)]
 #[repr(transparent)]
 pub struct Float32(Packed);
 impl Sealed for Float32 {}
-impl PackedAbi for Float32 {}
+/// SAFETY: `self` is a transparent wrapper over `Packed`.
+unsafe impl PackedAbi for Float32 {}
 
 #[derive(Clone, Copy)]
 #[repr(transparent)]
 pub struct Float64(Packed);
 impl Sealed for Float64 {}
-impl PackedAbi for Float64 {}
+/// SAFETY: `self` is a transparent wrapper over `Packed`.
+unsafe impl PackedAbi for Float64 {}
 
 #[derive(Clone, Copy)]
 #[repr(transparent)]
 pub struct Bool(Packed);
 impl Sealed for Bool {}
-impl PackedAbi for Bool {}
+/// SAFETY: `self` is a transparent wrapper over `Packed`.
+unsafe impl PackedAbi for Bool {}
 
 #[derive(Clone, Copy)]
 #[repr(transparent)]
 pub struct Str(Packed);
 impl Sealed for Str {}
-impl PackedAbi for Str {}
+/// SAFETY: `self` is a transparent wrapper over `Packed`.
+unsafe impl PackedAbi for Str {}
 
 #[derive(Clone, Copy)]
 #[repr(transparent)]
 pub struct Nil(Packed);
 impl Sealed for Nil {}
-impl PackedAbi for Nil {}
+/// SAFETY: `self` is a transparent wrapper over `Packed`.
+unsafe impl PackedAbi for Nil {}
 
 #[derive(Clone, Copy)]
 #[repr(transparent)]
 pub struct Branch(Packed);
 impl Sealed for Branch {}
-impl PackedAbi for Branch {}
+/// SAFETY: `self` is a transparent wrapper over `Packed`.
+unsafe impl PackedAbi for Branch {}
 
 #[derive(Clone, Copy)]
 #[repr(transparent)]
 pub struct ObjectEntry(Packed);
 impl Sealed for ObjectEntry {}
-impl PackedAbi for ObjectEntry {}
+/// SAFETY: `self` is a transparent wrapper over `Packed`.
+unsafe impl PackedAbi for ObjectEntry {}
 
 #[derive(Clone, Copy)]
 #[repr(transparent)]
 pub struct Ident(Packed);
 impl Sealed for Ident {}
-impl PackedAbi for Ident {}
+/// SAFETY: `self` is a transparent wrapper over `Packed`.
+unsafe impl PackedAbi for Ident {}
 
 pub struct VarParts {
     pub name: Ident,
@@ -1152,6 +1227,7 @@ impl Pack for Int {
     type Parts<'a> = IntParts;
 
     fn pack<'a>(parts: Self::Parts<'a>, ast: &mut AstBuilder) -> Self {
+        let _ = ast;
         let IntParts { value } = parts;
         let value: u56 = value.into_u56();
         Self::from_packed(Packed::inline(NodeKind::Int, value))
@@ -1162,6 +1238,7 @@ impl Pack for Float32 {
     type Parts<'a> = Float32Parts;
 
     fn pack<'a>(parts: Self::Parts<'a>, ast: &mut AstBuilder) -> Self {
+        let _ = ast;
         let Float32Parts { value } = parts;
         let value: u56 = value.into_u56();
         Self::from_packed(Packed::inline(NodeKind::Float32, value))
@@ -1172,6 +1249,7 @@ impl Pack for Float64 {
     type Parts<'a> = Float64Parts;
 
     fn pack<'a>(parts: Self::Parts<'a>, ast: &mut AstBuilder) -> Self {
+        let _ = ast;
         let Float64Parts { value } = parts;
         let value: u56 = value.into_u56();
         Self::from_packed(Packed::inline(NodeKind::Float64, value))
@@ -1182,6 +1260,7 @@ impl Pack for Bool {
     type Parts<'a> = BoolParts;
 
     fn pack<'a>(parts: Self::Parts<'a>, ast: &mut AstBuilder) -> Self {
+        let _ = ast;
         let BoolParts { value } = parts;
         let value: u56 = value.into_u56();
         Self::from_packed(Packed::inline(NodeKind::Bool, value))
@@ -1192,6 +1271,7 @@ impl Pack for Str {
     type Parts<'a> = StrParts;
 
     fn pack<'a>(parts: Self::Parts<'a>, ast: &mut AstBuilder) -> Self {
+        let _ = ast;
         let StrParts { value } = parts;
         let value: u56 = value.into_u56();
         Self::from_packed(Packed::inline(NodeKind::Str, value))
@@ -1235,8 +1315,353 @@ impl Pack for Ident {
     type Parts<'a> = IdentParts;
 
     fn pack<'a>(parts: Self::Parts<'a>, ast: &mut AstBuilder) -> Self {
+        let _ = ast;
         let IdentParts { id } = parts;
         let id: u56 = id.into_u56();
         Self::from_packed(Packed::inline(NodeKind::Ident, id))
+    }
+}
+
+impl Unpack for Var {
+    unsafe fn unpack<'a>(self, ast: &'a Ast) -> Self::Parts<'a> {
+        const N: usize = 2;
+        let repr = unsafe { self.0.as_fixed_arity() };
+        let index = repr.index as usize;
+        let raw: &[Packed] = unsafe { ast.nodes.get_unchecked(index..index + N) };
+        let name = <_>::from_packed(unsafe { *raw.get_unchecked(0) });
+        let value = <_>::from_packed(unsafe { *raw.get_unchecked(1) });
+        Self::Parts { name, value }
+    }
+}
+
+impl Unpack for Loop {
+    unsafe fn unpack<'a>(self, ast: &'a Ast) -> Self::Parts<'a> {
+        let repr = unsafe { self.0.as_variable_arity() };
+        let index = repr.index as usize;
+        let length = repr.length.get() as usize;
+        let raw: &[Packed] = unsafe { ast.nodes.get_unchecked(index..index + length) };
+        let body: &[_] = <_>::from_packed_slice(raw);
+        Self::Parts { body }
+    }
+}
+
+impl Unpack for StmtExpr {
+    unsafe fn unpack<'a>(self, ast: &'a Ast) -> Self::Parts<'a> {
+        const N: usize = 1;
+        let repr = unsafe { self.0.as_fixed_arity() };
+        let index = repr.index as usize;
+        let raw: &[Packed] = unsafe { ast.nodes.get_unchecked(index..index + N) };
+        let inner = <_>::from_packed(unsafe { *raw.get_unchecked(0) });
+        Self::Parts { inner }
+    }
+}
+
+impl Unpack for Return {
+    unsafe fn unpack<'a>(self, ast: &'a Ast) -> Self::Parts<'a> {
+        const N: usize = 1;
+        let repr = unsafe { self.0.as_fixed_arity() };
+        let index = repr.index as usize;
+        let raw: &[Packed] = unsafe { ast.nodes.get_unchecked(index..index + N) };
+        let value = <_>::from_packed(unsafe { *raw.get_unchecked(0) });
+        Self::Parts { value }
+    }
+}
+
+impl Unpack for Break {
+    unsafe fn unpack<'a>(self, ast: &'a Ast) -> Self::Parts<'a> {
+        let _ = unsafe { self.0.as_kind_only() };
+        let _ = ast;
+        Self::Parts {}
+    }
+}
+
+impl Unpack for Continue {
+    unsafe fn unpack<'a>(self, ast: &'a Ast) -> Self::Parts<'a> {
+        let _ = unsafe { self.0.as_kind_only() };
+        let _ = ast;
+        Self::Parts {}
+    }
+}
+
+impl Unpack for IfSimple {
+    unsafe fn unpack<'a>(self, ast: &'a Ast) -> Self::Parts<'a> {
+        const N: usize = 3;
+        let repr = unsafe { self.0.as_fixed_arity() };
+        let index = repr.index as usize;
+        let raw: &[Packed] = unsafe { ast.nodes.get_unchecked(index..index + N) };
+        let cond = <_>::from_packed(unsafe { *raw.get_unchecked(0) });
+        let then = <_>::from_packed(unsafe { *raw.get_unchecked(1) });
+        let else_ = <_>::from_packed(unsafe { *raw.get_unchecked(2) });
+        Self::Parts { cond, then, else_ }
+    }
+}
+
+impl Unpack for IfMulti {
+    unsafe fn unpack<'a>(self, ast: &'a Ast) -> Self::Parts<'a> {
+        const N: usize = 1;
+        let repr = unsafe { self.0.as_mixed_arity() };
+        let index = repr.index as usize;
+        let tail_length = repr.tail_length.get() as usize;
+        let raw: &[Packed] = unsafe { ast.nodes.get_unchecked(index..index + N + tail_length) };
+        let tail = <_>::from_packed(unsafe { *raw.get_unchecked(0) });
+        let branches: &[_] = <_>::from_packed_slice(unsafe { raw.get_unchecked(N..) });
+        Self::Parts { tail, branches }
+    }
+}
+
+impl Unpack for Block {
+    unsafe fn unpack<'a>(self, ast: &'a Ast) -> Self::Parts<'a> {
+        let repr = unsafe { self.0.as_variable_arity() };
+        let index = repr.index as usize;
+        let length = repr.length.get() as usize;
+        let raw: &[Packed] = unsafe { ast.nodes.get_unchecked(index..index + length) };
+        let body: &[_] = <_>::from_packed_slice(raw);
+        Self::Parts { body }
+    }
+}
+
+impl Unpack for Fn {
+    unsafe fn unpack<'a>(self, ast: &'a Ast) -> Self::Parts<'a> {
+        const N: usize = 2;
+        let repr = unsafe { self.0.as_mixed_arity() };
+        let index = repr.index as usize;
+        let tail_length = repr.tail_length.get() as usize;
+        let raw: &[Packed] = unsafe { ast.nodes.get_unchecked(index..index + N + tail_length) };
+        let name = <_>::from_packed(unsafe { *raw.get_unchecked(0) });
+        let body = <_>::from_packed(unsafe { *raw.get_unchecked(1) });
+        let params: &[_] = <_>::from_packed_slice(unsafe { raw.get_unchecked(N..) });
+        Self::Parts { name, body, params }
+    }
+}
+
+impl Unpack for GetVar {
+    unsafe fn unpack<'a>(self, ast: &'a Ast) -> Self::Parts<'a> {
+        const N: usize = 1;
+        let repr = unsafe { self.0.as_fixed_arity() };
+        let index = repr.index as usize;
+        let raw: &[Packed] = unsafe { ast.nodes.get_unchecked(index..index + N) };
+        let name = <_>::from_packed(unsafe { *raw.get_unchecked(0) });
+        Self::Parts { name }
+    }
+}
+
+impl Unpack for GetField {
+    unsafe fn unpack<'a>(self, ast: &'a Ast) -> Self::Parts<'a> {
+        const N: usize = 2;
+        let repr = unsafe { self.0.as_fixed_arity() };
+        let index = repr.index as usize;
+        let raw: &[Packed] = unsafe { ast.nodes.get_unchecked(index..index + N) };
+        let parent = <_>::from_packed(unsafe { *raw.get_unchecked(0) });
+        let key = <_>::from_packed(unsafe { *raw.get_unchecked(1) });
+        Self::Parts { parent, key }
+    }
+}
+
+impl Unpack for GetIndex {
+    unsafe fn unpack<'a>(self, ast: &'a Ast) -> Self::Parts<'a> {
+        const N: usize = 2;
+        let repr = unsafe { self.0.as_fixed_arity() };
+        let index = repr.index as usize;
+        let raw: &[Packed] = unsafe { ast.nodes.get_unchecked(index..index + N) };
+        let parent = <_>::from_packed(unsafe { *raw.get_unchecked(0) });
+        let key = <_>::from_packed(unsafe { *raw.get_unchecked(1) });
+        Self::Parts { parent, key }
+    }
+}
+
+impl Unpack for Call {
+    unsafe fn unpack<'a>(self, ast: &'a Ast) -> Self::Parts<'a> {
+        const N: usize = 1;
+        let repr = unsafe { self.0.as_mixed_arity() };
+        let index = repr.index as usize;
+        let tail_length = repr.tail_length.get() as usize;
+        let raw: &[Packed] = unsafe { ast.nodes.get_unchecked(index..index + N + tail_length) };
+        let callee = <_>::from_packed(unsafe { *raw.get_unchecked(0) });
+        let args: &[_] = <_>::from_packed_slice(unsafe { raw.get_unchecked(N..) });
+        Self::Parts { callee, args }
+    }
+}
+
+impl Unpack for SetVar {
+    unsafe fn unpack<'a>(self, ast: &'a Ast) -> Self::Parts<'a> {
+        const N: usize = 2;
+        let repr = unsafe { self.0.as_fixed_arity_inline() };
+        let index = repr.index as usize;
+        let raw: &[Packed] = unsafe { ast.nodes.get_unchecked(index..index + N) };
+        let name = <_>::from_packed(unsafe { *raw.get_unchecked(0) });
+        let value = <_>::from_packed(unsafe { *raw.get_unchecked(1) });
+        let op = <AssignOp>::from_u24(repr.value);
+        Self::Parts { name, value, op }
+    }
+}
+
+impl Unpack for SetField {
+    unsafe fn unpack<'a>(self, ast: &'a Ast) -> Self::Parts<'a> {
+        const N: usize = 3;
+        let repr = unsafe { self.0.as_fixed_arity_inline() };
+        let index = repr.index as usize;
+        let raw: &[Packed] = unsafe { ast.nodes.get_unchecked(index..index + N) };
+        let parent = <_>::from_packed(unsafe { *raw.get_unchecked(0) });
+        let key = <_>::from_packed(unsafe { *raw.get_unchecked(1) });
+        let value = <_>::from_packed(unsafe { *raw.get_unchecked(2) });
+        let op = <AssignOp>::from_u24(repr.value);
+        Self::Parts {
+            parent,
+            key,
+            value,
+            op,
+        }
+    }
+}
+
+impl Unpack for SetIndex {
+    unsafe fn unpack<'a>(self, ast: &'a Ast) -> Self::Parts<'a> {
+        const N: usize = 3;
+        let repr = unsafe { self.0.as_fixed_arity_inline() };
+        let index = repr.index as usize;
+        let raw: &[Packed] = unsafe { ast.nodes.get_unchecked(index..index + N) };
+        let parent = <_>::from_packed(unsafe { *raw.get_unchecked(0) });
+        let key = <_>::from_packed(unsafe { *raw.get_unchecked(1) });
+        let value = <_>::from_packed(unsafe { *raw.get_unchecked(2) });
+        let op = <AssignOp>::from_u24(repr.value);
+        Self::Parts {
+            parent,
+            key,
+            value,
+            op,
+        }
+    }
+}
+
+impl Unpack for Infix {
+    unsafe fn unpack<'a>(self, ast: &'a Ast) -> Self::Parts<'a> {
+        const N: usize = 2;
+        let repr = unsafe { self.0.as_fixed_arity_inline() };
+        let index = repr.index as usize;
+        let raw: &[Packed] = unsafe { ast.nodes.get_unchecked(index..index + N) };
+        let lhs = <_>::from_packed(unsafe { *raw.get_unchecked(0) });
+        let rhs = <_>::from_packed(unsafe { *raw.get_unchecked(1) });
+        let op = <InfixOp>::from_u24(repr.value);
+        Self::Parts { lhs, rhs, op }
+    }
+}
+
+impl Unpack for Prefix {
+    unsafe fn unpack<'a>(self, ast: &'a Ast) -> Self::Parts<'a> {
+        const N: usize = 1;
+        let repr = unsafe { self.0.as_fixed_arity_inline() };
+        let index = repr.index as usize;
+        let raw: &[Packed] = unsafe { ast.nodes.get_unchecked(index..index + N) };
+        let rhs = <_>::from_packed(unsafe { *raw.get_unchecked(0) });
+        let op = <PrefixOp>::from_u24(repr.value);
+        Self::Parts { rhs, op }
+    }
+}
+
+impl Unpack for Array {
+    unsafe fn unpack<'a>(self, ast: &'a Ast) -> Self::Parts<'a> {
+        let repr = unsafe { self.0.as_variable_arity() };
+        let index = repr.index as usize;
+        let length = repr.length.get() as usize;
+        let raw: &[Packed] = unsafe { ast.nodes.get_unchecked(index..index + length) };
+        let items: &[_] = <_>::from_packed_slice(raw);
+        Self::Parts { items }
+    }
+}
+
+impl Unpack for Object {
+    unsafe fn unpack<'a>(self, ast: &'a Ast) -> Self::Parts<'a> {
+        let repr = unsafe { self.0.as_variable_arity() };
+        let index = repr.index as usize;
+        let length = repr.length.get() as usize;
+        let raw: &[Packed] = unsafe { ast.nodes.get_unchecked(index..index + length) };
+        let entries: &[_] = <_>::from_packed_slice(raw);
+        Self::Parts { entries }
+    }
+}
+
+impl Unpack for Int {
+    unsafe fn unpack<'a>(self, ast: &'a Ast) -> Self::Parts<'a> {
+        let _ = ast;
+        let repr = unsafe { self.0.as_inline() };
+        let value = <u56>::from_u56(repr.value);
+        Self::Parts { value }
+    }
+}
+
+impl Unpack for Float32 {
+    unsafe fn unpack<'a>(self, ast: &'a Ast) -> Self::Parts<'a> {
+        let _ = ast;
+        let repr = unsafe { self.0.as_inline() };
+        let value = <f32>::from_u56(repr.value);
+        Self::Parts { value }
+    }
+}
+
+impl Unpack for Float64 {
+    unsafe fn unpack<'a>(self, ast: &'a Ast) -> Self::Parts<'a> {
+        let _ = ast;
+        let repr = unsafe { self.0.as_inline() };
+        let value = <FloatId>::from_u56(repr.value);
+        Self::Parts { value }
+    }
+}
+
+impl Unpack for Bool {
+    unsafe fn unpack<'a>(self, ast: &'a Ast) -> Self::Parts<'a> {
+        let _ = ast;
+        let repr = unsafe { self.0.as_inline() };
+        let value = <bool>::from_u56(repr.value);
+        Self::Parts { value }
+    }
+}
+
+impl Unpack for Str {
+    unsafe fn unpack<'a>(self, ast: &'a Ast) -> Self::Parts<'a> {
+        let _ = ast;
+        let repr = unsafe { self.0.as_inline() };
+        let value = <StrId>::from_u56(repr.value);
+        Self::Parts { value }
+    }
+}
+
+impl Unpack for Nil {
+    unsafe fn unpack<'a>(self, ast: &'a Ast) -> Self::Parts<'a> {
+        let _ = unsafe { self.0.as_kind_only() };
+        let _ = ast;
+        Self::Parts {}
+    }
+}
+
+impl Unpack for Branch {
+    unsafe fn unpack<'a>(self, ast: &'a Ast) -> Self::Parts<'a> {
+        const N: usize = 2;
+        let repr = unsafe { self.0.as_fixed_arity() };
+        let index = repr.index as usize;
+        let raw: &[Packed] = unsafe { ast.nodes.get_unchecked(index..index + N) };
+        let cond = <_>::from_packed(unsafe { *raw.get_unchecked(0) });
+        let then = <_>::from_packed(unsafe { *raw.get_unchecked(1) });
+        Self::Parts { cond, then }
+    }
+}
+
+impl Unpack for ObjectEntry {
+    unsafe fn unpack<'a>(self, ast: &'a Ast) -> Self::Parts<'a> {
+        const N: usize = 2;
+        let repr = unsafe { self.0.as_fixed_arity() };
+        let index = repr.index as usize;
+        let raw: &[Packed] = unsafe { ast.nodes.get_unchecked(index..index + N) };
+        let key = <_>::from_packed(unsafe { *raw.get_unchecked(0) });
+        let value = <_>::from_packed(unsafe { *raw.get_unchecked(1) });
+        Self::Parts { key, value }
+    }
+}
+
+impl Unpack for Ident {
+    unsafe fn unpack<'a>(self, ast: &'a Ast) -> Self::Parts<'a> {
+        let _ = ast;
+        let repr = unsafe { self.0.as_inline() };
+        let id = <IdentId>::from_u56(repr.value);
+        Self::Parts { id }
     }
 }

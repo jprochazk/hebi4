@@ -1,106 +1,106 @@
 
 stmt var {
-	name: ident,
-	value: expr,
+    name: ident,
+    value: expr,
 };
 
 stmt loop {
-	body: [stmt],
+    body: [stmt],
 };
 
 stmt stmt_expr {
-	inner: expr,
+    inner: expr,
 };
 
 expr return {
-	value: expr?,
+    value: expr?,
 };
 
 expr break;
 expr continue;
 
 expr if_simple {
-	cond: expr,
-	then: expr,
-	else_: expr?,
+    cond: expr,
+    then: expr,
+    else_: expr?,
 };
 
 expr if_multi {
-	tail: block,
-	branches: [branch],
+    tail: block,
+    branches: [branch],
 };
 
 data branch {
-	cond: expr,
-	then: expr,
+    cond: expr,
+    then: expr,
 };
 
 expr block {
-	body: [stmt],	
+    body: [stmt],
 };
 
 expr fn {
-	name: ident,
-	body: block,
-	params: [ident],
+    name: ident,
+    body: block,
+    params: [ident],
 };
 
 expr get_var {
-	name: ident,
+    name: ident,
 };
 
 expr get_field {
-	parent: expr,
-	key: ident,
+    parent: expr,
+    key: ident,
 };
 
 expr get_index {
-	parent: expr,
-	key: expr,
+    parent: expr,
+    key: expr,
 };
 
 expr call {
-	callee: expr,
-	args: [expr],
+    callee: expr,
+    args: [expr],
 };
 
 expr set_var(op: AssignOp as u24) {
-	name: ident,
-	value: expr,
+    name: ident,
+    value: expr,
 };
 
 expr set_field(op: AssignOp as u24) {
-	parent: expr,
-	key: ident,
-	value: expr,
+    parent: expr,
+    key: ident,
+    value: expr,
 };
 
 expr set_index(op: AssignOp as u24) {
-	parent: expr,
-	key: expr,
-	value: expr,
+    parent: expr,
+    key: expr,
+    value: expr,
 };
 
 expr infix(op: InfixOp as u24) {
-	lhs: expr,
-	rhs: expr,
+    lhs: expr,
+    rhs: expr,
 };
 
 expr prefix(op: PrefixOp as u24) {
-	rhs: expr,
+    rhs: expr,
 };
 
 expr array {
-	items: [expr],
+    items: [expr],
 };
 
 expr object {
-	entries: [object_entry],
+    entries: [object_entry],
 };
 
 data object_entry {
-	key: expr,
-	value: expr,
+    key: expr,
+    value: expr,
 };
 
 expr int(value: u56 as u56);

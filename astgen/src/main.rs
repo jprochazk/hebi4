@@ -59,7 +59,28 @@ fn main() {
         let outfile = Path::new(&outfile);
         std::fs::create_dir_all(outfile.parent().unwrap_or(outfile))
             .expect("failed to create parent directories");
-        std::fs::write(outfile, out).expect("failed to write file");
+        std::fs::write(&outfile, out).expect("failed to write file");
+        run(format!("rustfmt {}", outfile.display()));
+    }
+}
+
+fn run(cmd: impl AsRef<str>) {
+    let cmd = cmd.as_ref();
+    let mut parts = cmd.split_ascii_whitespace();
+    let Some(cmd) = parts.next() else {
+        return;
+    };
+    let args = parts;
+
+    let mut p = std::process::Command::new(cmd)
+        .args(args)
+        .stdout(std::io::stdout())
+        .stderr(std::io::stderr())
+        .spawn()
+        .unwrap();
+    let status = p.wait().unwrap();
+    if !status.success() {
+        panic!("command exited with non-zero exit code");
     }
 }
 
@@ -499,6 +520,7 @@ fn emit_nodes(nodes: Nodes<'_>) -> String {
     emit_packed_wrappers(&nodes, &mut out);
     emit_node_parts(&nodes, &mut out);
     emit_pack_impls(&nodes, &mut out);
+    emit_unpack_impls(&nodes, &mut out);
 
     out
 }
@@ -589,7 +611,8 @@ fn emit_packed_wrappers(nodes: &Nodes, out: &mut String) {
             #[repr(transparent)]
             pub struct {name}(Packed);
             impl Sealed for {name} {{}}
-            impl PackedAbi for {name} {{}}
+            /// SAFETY: `self` is a transparent wrapper over `Packed`.
+            unsafe impl PackedAbi for {name} {{}}
 
         "
         );
@@ -652,15 +675,6 @@ fn emit_pack_impls(nodes: &Nodes, out: &mut String) {
                 );
             }
             NodeKind::FixedArity { fields, inline } => {
-                /*
-                let Self { $inline, $($fields)* } = self;
-                let index = ast.append(&[$($fields),*]);
-                #if inline {
-                    Packed::fixed_arity_inline(NodeKind::$name, $inline, index)
-                } else {
-                    Packed::fixed_arity(NodeKind::$name, index)
-                }
-                */
                 if let Some(inline) = inline {
                     ml!(
                         out,
@@ -754,6 +768,7 @@ fn emit_pack_impls(nodes: &Nodes, out: &mut String) {
                 ml!(
                     out,
                     "
+                        let _ = ast;
                         let {name}Parts {{ {inline} }} = parts;
                         let {inline}: u56 = {inline}.into_u56();
                         Self::from_packed(
@@ -765,6 +780,149 @@ fn emit_pack_impls(nodes: &Nodes, out: &mut String) {
             }
         }
         ln!(out, "    }}");
+        ln!(out, "}}\n");
+    }
+}
+
+fn emit_unpack_impls(nodes: &Nodes, out: &mut String) {
+    /*
+    impl Unpack for {name} {{
+        unsafe fn unpack<'a>(self, ast: &'a Ast) -> Self::Parts<'a> {{
+            {name}Parts {{
+                $($fields,*)
+                $($tail,)?
+                $($inline,)?
+            }}
+        }}
+    }}
+    */
+    for node in nodes.in_order() {
+        let name = AsPascalCase(node.name);
+        ml!(
+            out,
+            "
+            impl Unpack for {name} {{        
+                unsafe fn unpack<'a>(self, ast: &'a Ast) -> Self::Parts<'a> {{
+            "
+        );
+        match &node.kind {
+            NodeKind::Empty => {
+                ml!(
+                    out,
+                    "
+                    let _ = unsafe {{ self.0.as_kind_only() }};
+                    let _ = ast;
+                    Self::Parts {{}}
+                    ",
+                );
+            }
+            NodeKind::FixedArity {
+                fields,
+                inline: Some(inline),
+            } => {
+                let num_fields = fields.len();
+                ml!(
+                    out,
+                    "
+                    const N: usize = {num_fields};
+                    let repr = unsafe {{ self.0.as_fixed_arity_inline() }};
+                    let index = repr.index as usize;
+                    let raw: &[Packed] = unsafe {{ ast.nodes.get_unchecked(index..index+N) }};
+                    {fields_from}
+                    let {inline} = <{inline_ty}>::from_u24(repr.value);
+                    Self::Parts {{ {fields}, {inline} }}
+                    ",
+                    fields_from = fields
+                        .iter()
+                        .enumerate()
+                        .map(|(i, Field { name, .. })| format!(
+                            "let {name} = <_>::from_packed(unsafe {{ *raw.get_unchecked({i}) }});"
+                        ))
+                        .join('\n'),
+                    fields = fields.iter().map(|f| f.name).join(','),
+                    inline = inline.name,
+                    inline_ty = inline.resolved_ty(),
+                );
+            }
+            NodeKind::FixedArity {
+                fields,
+                inline: None,
+            } => {
+                let num_fields = fields.len();
+                ml!(
+                    out,
+                    "
+                    const N: usize = {num_fields};
+                    let repr = unsafe {{ self.0.as_fixed_arity() }};
+                    let index = repr.index as usize;
+                    let raw: &[Packed] = unsafe {{ ast.nodes.get_unchecked(index..index+N) }};
+                    {fields_from}
+                    Self::Parts {{ {fields} }}
+                    ",
+                    fields_from = fields
+                        .iter()
+                        .enumerate()
+                        .map(|(i, Field { name, .. })| format!(
+                            "let {name} = <_>::from_packed(unsafe {{ *raw.get_unchecked({i}) }});"
+                        ))
+                        .join('\n'),
+                    fields = fields.iter().map(|f| f.name).join(','),
+                );
+            }
+            NodeKind::VariableArity { tail } => {
+                ml!(
+                    out,
+                    "
+                    let repr = unsafe {{ self.0.as_variable_arity() }};
+                    let index = repr.index as usize;
+                    let length = repr.length.get() as usize;
+                    let raw: &[Packed] = unsafe {{ ast.nodes.get_unchecked(index..index+length) }};
+                    let {tail}: &[_] = <_>::from_packed_slice(raw);
+                    Self::Parts {{ {tail} }}
+                    ",
+                    tail = tail.name,
+                );
+            }
+            NodeKind::MixedArity { fields, tail } => {
+                let num_fields = fields.len();
+                ml!(
+                    out,
+                    "
+                    const N: usize = {num_fields};
+                    let repr = unsafe {{ self.0.as_mixed_arity() }};
+                    let index = repr.index as usize;
+                    let tail_length = repr.tail_length.get() as usize;
+                    let raw: &[Packed] = unsafe {{ ast.nodes.get_unchecked(index..index+N+tail_length) }};
+                    {fields_from}
+                    let {tail}: &[_] = <_>::from_packed_slice(unsafe {{ raw.get_unchecked(N..) }});
+                    Self::Parts {{ {fields}, {tail} }}
+                    ",
+                    fields_from = fields
+                        .iter()
+                        .enumerate()
+                        .map(|(i, Field { name, .. })| format!(
+                            "let {name} = <_>::from_packed(unsafe {{ *raw.get_unchecked({i}) }});"
+                        ))
+                        .join('\n'),
+                    fields = fields.iter().map(|f| f.name).join(','),
+                    tail = tail.name,
+                );
+            }
+            NodeKind::InlineValue { inline } => {
+                ml!(
+                    out,
+                    "
+                    let _ = ast;
+                    let repr = unsafe {{ self.0.as_inline() }};
+                    let {inline} = <{inline_ty}>::from_u56(repr.value);
+                    Self::Parts {{ {inline} }}
+                    ",
+                    inline = inline.name,
+                    inline_ty = inline.resolved_ty(),
+                );
+            }
+        }
+        ln!(out, "  }}");
         ln!(out, "}}\n");
     }
 }
