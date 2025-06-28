@@ -328,6 +328,11 @@ impl<'src, 'tokens> TokenCursor<'src, 'tokens> {
     pub fn peek(&self) -> Token {
         Token((self.index + 1) as u32)
     }
+
+    #[inline]
+    pub fn prev(&self) -> Token {
+        Token(self.index.wrapping_sub(1) as u32)
+    }
 }
 
 impl<'src, 'tokens> Iterator for TokenCursor<'src, 'tokens> {

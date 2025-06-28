@@ -39,7 +39,7 @@ expr block {
     body: [stmt],
 };
 
-expr fn {
+expr func {
     name: ident,
     body: block,
     params: [ident],

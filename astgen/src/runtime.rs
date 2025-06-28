@@ -1,12 +1,42 @@
+#![allow(dead_code)] // may be used in output
+
+// This file contains the "dependencies" for the generated output.
+// They are placed here because they also require parts of the generated output to exist,
+// which is also why this prelude with placeholders exists.
+// Some things are here for no reason other than it seemed more convenient that way at
+// the time of writing.
+
 pub struct Ast {}
 pub struct AstBuilder {}
 pub struct IdentId {}
 pub struct StrId {}
 pub struct FloatId {}
 
+#[derive(Clone, Copy)]
+#[repr(C)]
+pub struct Spanned<T> {
+    inner: T,
+    pub span: Span,
+}
+
+impl<T> std::ops::Deref for Spanned<T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        &self.inner
+    }
+}
+
+#[derive(Clone, Copy)]
+pub struct Span {
+    pub start: u32,
+    pub end: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum NodeKind {
-    Root,
-    None,
+    Root = 1,
+    None = 255,
 }
 
 impl NodeKind {
@@ -158,6 +188,7 @@ impl IntoU56 for bool {
 }
 
 impl FromU56 for bool {
+    #[allow(unnecessary_transmutes)]
     fn from_u56(v: u56) -> Self {
         unsafe { core::mem::transmute(v.get() as u8) }
     }
@@ -390,46 +421,102 @@ struct Inline {
 }
 
 /// Marker for types which are transparent wrappers over [`Packed`].
-pub unsafe trait PackedAbi: Sealed + Sized + Copy {}
+pub unsafe trait PackedAbi: Sealed + Sized + Copy {
+    /// Check if `kind` matches `Self`'s kind.
+    unsafe fn check_kind(kind: NodeKind) -> bool;
+}
 
 /// Conversion traits to/from [`Packed`].
 pub trait PackedNode: PackedAbi {
-    fn from_packed(v: Packed) -> Self;
+    /// SAFETY:
+    /// - `Self` must be a transparent wrapper over `Packed`.
+    /// - `v` must have the same kind as `Self`.
+    unsafe fn from_packed(v: Packed) -> Self;
+
     fn into_packed(v: Self) -> Packed;
-    fn from_packed_slice(v: &[Packed]) -> &[Self];
+
+    /// SAFETY:
+    /// - All nodes in `v` must have the same kind as `Self`.
+    /// - `Self` must be a transparent wrapper over `Packed`.
+    unsafe fn from_packed_slice(v: &[Packed]) -> &[Self];
+
     fn into_packed_slice(v: &[Self]) -> &[Packed];
+
+    /// SAFETY:
+    /// - `Self` must be a transparent wrapper over `Packed`.
+    /// - `Spanned` is a repr(C) struct, meaning it has the
+    ///   same layout for the same `T`.
+    unsafe fn from_spanned_packed(v: Spanned<Packed>) -> Spanned<Self>;
+
+    fn into_spanned_packed(v: Spanned<Self>) -> Spanned<Packed>;
+
+    /// SAFETY:
+    /// - `Self` must be a transparent wrapper over `Packed`.
+    /// - All nodes in `v` must have the same kind as `Self`.
+    /// - `Spanned` is a repr(C) struct, meaning it has the
+    ///   same layout for the same `T`.
+    unsafe fn from_spanned_packed_slice(v: &[Spanned<Packed>]) -> &[Spanned<Self>];
+
+    fn into_spanned_packed_slice(v: &[Spanned<Self>]) -> &[Spanned<Packed>];
 }
 
 impl<T: PackedAbi> PackedNode for T {
-    fn from_packed(v: Packed) -> Self {
-        // SAFETY: `Self` is a transparent wrapper over `Packed`.
+    unsafe fn from_packed(v: Packed) -> Self {
+        debug_assert!(unsafe { T::check_kind(v.kind()) });
         unsafe { core::mem::transmute_copy(&v) }
     }
 
     fn into_packed(v: Self) -> Packed {
-        // SAFETY: `Self` is a transparent wrapper over `Packed`.
         unsafe { core::mem::transmute_copy(&v) }
     }
 
-    fn from_packed_slice(v: &[Packed]) -> &[Self] {
-        // SAFETY: `Self` is a transparent wrapper over `Packed`.
+    unsafe fn from_packed_slice(v: &[Packed]) -> &[Self] {
+        debug_assert!(v.iter().all(|v| unsafe { T::check_kind(v.kind()) }));
         unsafe { core::mem::transmute(v) }
     }
 
     fn into_packed_slice(v: &[Self]) -> &[Packed] {
-        // SAFETY: `Self` is a transparent wrapper over `Packed`.
+        unsafe { core::mem::transmute(v) }
+    }
+
+    unsafe fn from_spanned_packed(v: Spanned<Packed>) -> Spanned<Self> {
+        debug_assert!(unsafe { T::check_kind(v.kind()) });
+        unsafe { core::mem::transmute_copy(&v) }
+    }
+
+    fn into_spanned_packed(v: Spanned<Self>) -> Spanned<Packed> {
+        unsafe { core::mem::transmute_copy(&v) }
+    }
+
+    unsafe fn from_spanned_packed_slice(v: &[Spanned<Packed>]) -> &[Spanned<Self>] {
+        debug_assert!(v.iter().all(|v| unsafe { T::check_kind(v.kind()) }));
+        unsafe { core::mem::transmute(v) }
+    }
+
+    fn into_spanned_packed_slice(v: &[Spanned<Self>]) -> &[Spanned<Packed>] {
         unsafe { core::mem::transmute(v) }
     }
 }
 
-pub trait Pack {
-    type Parts<'a>;
+#[derive(Clone, Copy, Debug)]
+pub struct NodeCastError;
+impl std::fmt::Display for NodeCastError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "invalid cast between node types")
+    }
+}
+impl std::error::Error for NodeCastError {}
 
-    fn pack<'a>(parts: Self::Parts<'a>, ast: &mut AstBuilder) -> Self;
+pub trait Pack {
+    type Node;
+
+    fn pack(self, ast: &mut AstBuilder) -> Self::Node;
 }
 
-pub trait Unpack: Pack {
-    unsafe fn unpack<'a>(self, ast: &'a Ast) -> Self::Parts<'a>;
+pub trait Unpack {
+    type Node<'a>;
+
+    unsafe fn unpack<'a>(self, ast: &'a Ast) -> Self::Node<'a>;
 }
 
 #[derive(Clone, Copy)]
@@ -438,7 +525,11 @@ pub struct Opt<T>(Packed, PhantomData<T>);
 
 impl<T: Sealed> Sealed for Opt<T> {}
 /// SAFETY: `Opt` is a transparent wrapper over `Packed`.
-unsafe impl<T: PackedAbi> PackedAbi for Opt<T> {}
+unsafe impl<T: PackedAbi> PackedAbi for Opt<T> {
+    unsafe fn check_kind(kind: NodeKind) -> bool {
+        kind == NodeKind::None || unsafe { T::check_kind(kind) }
+    }
+}
 
 impl<T: PackedAbi> Opt<T> {
     #[inline]
@@ -466,6 +557,31 @@ impl<T: PackedAbi> Opt<T> {
         if self.is_none() {
             panic!("unwrapped an Opt::None value");
         }
-        T::from_packed(self.0)
+        unsafe { T::from_packed(self.0) }
+    }
+
+    #[inline]
+    pub unsafe fn unwrap_unchecked(&self) -> T {
+        debug_assert!(self.is_some());
+        unsafe { T::from_packed(self.0) }
+    }
+}
+
+impl<T: PackedAbi> From<Opt<T>> for Option<T> {
+    fn from(value: Opt<T>) -> Self {
+        if value.is_some() {
+            Some(unsafe { value.unwrap_unchecked() })
+        } else {
+            None
+        }
+    }
+}
+
+impl<T: PackedAbi> From<Option<T>> for Opt<T> {
+    fn from(value: Option<T>) -> Self {
+        match value {
+            Some(value) => Self::some(value),
+            None => Self::none(),
+        }
     }
 }

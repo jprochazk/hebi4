@@ -1,24 +1,18 @@
+use std::marker::PhantomData;
+
 use bumpalo::{Bump, collections::Vec};
 
 use crate::{
     ast::{
-        Ast, AstBuilder, Expr, ExprKind, Node, Stmt,
-        node::{self, expr, stmt},
+        self, Ast, AstBuilder, Expr, ExprKind, InfixOp, Opt, Pack, PackedNode, PrefixOp, Stmt,
+        spanned::*,
     },
+    error::Error,
+    span::{Span, Spanned},
     token::{Token, TokenCursor, TokenKind, Tokens},
 };
 
 type Result<T, E = Error> = std::result::Result<T, E>;
-
-#[derive(Clone, Debug)]
-pub struct Error {}
-
-impl std::error::Error for Error {}
-impl std::fmt::Display for Error {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        todo!("display error")
-    }
-}
 
 pub fn parse(tokens: &Tokens<'_>) -> Result<Ast> {
     let parser = Parser::new(tokens);
@@ -97,10 +91,36 @@ impl<'t, 'src> Parser<'t, 'src> {
         }
     }
 
-    #[inline]
-    fn pack<T: Node>(&mut self, node: T) -> T::NodeKind {
-        node.pack_into(&mut self.ast)
+    fn open<T: Pack>(&mut self) -> Marker<T> {
+        Marker {
+            start: self.cursor.span(self.cursor.current()).start,
+            ty: PhantomData,
+        }
     }
+
+    fn open_at<T: Pack>(&mut self, kind: TokenKind) -> Result<Marker<T>> {
+        let tok = self.must(kind)?;
+        Ok(Marker {
+            start: self.cursor.span(tok).start,
+            ty: PhantomData,
+        })
+    }
+
+    #[inline]
+    fn close<T: Pack>(&mut self, marker: Marker<T>, node: T) -> Spanned<T::Node> {
+        let tok = self.cursor.prev();
+        let span = Span {
+            start: marker.start,
+            end: self.cursor.span(tok).end,
+        };
+        Spanned::new(Pack::pack(node, &mut self.ast), span)
+    }
+}
+
+#[derive(Clone, Copy)]
+struct Marker<T> {
+    start: u32,
+    ty: PhantomData<T>,
 }
 
 fn temp<T>(buf: &Bump) -> Vec<'_, T> {
@@ -112,16 +132,21 @@ fn parse_root(mut p: Parser) -> Result<Ast> {
     let buf = Bump::new();
 
     let mut body = temp(&buf);
+
     while !p.end() {
         body.push(parse_stmt(&mut p, &buf)?);
     }
-
-    let root = p.pack(node::Root::new(body.as_slice()));
+    let root = PackedNode::into_packed(
+        Root {
+            body: body.as_slice(),
+        }
+        .pack(&mut p.ast),
+    );
 
     Ok(p.ast.build(root))
 }
 
-fn parse_stmt(p: &mut Parser, buf: &Bump) -> Result<Stmt> {
+fn parse_stmt(p: &mut Parser, buf: &Bump) -> Result<Spanned<Stmt>> {
     match p.current() {
         t![var] => parse_stmt_var(p, buf),
         t![fn] => parse_stmt_fn(p, buf),
@@ -133,29 +158,40 @@ fn parse_stmt(p: &mut Parser, buf: &Bump) -> Result<Stmt> {
 /// `"var" name:IDENT "=" value:EXPR`
 ///
 /// `p` must be at "var"
-fn parse_stmt_var(p: &mut Parser, buf: &Bump) -> Result<Stmt> {
-    assert!(p.eat(t![var]));
+fn parse_stmt_var(p: &mut Parser, buf: &Bump) -> Result<Spanned<Stmt>> {
+    let node = p.open_at(t![var])?;
 
     let name = parse_ident(p, buf)?;
     p.must(t![=])?;
     let value = parse_expr(p, buf)?;
 
-    Ok(p.pack(stmt::Var::new(name, value)))
+    Ok(p.close(node, Var { name, value }).map_into())
 }
 
 /// `"fn" name:IDENT "(" param:IDENT,* ")" "do" stmt* "end"`
-fn parse_stmt_fn(p: &mut Parser, buf: &Bump) -> Result<Stmt> {
-    assert!(p.eat(t![fn]));
+fn parse_stmt_fn(p: &mut Parser, buf: &Bump) -> Result<Spanned<Stmt>> {
+    let stmt_node = p.open();
+    let func_node = p.open_at(t![fn])?;
 
     let name = parse_ident(p, buf)?;
     let params = paren_list(p, buf, parse_ident)?;
-    let body = parse_expr_do(p, buf)?;
+    let body = parse_block(p, buf)?;
 
-    Ok(p.pack(stmt::Fn::new(name, body, params.as_slice())))
+    let func = p.close(
+        func_node,
+        Func {
+            name,
+            body,
+            params: params.as_slice(),
+        },
+    );
+    let inner = func.map_into();
+
+    Ok(p.close(stmt_node, StmtExpr { inner }).map_into())
 }
 
-fn parse_stmt_loop(p: &mut Parser, buf: &Bump) -> Result<Stmt> {
-    assert!(p.eat(t![loop]));
+fn parse_stmt_loop(p: &mut Parser, buf: &Bump) -> Result<Spanned<Stmt>> {
+    let node = p.open_at(t![loop])?;
 
     let mut body = temp(buf);
     while !p.end() && !p.at(t![end]) {
@@ -163,65 +199,75 @@ fn parse_stmt_loop(p: &mut Parser, buf: &Bump) -> Result<Stmt> {
     }
     p.must(t![end])?;
 
-    Ok(p.pack(stmt::Loop::new(body.as_slice())))
+    Ok(p.close(
+        node,
+        Loop {
+            body: body.as_slice(),
+        },
+    )
+    .map_into())
 }
 
-fn parse_stmt_expr(p: &mut Parser, buf: &Bump) -> Result<Stmt> {
+fn parse_stmt_expr(p: &mut Parser, buf: &Bump) -> Result<Spanned<Stmt>> {
+    let node = p.open();
+
     let inner = parse_expr_top_level(p, buf)?;
 
-    Ok(p.pack(stmt::Expr::new(inner)))
+    Ok(p.close(node, StmtExpr { inner }).map_into())
 }
 
-fn parse_ident(p: &mut Parser, _: &Bump) -> Result<node::Ident> {
+fn parse_ident(p: &mut Parser, _: &Bump) -> Result<Spanned<ast::Ident>> {
+    let node = p.open();
     let ident = p.must(t![ident])?;
     let lexeme = p.lexeme(ident);
-    Ok(p.ast.intern_ident(lexeme))
+    let id = p.ast.intern_ident(lexeme);
+    Ok(p.close(node, Ident { id }))
 }
 
-fn parse_expr_top_level(p: &mut Parser, buf: &Bump) -> Result<Expr> {
+fn parse_expr_top_level(p: &mut Parser, buf: &Bump) -> Result<Spanned<Expr>> {
     match p.current() {
         t![return] => parse_expr_return(p, buf),
         t![break] => parse_expr_break(p, buf),
         t![continue] => parse_expr_continue(p, buf),
         t![if] => parse_expr_if(p, buf),
-        t![do] => parse_expr_do(p, buf),
+        t![do] => parse_block(p, buf).map(|v| v.map_into()),
         t![fn] => parse_expr_fn(p, buf),
         _ => parse_expr_assign(p, buf),
     }
 }
 
-fn parse_expr_return(p: &mut Parser, buf: &Bump) -> Result<Expr> {
-    assert!(p.eat(t![return]));
+fn parse_expr_return(p: &mut Parser, buf: &Bump) -> Result<Spanned<Expr>> {
+    let node = p.open_at(t![return])?;
 
-    let value: node::Opt<Expr> = if can_begin_expr(p) {
-        node::Opt::some(parse_expr(p, buf)?)
+    let value: Spanned<Opt<Expr>> = if can_begin_expr(p) {
+        parse_expr(p, buf)?.map(Opt::some)
     } else {
-        node::Opt::none()
+        Spanned::new(Opt::none(), Span::empty())
     };
 
-    Ok(p.pack(expr::Return::new(value)))
+    Ok(p.close(node, Return { value }).map_into())
 }
 
-fn parse_expr_break(p: &mut Parser, buf: &Bump) -> Result<Expr> {
-    assert!(p.eat(t![break]));
+fn parse_expr_break(p: &mut Parser, _: &Bump) -> Result<Spanned<Expr>> {
+    let node = p.open_at(t![break])?;
 
-    Ok(p.pack(expr::Break::new()))
+    Ok(p.close(node, Break {}).map_into())
 }
 
-fn parse_expr_continue(p: &mut Parser, buf: &Bump) -> Result<Expr> {
-    assert!(p.eat(t![continue]));
+fn parse_expr_continue(p: &mut Parser, _: &Bump) -> Result<Spanned<Expr>> {
+    let node = p.open_at(t![continue])?;
 
-    Ok(p.pack(expr::Continue::new()))
+    Ok(p.close(node, Continue {}).map_into())
 }
 
-fn parse_expr_if(p: &mut Parser, buf: &Bump) -> Result<Expr> {
+fn parse_expr_if(p: &mut Parser, buf: &Bump) -> Result<Spanned<Expr>> {
     assert!(p.eat(t![if]));
 
     todo!("if expr")
 }
 
-fn parse_expr_do(p: &mut Parser, buf: &Bump) -> Result<Expr> {
-    assert!(p.eat(t![do]));
+fn parse_block(p: &mut Parser, buf: &Bump) -> Result<Spanned<ast::Block>> {
+    let node = p.open_at(t![do])?;
 
     let mut body = temp(buf);
     while !p.end() && !p.at(t![end]) {
@@ -229,23 +275,28 @@ fn parse_expr_do(p: &mut Parser, buf: &Bump) -> Result<Expr> {
     }
     p.must(t![end])?;
 
-    Ok(p.pack(expr::Do::new(body.as_slice())))
+    Ok(p.close(
+        node,
+        Block {
+            body: body.as_slice(),
+        },
+    ))
 }
 
-fn parse_expr_fn(p: &mut Parser, buf: &Bump) -> Result<Expr> {
+fn parse_expr_fn(p: &mut Parser, buf: &Bump) -> Result<Spanned<Expr>> {
     assert!(p.eat(t![fn]));
 
     todo!("fn expr")
 }
 
-fn parse_expr_assign(p: &mut Parser, buf: &Bump) -> Result<Expr> {
+fn parse_expr_assign(p: &mut Parser, buf: &Bump) -> Result<Spanned<Expr>> {
     let lhs = parse_expr(p, buf)?;
     let op = match p.current() {
         t![=] => None,
-        t![+=] => Some(expr::InfixOp::Add),
-        t![-=] => Some(expr::InfixOp::Sub),
-        t![*=] => Some(expr::InfixOp::Mul),
-        t![/=] => Some(expr::InfixOp::Div),
+        t![+=] => Some(InfixOp::Add),
+        t![-=] => Some(InfixOp::Sub),
+        t![*=] => Some(InfixOp::Mul),
+        t![/=] => Some(InfixOp::Div),
         _ => return Ok(lhs),
     };
     p.advance(); // eat op
@@ -253,14 +304,14 @@ fn parse_expr_assign(p: &mut Parser, buf: &Bump) -> Result<Expr> {
 
     use ExprKind as E;
     match lhs.kind() {
-        E::Index => todo!("index assignment"),
-        E::Field => todo!("field assignment"),
-        E::Use => todo!("variable assignment"),
+        E::GetIndex => todo!("index assignment"),
+        E::GetField => todo!("field assignment"),
+        E::GetVar => todo!("variable assignment"),
         _ => todo!("invalid assignment target error"),
     }
 }
 
-fn parse_expr(p: &mut Parser, buf: &Bump) -> Result<Expr> {
+fn parse_expr(p: &mut Parser, buf: &Bump) -> Result<Spanned<Expr>> {
     match p.current() {
         t![return] => parse_expr_return(p, buf),
         t![break] => parse_expr_break(p, buf),
@@ -269,14 +320,14 @@ fn parse_expr(p: &mut Parser, buf: &Bump) -> Result<Expr> {
     }
 }
 
-fn parse_expr_infix(p: &mut Parser, buf: &Bump) -> Result<Expr> {
+fn parse_expr_infix(p: &mut Parser, buf: &Bump) -> Result<Spanned<Expr>> {
     parse_expr_or(p, buf)
 }
 
-fn parse_binop<F, E>(p: &mut Parser, buf: &Bump, token_to_op: F, next: E) -> Result<Expr>
+fn parse_binop<F, E>(p: &mut Parser, buf: &Bump, token_to_op: F, next: E) -> Result<Spanned<Expr>>
 where
-    F: Fn(TokenKind) -> Option<expr::InfixOp>,
-    E: Fn(&mut Parser, &Bump) -> Result<Expr>,
+    F: Fn(TokenKind) -> Option<InfixOp>,
+    E: Fn(&mut Parser, &Bump) -> Result<Spanned<Expr>>,
 {
     let mut lhs = next(p, buf)?;
     while !p.end() {
@@ -286,7 +337,11 @@ where
         };
         p.advance(); // eat op
         let rhs = next(p, buf)?;
-        lhs = p.pack(expr::Infix::new(lhs, rhs, op));
+        lhs = Spanned::new(
+            Infix { lhs, rhs, op }.pack(&mut p.ast),
+            lhs.span.to(rhs.span),
+        )
+        .map_into();
     }
     Ok(lhs)
 }
@@ -300,109 +355,116 @@ macro_rules! token_map {
     };
 }
 
-fn parse_expr_or(p: &mut Parser, buf: &Bump) -> Result<Expr> {
+fn parse_expr_or(p: &mut Parser, buf: &Bump) -> Result<Spanned<Expr>> {
     let token_to_op = token_map! {
-        or => expr::InfixOp::Or,
+        or => InfixOp::Or,
     };
     let next = parse_expr_and;
     parse_binop(p, buf, token_to_op, next)
 }
 
-fn parse_expr_and(p: &mut Parser, buf: &Bump) -> Result<Expr> {
+fn parse_expr_and(p: &mut Parser, buf: &Bump) -> Result<Spanned<Expr>> {
     let token_to_op = token_map! {
-        and => expr::InfixOp::And,
+        and => InfixOp::And,
     };
     let next = parse_expr_eq;
     parse_binop(p, buf, token_to_op, next)
 }
 
-fn parse_expr_eq(p: &mut Parser, buf: &Bump) -> Result<Expr> {
+fn parse_expr_eq(p: &mut Parser, buf: &Bump) -> Result<Spanned<Expr>> {
     let token_to_op = token_map! {
-        == => expr::InfixOp::Eq,
-        != => expr::InfixOp::Ne,
+        == => InfixOp::Eq,
+        != => InfixOp::Ne,
     };
     let next = parse_expr_cmp;
     parse_binop(p, buf, token_to_op, next)
 }
 
-fn parse_expr_cmp(p: &mut Parser, buf: &Bump) -> Result<Expr> {
+fn parse_expr_cmp(p: &mut Parser, buf: &Bump) -> Result<Spanned<Expr>> {
     let token_to_op = token_map! {
-        > => expr::InfixOp::Gt,
-        >= => expr::InfixOp::Ge,
-        < => expr::InfixOp::Lt,
-        <= => expr::InfixOp::Le,
+        > => InfixOp::Gt,
+        >= => InfixOp::Ge,
+        < => InfixOp::Lt,
+        <= => InfixOp::Le,
     };
     let next = parse_expr_add;
     parse_binop(p, buf, token_to_op, next)
 }
 
-fn parse_expr_add(p: &mut Parser, buf: &Bump) -> Result<Expr> {
+fn parse_expr_add(p: &mut Parser, buf: &Bump) -> Result<Spanned<Expr>> {
     let token_to_op = token_map! {
-        + => expr::InfixOp::Add,
-        - => expr::InfixOp::Sub,
+        + => InfixOp::Add,
+        - => InfixOp::Sub,
     };
     let next = parse_expr_mul;
     parse_binop(p, buf, token_to_op, next)
 }
 
-fn parse_expr_mul(p: &mut Parser, buf: &Bump) -> Result<Expr> {
+fn parse_expr_mul(p: &mut Parser, buf: &Bump) -> Result<Spanned<Expr>> {
     let token_to_op = token_map! {
-        * => expr::InfixOp::Mul,
-        / => expr::InfixOp::Div,
+        * => InfixOp::Mul,
+        / => InfixOp::Div,
     };
     let next = parse_expr_prefix;
     parse_binop(p, buf, token_to_op, next)
 }
 
-fn parse_expr_prefix(p: &mut Parser, buf: &Bump) -> Result<Expr> {
+fn parse_expr_prefix(p: &mut Parser, buf: &Bump) -> Result<Spanned<Expr>> {
     let op = match p.current() {
-        t![-] => expr::PrefixOp::Minus,
-        t![not] => expr::PrefixOp::Minus,
+        t![-] => PrefixOp::Minus,
+        t![not] => PrefixOp::Minus,
         _ => return parse_expr_postfix(p, buf),
     };
+    let node = p.open();
     p.advance(); // eat op
     let rhs = parse_expr_prefix(p, buf)?;
-    Ok(p.pack(expr::Prefix::new(rhs, op)))
+    Ok(p.close(node, Prefix { rhs, op }).map_into())
 }
 
-fn parse_expr_postfix(p: &mut Parser, buf: &Bump) -> Result<Expr> {
+fn parse_expr_postfix(p: &mut Parser, buf: &Bump) -> Result<Spanned<Expr>> {
     let mut expr = parse_expr_primary(p, buf)?;
     while !p.end() {
         match p.current() {
-            t!["("] => expr = parse_expr_call(p, buf)?,
-            t!["{"] => expr = parse_expr_call_object(p, buf)?,
-            t!["["] => expr = parse_expr_index(p, buf)?,
-            t![.] => expr = parse_expr_field(p, buf)?,
+            t!["("] => expr = parse_expr_call(p, buf, expr)?,
+            t!["{"] => expr = parse_expr_call_object(p, buf, expr)?,
+            t!["["] => expr = parse_expr_index(p, buf, expr)?,
+            t![.] => expr = parse_expr_field(p, buf, expr)?,
             _ => break,
         }
     }
     Ok(expr)
 }
 
-fn parse_expr_call(p: &mut Parser, buf: &Bump) -> Result<Expr> {
+fn parse_expr_call(p: &mut Parser, buf: &Bump, parent: Spanned<Expr>) -> Result<Spanned<Expr>> {
     todo!("call expr")
 }
 
-fn parse_expr_call_object(p: &mut Parser, buf: &Bump) -> Result<Expr> {
+fn parse_expr_call_object(
+    p: &mut Parser,
+    buf: &Bump,
+    parent: Spanned<Expr>,
+) -> Result<Spanned<Expr>> {
     todo!("call object expr")
 }
 
-fn parse_expr_index(p: &mut Parser, buf: &Bump) -> Result<Expr> {
-    assert!(p.eat(t!["["]));
+fn parse_expr_index(p: &mut Parser, buf: &Bump, parent: Spanned<Expr>) -> Result<Spanned<Expr>> {
+    let node = p.open_at(t!["["])?;
+
     let key = parse_expr(p, buf)?;
     p.must(t!["]"])?;
 
-    Ok(p.pack(expr::Index::new(key)))
+    Ok(p.close(node, GetIndex { parent, key }).map_into())
 }
 
-fn parse_expr_field(p: &mut Parser, buf: &Bump) -> Result<Expr> {
-    assert!(p.eat(t![.]));
+fn parse_expr_field(p: &mut Parser, buf: &Bump, parent: Spanned<Expr>) -> Result<Spanned<Expr>> {
+    let node = p.open_at(t![.])?;
+
     let key = parse_ident(p, buf)?;
 
-    Ok(p.pack(expr::Field::new(key)))
+    Ok(p.close(node, GetField { parent, key }).map_into())
 }
 
-fn parse_expr_primary(p: &mut Parser, buf: &Bump) -> Result<Expr> {
+fn parse_expr_primary(p: &mut Parser, buf: &Bump) -> Result<Spanned<Expr>> {
     match p.current() {
         t!["["] => parse_expr_array(p, buf),
         t!["{"] => parse_expr_object(p, buf),
@@ -417,42 +479,49 @@ fn parse_expr_primary(p: &mut Parser, buf: &Bump) -> Result<Expr> {
     }
 }
 
-fn parse_expr_array(p: &mut Parser, buf: &Bump) -> Result<Expr> {
+fn parse_expr_array(p: &mut Parser, buf: &Bump) -> Result<Spanned<Expr>> {
     todo!("array expr")
 }
 
-fn parse_expr_object(p: &mut Parser, buf: &Bump) -> Result<Expr> {
+fn parse_expr_object(p: &mut Parser, buf: &Bump) -> Result<Spanned<Expr>> {
     todo!("object expr")
 }
 
-fn parse_expr_int(p: &mut Parser, buf: &Bump) -> Result<Expr> {
+fn parse_expr_int(p: &mut Parser, buf: &Bump) -> Result<Spanned<Expr>> {
+    let node = p.open();
+
     let token = p.must(t![int])?;
     let lexeme = p.lexeme(token);
-    let value = expr::Int::parse(lexeme).ok_or_else(|| todo!("int parse error"))?;
-    Ok(p.pack(value))
+    let value: u64 = lexeme.parse().map_err(|err| todo!("int parse error"))?;
+    if value > ast::u56::MAX.get() {
+        todo!("int overflow error")
+    }
+    let value = ast::u56::new(value);
+
+    Ok(p.close(node, Int { value }).map_into())
 }
 
-fn parse_expr_float(p: &mut Parser, buf: &Bump) -> Result<Expr> {
+fn parse_expr_float(p: &mut Parser, buf: &Bump) -> Result<Spanned<Expr>> {
     todo!("float expr")
 }
 
-fn parse_expr_bool(p: &mut Parser, buf: &Bump) -> Result<Expr> {
+fn parse_expr_bool(p: &mut Parser, buf: &Bump) -> Result<Spanned<Expr>> {
     todo!("bool expr")
 }
 
-fn parse_expr_str(p: &mut Parser, buf: &Bump) -> Result<Expr> {
+fn parse_expr_str(p: &mut Parser, buf: &Bump) -> Result<Spanned<Expr>> {
     todo!("str expr")
 }
 
-fn parse_expr_nil(p: &mut Parser, buf: &Bump) -> Result<Expr> {
+fn parse_expr_nil(p: &mut Parser, buf: &Bump) -> Result<Spanned<Expr>> {
     todo!("nil expr")
 }
 
-fn parse_expr_use(p: &mut Parser, buf: &Bump) -> Result<Expr> {
+fn parse_expr_use(p: &mut Parser, buf: &Bump) -> Result<Spanned<Expr>> {
     todo!("variable use expr")
 }
 
-fn parse_expr_group(p: &mut Parser, buf: &Bump) -> Result<Expr> {
+fn parse_expr_group(p: &mut Parser, buf: &Bump) -> Result<Spanned<Expr>> {
     todo!("group expr")
 }
 

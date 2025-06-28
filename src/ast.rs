@@ -1,11 +1,12 @@
 pub mod nodes;
 
+pub use nodes::*;
+
 use crate::{
     intern::{Interner, simple::SimpleInterner},
-    span::Span,
+    span::{Span, Spanned},
     token::Tokens,
 };
-use nodes::{Packed, u24, u56};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
@@ -51,6 +52,22 @@ macro_rules! roundtrip_u24_op {
     };
 }
 
+#[allow(non_camel_case_types)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct f64n(u64);
+
+impl f64n {
+    #[inline]
+    pub fn new(v: f64) -> Self {
+        Self(v.to_bits())
+    }
+
+    #[inline]
+    pub fn get(self) -> f64 {
+        f64::from_bits(self.0)
+    }
+}
+
 roundtrip_u24_op!(AssignOp);
 roundtrip_u24_op!(InfixOp);
 roundtrip_u24_op!(PrefixOp);
@@ -65,7 +82,7 @@ pub struct Ast {
     spans: Vec<Span>,
     strings: Interner<StrId>,
     idents: Interner<IdentId>,
-    floats: SimpleInterner<FloatId, f64>,
+    floats: SimpleInterner<FloatId, f64n>,
 }
 
 pub struct AstBuilder {
@@ -73,7 +90,7 @@ pub struct AstBuilder {
     spans: Vec<Span>,
     strings: Interner<StrId>,
     idents: Interner<IdentId>,
-    floats: SimpleInterner<FloatId, f64>,
+    floats: SimpleInterner<FloatId, f64n>,
 }
 
 impl AstBuilder {
@@ -108,8 +125,40 @@ impl AstBuilder {
         }
     }
 
-    fn append(&mut self, nodes: &[Packed]) -> u32 {
-        todo!()
+    pub(crate) fn intern_ident(&mut self, ident: &str) -> IdentId {
+        self.idents.intern(ident)
+    }
+
+    pub(crate) fn intern_str(&mut self, str: &str) -> StrId {
+        self.strings.intern(str)
+    }
+
+    pub(crate) fn intern_float(&mut self, v: f64) -> FloatId {
+        self.floats.intern(f64n::new(v))
+    }
+
+    fn append(&mut self, nodes: &[Spanned<Packed>]) -> u32 {
+        let index = self.nodes.len() as u32;
+
+        self.spans.reserve(nodes.len());
+        self.nodes.reserve(nodes.len());
+
+        let spans_mem = self.spans.spare_capacity_mut();
+        let nodes_mem = self.nodes.spare_capacity_mut();
+        for (i, node) in nodes.iter().enumerate() {
+            unsafe {
+                spans_mem.get_unchecked_mut(i).write(node.span);
+                nodes_mem.get_unchecked_mut(i).write(node.into_inner());
+            }
+        }
+
+        unsafe {
+            let new_len = self.nodes.len() + nodes.len();
+            self.spans.set_len(new_len);
+            self.nodes.set_len(new_len);
+        }
+
+        index
     }
 }
 

@@ -1,6 +1,7 @@
 use std::ops::Deref;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[repr(C)]
 pub struct Span {
     pub start: u32,
     pub end: u32,
@@ -87,21 +88,45 @@ impl std::fmt::Display for Span {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Copy)]
+#[repr(C)]
 pub struct Spanned<T> {
     inner: T,
     pub span: Span,
 }
 
 impl<T> Spanned<T> {
+    #[inline]
     pub fn new(inner: T, span: Span) -> Self {
         Self { inner, span }
+    }
+
+    #[inline]
+    pub fn into_inner(self) -> T {
+        self.inner
+    }
+
+    #[inline]
+    pub fn map<U>(self, f: impl FnOnce(T) -> U) -> Spanned<U> {
+        Spanned {
+            inner: f(self.inner),
+            span: self.span,
+        }
+    }
+
+    #[inline]
+    pub fn map_into<U: From<T>>(self) -> Spanned<U> {
+        Spanned {
+            inner: self.inner.into(),
+            span: self.span,
+        }
     }
 }
 
 impl<T> Deref for Spanned<T> {
     type Target = T;
 
+    #[inline]
     fn deref(&self) -> &Self::Target {
         &self.inner
     }
