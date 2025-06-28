@@ -6,7 +6,7 @@ pub mod error;
 mod intern;
 
 #[macro_use]
-pub mod token;
+mod token;
 
-pub mod ast;
-pub mod parser;
+mod ast;
+mod parser;
