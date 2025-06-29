@@ -5,9 +5,9 @@ use bumpalo::{Bump, collections::Vec};
 use crate::{
     ast::{
         self, Ast, AstBuilder, Expr, ExprKind, InfixOp, Opt, Pack, PackedNode, PrefixOp, Stmt,
-        spanned::*,
+        spanned::*, u56,
     },
-    error::Error,
+    error::{Error, error},
     span::{Span, Spanned},
     token::{Token, TokenCursor, TokenKind, Tokens},
 };
@@ -33,9 +33,14 @@ impl<'t, 'src> Parser<'t, 'src> {
     }
 
     #[inline]
-    fn current(&self) -> TokenKind {
+    fn kind(&self) -> TokenKind {
         let token = self.cursor.current();
         self.cursor.kind(token)
+    }
+
+    #[inline]
+    fn current(&self) -> Token {
+        self.cursor.current()
     }
 
     #[inline]
@@ -45,8 +50,13 @@ impl<'t, 'src> Parser<'t, 'src> {
     }
 
     #[inline]
-    fn lexeme(&self, token: Token) -> &'src str {
-        self.cursor.lexeme(token)
+    fn lexeme(&self) -> &'src str {
+        self.cursor.lexeme(self.cursor.current())
+    }
+
+    #[inline]
+    fn span(&self) -> Span {
+        self.cursor.span(self.cursor.current())
     }
 
     #[inline]
@@ -64,7 +74,7 @@ impl<'t, 'src> Parser<'t, 'src> {
     /// Does not advance.
     #[inline]
     fn at(&self, kind: TokenKind) -> bool {
-        self.current() == kind
+        self.kind() == kind
     }
 
     /// Iff current token is `kind` advances and returns `true`,
@@ -87,7 +97,15 @@ impl<'t, 'src> Parser<'t, 'src> {
         if self.eat(kind) {
             Ok(tok)
         } else {
-            todo!("error in `p.must`")
+            error(
+                format!(
+                    "expected '{}', found '{}'",
+                    kind.bare_lexeme(),
+                    self.cursor.lexeme(tok)
+                ),
+                self.cursor.span(tok),
+            )
+            .into()
         }
     }
 
@@ -146,7 +164,7 @@ fn parse_root(mut p: Parser) -> Result<Ast> {
 }
 
 fn parse_stmt(p: &mut Parser, buf: &Bump) -> Result<Spanned<Stmt>> {
-    match p.current() {
+    match p.kind() {
         t![var] => parse_stmt_var(p, buf),
         t![fn] => parse_stmt_fn(p, buf),
         t![loop] => parse_stmt_loop(p, buf),
@@ -217,14 +235,14 @@ fn parse_stmt_expr(p: &mut Parser, buf: &Bump) -> Result<Spanned<Stmt>> {
 
 fn parse_ident(p: &mut Parser, _: &Bump) -> Result<Spanned<ast::Ident>> {
     let node = p.open();
-    let ident = p.must(t![ident])?;
-    let lexeme = p.lexeme(ident);
+    let lexeme = p.lexeme();
+    p.must(t![ident])?;
     let id = p.ast.intern_ident(lexeme);
     Ok(p.close(node, Ident { id }))
 }
 
 fn parse_expr_top_level(p: &mut Parser, buf: &Bump) -> Result<Spanned<Expr>> {
-    match p.current() {
+    match p.kind() {
         t![return] => parse_expr_return(p, buf),
         t![break] => parse_expr_break(p, buf),
         t![continue] => parse_expr_continue(p, buf),
@@ -290,7 +308,7 @@ fn parse_expr_fn(p: &mut Parser, buf: &Bump) -> Result<Spanned<Expr>> {
 
 fn parse_expr_assign(p: &mut Parser, buf: &Bump) -> Result<Spanned<Expr>> {
     let lhs = parse_expr(p, buf)?;
-    let op = match p.current() {
+    let op = match p.kind() {
         t![=] => None,
         t![+=] => Some(InfixOp::Add),
         t![-=] => Some(InfixOp::Sub),
@@ -306,12 +324,12 @@ fn parse_expr_assign(p: &mut Parser, buf: &Bump) -> Result<Spanned<Expr>> {
         E::GetIndex => todo!("index assignment"),
         E::GetField => todo!("field assignment"),
         E::GetVar => todo!("variable assignment"),
-        _ => todo!("invalid assignment target error"),
+        _ => error("invalid assignment target", lhs.span).into(),
     }
 }
 
 fn parse_expr(p: &mut Parser, buf: &Bump) -> Result<Spanned<Expr>> {
-    match p.current() {
+    match p.kind() {
         t![return] => parse_expr_return(p, buf),
         t![break] => parse_expr_break(p, buf),
         t![continue] => parse_expr_continue(p, buf),
@@ -331,7 +349,7 @@ where
 {
     let mut lhs = next(p, buf)?;
     while !p.end() {
-        let op = match token_to_op(p.current()) {
+        let op = match token_to_op(p.kind()) {
             Some(op) => op,
             None => break,
         };
@@ -410,7 +428,7 @@ fn parse_expr_mul(p: &mut Parser, buf: &Bump) -> Result<Spanned<Expr>> {
 }
 
 fn parse_expr_prefix(p: &mut Parser, buf: &Bump) -> Result<Spanned<Expr>> {
-    let op = match p.current() {
+    let op = match p.kind() {
         t![-] => PrefixOp::Minus,
         t![not] => PrefixOp::Minus,
         _ => return parse_expr_postfix(p, buf),
@@ -424,7 +442,7 @@ fn parse_expr_prefix(p: &mut Parser, buf: &Bump) -> Result<Spanned<Expr>> {
 fn parse_expr_postfix(p: &mut Parser, buf: &Bump) -> Result<Spanned<Expr>> {
     let mut expr = parse_expr_primary(p, buf)?;
     while !p.end() {
-        match p.current() {
+        match p.kind() {
             t!["("] => expr = parse_expr_call(p, buf, expr)?,
             t!["{"] => expr = parse_expr_call_object(p, buf, expr)?,
             t!["["] => expr = parse_expr_index(p, buf, expr)?,
@@ -465,7 +483,7 @@ fn parse_expr_field(p: &mut Parser, buf: &Bump, parent: Spanned<Expr>) -> Result
 }
 
 fn parse_expr_primary(p: &mut Parser, buf: &Bump) -> Result<Spanned<Expr>> {
-    match p.current() {
+    match p.kind() {
         t!["["] => parse_expr_array(p, buf),
         t!["{"] => parse_expr_object(p, buf),
         t![int] => parse_expr_int(p, buf),
@@ -475,7 +493,7 @@ fn parse_expr_primary(p: &mut Parser, buf: &Bump) -> Result<Spanned<Expr>> {
         t![nil] => parse_expr_nil(p, buf),
         t![ident] => parse_expr_use(p, buf),
         t!["("] => parse_expr_group(p, buf),
-        _ => todo!("error when nothing matches"),
+        _ => error(format!("unexpected token {:?}", p.lexeme()), p.span()).into(),
     }
 }
 
@@ -490,13 +508,24 @@ fn parse_expr_object(p: &mut Parser, buf: &Bump) -> Result<Spanned<Expr>> {
 fn parse_expr_int(p: &mut Parser, buf: &Bump) -> Result<Spanned<Expr>> {
     let node = p.open();
 
-    let token = p.must(t![int])?;
-    let lexeme = p.lexeme(token);
-    let value: u64 = lexeme.parse().map_err(|err| todo!("int parse error"))?;
-    if value > ast::u56::MAX.get() {
-        todo!("int overflow error")
+    let lexeme = p.lexeme();
+    let span = p.span();
+    p.must(t![int])?;
+    let value: u64 = lexeme
+        .parse()
+        .map_err(|err| error(format!("failed to parse int: {err}"), span))?;
+    if value > u56::MAX.get() {
+        return error(
+            format!(
+                "int ({}) is larger than u56::MAX ({})",
+                value,
+                u56::MAX.get()
+            ),
+            span,
+        )
+        .into();
     }
-    let value = ast::u56::new(value);
+    let value = u56::new(value);
 
     Ok(p.close(node, Int { value }).map_into())
 }

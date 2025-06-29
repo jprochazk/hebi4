@@ -58,6 +58,12 @@ impl std::fmt::Display for Error {
     }
 }
 
+impl<T> From<Error> for Result<T, Error> {
+    fn from(value: Error) -> Self {
+        Err(value)
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct Location {
     line_num: usize,

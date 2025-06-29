@@ -1,7 +1,8 @@
 ---
 source: src/parser/tests.rs
-expression: parse(&tokens).unwrap()
+expression: snapshot
 ---
+OK
 Root(
     [
         StmtExpr(
@@ -13,6 +14,27 @@ Root(
                     [],
                 ),
                 [],
+            ),
+        ),
+        StmtExpr(
+            Func(
+                Ident(
+                    "test",
+                ),
+                Block(
+                    [],
+                ),
+                [
+                    Ident(
+                        "a",
+                    ),
+                    Ident(
+                        "b",
+                    ),
+                    Ident(
+                        "c",
+                    ),
+                ],
             ),
         ),
     ],

@@ -1,7 +1,8 @@
 ---
 source: src/parser/tests.rs
-expression: parse(&tokens).unwrap()
+expression: snapshot
 ---
+OK
 Root(
     [
         StmtExpr(

@@ -140,10 +140,7 @@ impl<'src> Iterator for Lexer<'src> {
 
     fn next(&mut self) -> Option<Self::Item> {
         let (kind, span) = self.inner.next()?;
-        let kind = match kind.unwrap_or_else(|_| TokenKind::Error) {
-            TokenKind::Tabs => TokenKind::Error,
-            kind => kind,
-        };
+        let kind = kind.unwrap_or_else(|_| TokenKind::Error);
         Some(RawToken {
             kind,
             span: span.into(),
@@ -191,55 +188,11 @@ fn span(src: &str, kind: TokenKind) -> Span {
 
 fn lexeme(src: &str, kind: TokenKind) -> &str {
     match kind {
-        TokenKind::Var => "var",
-        TokenKind::Fn => "fn",
-        TokenKind::Do => "do",
-        TokenKind::Loop => "loop",
-        TokenKind::End => "end",
-        TokenKind::Return => "return",
-        TokenKind::Break => "break",
-        TokenKind::Continue => "continue",
-        TokenKind::If => "if",
-        TokenKind::Else => "else",
-        TokenKind::ParenL => "(",
-        TokenKind::ParenR => ")",
-        TokenKind::BraceL => "{",
-        TokenKind::BraceR => "}",
-        TokenKind::BracketL => "[",
-        TokenKind::BracketR => "]",
-        TokenKind::Dot => ".",
-        TokenKind::Comma => ",",
-        TokenKind::Eq => "=",
-        TokenKind::PlusEq => "+=",
-        TokenKind::MinusEq => "-=",
-        TokenKind::StarEq => "*=",
-        TokenKind::SlashEq => "/=",
-        TokenKind::Or => "or",
-        TokenKind::And => "and",
-        TokenKind::EqEq => "==",
-        TokenKind::NotEq => "!=",
-        TokenKind::Gt => ">",
-        TokenKind::Ge => ">=",
-        TokenKind::Lt => "<",
-        TokenKind::Le => "<=",
-        TokenKind::Plus => "+",
-        TokenKind::Minus => "-",
-        TokenKind::Star => "*",
-        TokenKind::Slash => "/",
-        TokenKind::Not => "not",
-        TokenKind::True => "true",
-        TokenKind::False => "false",
-        TokenKind::Nil => "nil",
-
         kind @ (TokenKind::Ident | TokenKind::Integer | TokenKind::Float | TokenKind::String) => {
             &src[tokenize_one(src, kind).span]
         }
-        TokenKind::Comment
-        | TokenKind::Shebang
-        | TokenKind::Tabs
-        | TokenKind::Whitespace
-        | TokenKind::Error
-        | TokenKind::Eof => "",
+
+        kind => kind.bare_lexeme(),
     }
 }
 
@@ -464,6 +417,63 @@ pub enum TokenKind {
 
     Error,
     Eof,
+}
+
+impl TokenKind {
+    pub fn bare_lexeme(self) -> &'static str {
+        match self {
+            TokenKind::Var => "var",
+            TokenKind::Fn => "fn",
+            TokenKind::Do => "do",
+            TokenKind::Loop => "loop",
+            TokenKind::End => "end",
+            TokenKind::Return => "return",
+            TokenKind::Break => "break",
+            TokenKind::Continue => "continue",
+            TokenKind::If => "if",
+            TokenKind::Else => "else",
+            TokenKind::ParenL => "(",
+            TokenKind::ParenR => ")",
+            TokenKind::BraceL => "{",
+            TokenKind::BraceR => "}",
+            TokenKind::BracketL => "[",
+            TokenKind::BracketR => "]",
+            TokenKind::Dot => ".",
+            TokenKind::Comma => ",",
+            TokenKind::Eq => "=",
+            TokenKind::PlusEq => "+=",
+            TokenKind::MinusEq => "-=",
+            TokenKind::StarEq => "*=",
+            TokenKind::SlashEq => "/=",
+            TokenKind::Or => "or",
+            TokenKind::And => "and",
+            TokenKind::EqEq => "==",
+            TokenKind::NotEq => "!=",
+            TokenKind::Gt => ">",
+            TokenKind::Ge => ">=",
+            TokenKind::Lt => "<",
+            TokenKind::Le => "<=",
+            TokenKind::Plus => "+",
+            TokenKind::Minus => "-",
+            TokenKind::Star => "*",
+            TokenKind::Slash => "/",
+            TokenKind::Not => "not",
+            TokenKind::True => "true",
+            TokenKind::False => "false",
+            TokenKind::Nil => "nil",
+
+            TokenKind::Tabs => "\t",
+            TokenKind::Whitespace => "<space>",
+            TokenKind::Comment => "<comment>",
+            TokenKind::Shebang => "<shebang>",
+            TokenKind::Ident => "<ident>",
+            TokenKind::Integer => "<int>",
+            TokenKind::Float => "<float>",
+            TokenKind::String => "<string>",
+            TokenKind::Error => "<error>",
+            TokenKind::Eof => "<eof>",
+        }
+    }
 }
 
 #[cfg(test)]
