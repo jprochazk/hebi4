@@ -188,9 +188,11 @@ fn span(src: &str, kind: TokenKind) -> Span {
 
 fn lexeme(src: &str, kind: TokenKind) -> &str {
     match kind {
-        kind @ (TokenKind::Ident | TokenKind::Integer | TokenKind::Float | TokenKind::String) => {
-            &src[tokenize_one(src, kind).span]
-        }
+        kind @ (TokenKind::Error
+        | TokenKind::Ident
+        | TokenKind::Integer
+        | TokenKind::Float
+        | TokenKind::String) => &src[tokenize_one(src, kind).span],
 
         kind => kind.bare_lexeme(),
     }
@@ -410,9 +412,9 @@ pub enum TokenKind {
     #[regex(r"[ \r\n\f]+", logos::skip)]
     Whitespace,
 
-    #[regex(r"#[^\\n]*", logos::skip)]
+    #[regex(r"#[^\n]*", logos::skip)]
     Comment,
-    #[regex(r"#![^\\n]*", logos::skip)]
+    #[regex(r"#![^\n]*", logos::skip)]
     Shebang,
 
     Error,
@@ -461,8 +463,8 @@ impl TokenKind {
             TokenKind::True => "true",
             TokenKind::False => "false",
             TokenKind::Nil => "nil",
-
             TokenKind::Tabs => "\t",
+
             TokenKind::Whitespace => "<space>",
             TokenKind::Comment => "<comment>",
             TokenKind::Shebang => "<shebang>",

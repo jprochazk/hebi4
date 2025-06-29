@@ -4,12 +4,14 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-insta = { version = "1.43.1" }
 logos = "0.15.0"
-globdir = { path = "./globdir" }
 hashbrown = "0.15.4"
 rustc-hash = "2.1.1"
 bumpalo = { version = "3.18.1", features = ["collections", "std"] }
 
+[dev-dependencies]
+uitest = { path = "./uitest" }
+insta = { version = "1.43.1" }
+
 [workspace]
-members = ["astgen", "globdir"]
+members = ["astgen", "uitest"]

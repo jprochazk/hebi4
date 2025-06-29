@@ -1,0 +1,15 @@
+---
+source: src/token/tests.rs
+expression: tokenize(&input)
+---
+[
+    Error("$", 11..12),
+    Error("@", 13..14),
+    Error("~", 15..16),
+    Error("!", 17..18),
+    Error("&", 19..20),
+    Error("^", 21..22),
+    Error("\\", 23..24),
+    Error("|", 25..26),
+    Error("'", 27..28),
+]

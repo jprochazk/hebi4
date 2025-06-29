@@ -6,7 +6,7 @@ use std::fmt::Write as _;
 use std::str::FromStr as _;
 
 #[proc_macro]
-pub fn globdir(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
+pub fn uitest(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let input: TokenStream = input.into();
     match try_globdir(input.clone()) {
         Ok(token_stream) => token_stream.into(),
@@ -20,7 +20,7 @@ pub fn globdir(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
 
 fn invalid_arguments() -> Error {
     Error {
-        message: "invalid arguments, expected: (filename, fn)".into(),
+        message: "invalid arguments, expected: (filename, filter, fn)".into(),
         span: Span::call_site(),
     }
 }
@@ -28,6 +28,8 @@ fn invalid_arguments() -> Error {
 fn try_globdir(input: TokenStream) -> Result<TokenStream> {
     let mut input = input.into_iter();
     let pattern = parse_str_literal(&mut input)?;
+    expect_comma(&mut input)?;
+    let filter = parse_str_literal(&mut input)?;
     expect_comma(&mut input)?;
     // just assume the remainder is a callable thing.
     let fn_thing = input.collect::<TokenStream>();
@@ -49,6 +51,19 @@ fn try_globdir(input: TokenStream) -> Result<TokenStream> {
         glob::glob(&resolved_pattern).map_err(|err| error(err.to_string(), Span::call_site()))?
     {
         let path = path.map_err(|err| error(err.to_string(), Span::call_site()))?;
+        let contents = std::fs::read_to_string(&path)
+            .map_err(|err| error(err.to_string(), Span::call_site()))?;
+
+        // filter files
+        if let Some(line) = contents.lines().next()
+            && let Some(line) = line.strip_prefix("#")
+        {
+            let line = line.trim();
+            if !line.contains(filter.as_str()) {
+                continue;
+            }
+        }
+
         write!(
             &mut output,
             "#[test] fn {stem}() {{ let __callable: fn(&str) -> () = ({fn_thing}); __callable({path:?}); }}",
