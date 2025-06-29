@@ -123,6 +123,7 @@ struct Marker<T> {
     ty: PhantomData<T>,
 }
 
+/// Allocate a vec with some small initial capacity in `buf`
 fn temp<T>(buf: &Bump) -> Vec<'_, T> {
     // *shrug*
     Vec::with_capacity_in(16, buf)
@@ -132,16 +133,14 @@ fn parse_root(mut p: Parser) -> Result<Ast> {
     let buf = Bump::new();
 
     let mut body = temp(&buf);
-
     while !p.end() {
         body.push(parse_stmt(&mut p, &buf)?);
     }
-    let root = PackedNode::into_packed(
-        Root {
-            body: body.as_slice(),
-        }
-        .pack(&mut p.ast),
-    );
+
+    let root = Root {
+        body: body.as_slice(),
+    }
+    .pack(&mut p.ast);
 
     Ok(p.ast.build(root))
 }
@@ -324,6 +323,7 @@ fn parse_expr_infix(p: &mut Parser, buf: &Bump) -> Result<Spanned<Expr>> {
     parse_expr_or(p, buf)
 }
 
+#[inline]
 fn parse_binop<F, E>(p: &mut Parser, buf: &Bump, token_to_op: F, next: E) -> Result<Spanned<Expr>>
 where
     F: Fn(TokenKind) -> Option<InfixOp>,
@@ -525,6 +525,7 @@ fn parse_expr_group(p: &mut Parser, buf: &Bump) -> Result<Spanned<Expr>> {
     todo!("group expr")
 }
 
+#[inline]
 fn paren_list<'bump, F, T>(p: &mut Parser, buf: &'bump Bump, f: F) -> Result<Vec<'bump, T>>
 where
     F: Fn(&mut Parser, &Bump) -> Result<T>,
@@ -541,6 +542,10 @@ where
     Ok(out)
 }
 
+#[inline]
 fn can_begin_expr(p: &mut Parser) -> bool {
     todo!("can begin expr check")
 }
+
+#[cfg(test)]
+mod tests;

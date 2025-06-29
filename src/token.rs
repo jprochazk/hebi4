@@ -465,3 +465,6 @@ pub enum TokenKind {
     Error,
     Eof,
 }
+
+#[cfg(test)]
+mod tests;

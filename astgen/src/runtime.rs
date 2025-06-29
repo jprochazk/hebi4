@@ -45,6 +45,34 @@ impl NodeKind {
     }
 }
 
+struct Root(Packed);
+struct Stmt(Packed);
+struct Expr(Packed);
+
+impl TryFrom<Packed> for Root {
+    type Error = ();
+
+    fn try_from(value: Packed) -> Result<Self, Self::Error> {
+        todo!()
+    }
+}
+
+impl TryFrom<Packed> for Stmt {
+    type Error = ();
+
+    fn try_from(value: Packed) -> Result<Self, Self::Error> {
+        todo!()
+    }
+}
+
+impl TryFrom<Packed> for Expr {
+    type Error = ();
+
+    fn try_from(value: Packed) -> Result<Self, Self::Error> {
+        todo!()
+    }
+}
+
 // code before this marker is not included in the generated output
 //file-start
 
@@ -54,6 +82,22 @@ mod private {
 use private::Sealed;
 
 use std::marker::PhantomData;
+
+trait DebugWithAstExt {
+    fn debug(self, ast: &Ast) -> impl std::fmt::Debug + '_;
+}
+
+impl DebugWithAstExt for f32 {
+    fn debug(self, _: &Ast) -> impl std::fmt::Debug + '_ {
+        self
+    }
+}
+
+impl DebugWithAstExt for bool {
+    fn debug(self, _: &Ast) -> impl std::fmt::Debug + '_ {
+        self
+    }
+}
 
 #[allow(non_camel_case_types)]
 #[derive(Clone, Copy, Hash)]
@@ -107,6 +151,18 @@ impl Ord for u24 {
     #[inline]
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         Ord::cmp(&self.get(), &other.get())
+    }
+}
+
+impl std::fmt::Debug for u24 {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        <u32 as std::fmt::Debug>::fmt(&self.get(), f)
+    }
+}
+
+impl u24 {
+    pub fn debug(self, _: &Ast) -> impl std::fmt::Debug + '_ {
+        self
     }
 }
 
@@ -170,6 +226,18 @@ impl Ord for u56 {
     #[inline]
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         Ord::cmp(&self.get(), &other.get())
+    }
+}
+
+impl std::fmt::Debug for u56 {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        <u64 as std::fmt::Debug>::fmt(&self.get(), f)
+    }
+}
+
+impl u56 {
+    pub fn debug(self, _: &Ast) -> impl std::fmt::Debug + '_ {
+        self
     }
 }
 
@@ -277,7 +345,7 @@ impl Packed {
                     index,
                 },
             },
-            debug_tag: DebugPackedReprTag::FixedArity_Inline,
+            debug_tag: DebugPackedReprTag::VariableArity,
         }
     }
 
@@ -291,7 +359,7 @@ impl Packed {
                     index,
                 },
             },
-            debug_tag: DebugPackedReprTag::FixedArity_Inline,
+            debug_tag: DebugPackedReprTag::MixedArity,
         }
     }
 
@@ -304,7 +372,7 @@ impl Packed {
                     value,
                 },
             },
-            debug_tag: DebugPackedReprTag::FixedArity_Inline,
+            debug_tag: DebugPackedReprTag::Inline,
         }
     }
 
@@ -423,7 +491,7 @@ struct Inline {
 /// Marker for types which are transparent wrappers over [`Packed`].
 pub unsafe trait PackedAbi: Sealed + Sized + Copy {
     /// Check if `kind` matches `Self`'s kind.
-    unsafe fn check_kind(kind: NodeKind) -> bool;
+    fn check_kind(kind: NodeKind) -> bool;
 }
 
 /// Conversion traits to/from [`Packed`].
@@ -462,7 +530,7 @@ pub trait PackedNode: PackedAbi {
 
 impl<T: PackedAbi> PackedNode for T {
     unsafe fn from_packed(v: Packed) -> Self {
-        debug_assert!(unsafe { T::check_kind(v.kind()) });
+        debug_assert!(T::check_kind(v.kind()));
         unsafe { core::mem::transmute_copy(&v) }
     }
 
@@ -471,7 +539,7 @@ impl<T: PackedAbi> PackedNode for T {
     }
 
     unsafe fn from_packed_slice(v: &[Packed]) -> &[Self] {
-        debug_assert!(v.iter().all(|v| unsafe { T::check_kind(v.kind()) }));
+        debug_assert!(v.iter().all(|v| T::check_kind(v.kind())));
         unsafe { core::mem::transmute(v) }
     }
 
@@ -480,7 +548,7 @@ impl<T: PackedAbi> PackedNode for T {
     }
 
     unsafe fn from_spanned_packed(v: Spanned<Packed>) -> Spanned<Self> {
-        debug_assert!(unsafe { T::check_kind(v.kind()) });
+        debug_assert!(T::check_kind(v.kind()));
         unsafe { core::mem::transmute_copy(&v) }
     }
 
@@ -489,7 +557,7 @@ impl<T: PackedAbi> PackedNode for T {
     }
 
     unsafe fn from_spanned_packed_slice(v: &[Spanned<Packed>]) -> &[Spanned<Self>] {
-        debug_assert!(v.iter().all(|v| unsafe { T::check_kind(v.kind()) }));
+        debug_assert!(v.iter().all(|v| T::check_kind(v.kind())));
         unsafe { core::mem::transmute(v) }
     }
 
@@ -516,6 +584,11 @@ pub trait Pack {
 pub trait Unpack {
     type Node<'a>;
 
+    /// # Safety
+    /// - The node and all its subnodes must exist within the given `ast`.
+    ///
+    /// The only way to ensure this is to use [`Pack`] with [`AstBuilder`],
+    /// and then [`AstBuilder::build`].
     unsafe fn unpack<'a>(self, ast: &'a Ast) -> Self::Node<'a>;
 }
 
@@ -526,8 +599,8 @@ pub struct Opt<T>(Packed, PhantomData<T>);
 impl<T: Sealed> Sealed for Opt<T> {}
 /// SAFETY: `Opt` is a transparent wrapper over `Packed`.
 unsafe impl<T: PackedAbi> PackedAbi for Opt<T> {
-    unsafe fn check_kind(kind: NodeKind) -> bool {
-        kind == NodeKind::None || unsafe { T::check_kind(kind) }
+    fn check_kind(kind: NodeKind) -> bool {
+        kind == NodeKind::None || T::check_kind(kind)
     }
 }
 
@@ -565,6 +638,11 @@ impl<T: PackedAbi> Opt<T> {
         debug_assert!(self.is_some());
         unsafe { T::from_packed(self.0) }
     }
+
+    #[inline]
+    pub fn into_option(self) -> Option<T> {
+        self.into()
+    }
 }
 
 impl<T: PackedAbi> From<Opt<T>> for Option<T> {
@@ -583,5 +661,13 @@ impl<T: PackedAbi> From<Option<T>> for Opt<T> {
             Some(value) => Self::some(value),
             None => Self::none(),
         }
+    }
+}
+
+struct DebugIter<T>(T);
+
+impl<T: Clone + Iterator<Item = I>, I: std::fmt::Debug> std::fmt::Debug for DebugIter<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_list().entries(self.0.clone()).finish()
     }
 }

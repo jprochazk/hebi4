@@ -18,6 +18,12 @@ pub enum AssignOp {
     Div,
 }
 
+impl AssignOp {
+    pub fn debug(self, _: &Ast) -> impl std::fmt::Debug + '_ {
+        self
+    }
+}
+
 #[rustfmt::skip]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
@@ -29,11 +35,23 @@ pub enum InfixOp {
     Mul, Div
 }
 
+impl InfixOp {
+    pub fn debug(self, _: &Ast) -> impl std::fmt::Debug + '_ {
+        self
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum PrefixOp {
     Minus,
     Not,
+}
+
+impl PrefixOp {
+    pub fn debug(self, _: &Ast) -> impl std::fmt::Debug + '_ {
+        self
+    }
 }
 
 macro_rules! roundtrip_u24_op {
@@ -68,6 +86,12 @@ impl f64n {
     }
 }
 
+impl f64n {
+    pub fn debug(self, _: &Ast) -> impl std::fmt::Debug + '_ {
+        self
+    }
+}
+
 roundtrip_u24_op!(AssignOp);
 roundtrip_u24_op!(InfixOp);
 roundtrip_u24_op!(PrefixOp);
@@ -76,8 +100,26 @@ declare_intern_id!(pub StrId);
 declare_intern_id!(pub IdentId);
 declare_intern_id!(pub FloatId);
 
+impl StrId {
+    pub fn debug(self, ast: &Ast) -> impl std::fmt::Debug + '_ {
+        ast.strings.get(self).unwrap()
+    }
+}
+
+impl IdentId {
+    pub fn debug(self, ast: &Ast) -> impl std::fmt::Debug + '_ {
+        ast.idents.get(self).unwrap()
+    }
+}
+
+impl FloatId {
+    pub fn debug(self, ast: &Ast) -> impl std::fmt::Debug + '_ {
+        ast.floats.get(self).unwrap()
+    }
+}
+
 pub struct Ast {
-    root: Packed,
+    root: Root,
     nodes: Vec<Packed>,
     spans: Vec<Span>,
     strings: Interner<StrId>,
@@ -107,7 +149,7 @@ impl AstBuilder {
         }
     }
 
-    pub(crate) fn build(self, root: Packed) -> Ast {
+    pub(crate) fn build(self, root: Root) -> Ast {
         let Self {
             nodes,
             spans,
@@ -115,6 +157,7 @@ impl AstBuilder {
             idents,
             floats,
         } = self;
+
         Ast {
             root,
             nodes,
@@ -183,3 +226,9 @@ macro_rules! roundtrip_u56_id {
 roundtrip_u56_id!(StrId);
 roundtrip_u56_id!(IdentId);
 roundtrip_u56_id!(FloatId);
+
+impl std::fmt::Debug for Ast {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.root.debug(self).fmt(f)
+    }
+}

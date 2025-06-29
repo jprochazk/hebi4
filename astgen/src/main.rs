@@ -108,6 +108,14 @@ impl Node<'_> {
             NodeKind::InlineValue { .. } => false,
         }
     }
+
+    #[inline]
+    fn tail(&self) -> Option<&Field<'_>> {
+        match &self.kind {
+            NodeKind::VariableArity { tail } | NodeKind::MixedArity { tail, .. } => Some(tail),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -352,7 +360,7 @@ impl<'a> Field<'a> {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 struct Inline<'a> {
     name: &'a str,
     ty: &'a str,
@@ -687,6 +695,7 @@ fn emit_nodes(nodes: Nodes<'_>) -> String {
     emit_unpack_impls(&nodes, &mut out);
     emit_span_getters(&nodes, &mut out);
     emit_visitor(&nodes, &mut out);
+    emit_debug_impls(&nodes, &mut out);
 
     out
 }
@@ -820,13 +829,44 @@ fn emit_packed_wrappers(nodes: &Nodes, out: &mut String) {
             /// SAFETY: `self` is a transparent wrapper over `Packed`.
             unsafe impl PackedAbi for {name} {{
                 #[inline]
-                unsafe fn check_kind(kind: NodeKind) -> bool {{
+                fn check_kind(kind: NodeKind) -> bool {{
                     kind >= NodeKind::{range_start} && kind <= NodeKind::{range_end}
                 }}
-            }}\n
+            }}
+
+            impl TryFrom<Packed> for {name} {{
+                type Error = ();
+
+                #[inline]
+                fn try_from(v: Packed) -> Result<Self, Self::Error> {{
+                    if <Self as PackedAbi>::check_kind(v.kind()) {{
+                        Ok(unsafe {{ PackedNode::from_packed(v) }})
+                    }} else {{
+                        Err(())
+                    }}
+                }}
+            }}
             "
         );
     }
+
+    ml!(
+        out,
+        "
+        impl TryFrom<Packed> for Root {{
+            type Error = ();
+
+            #[inline]
+            fn try_from(v: Packed) -> Result<Self, Self::Error> {{
+                if <Self as PackedAbi>::check_kind(v.kind()) {{
+                    Ok(unsafe {{ PackedNode::from_packed(v) }})
+                }} else {{
+                    Err(())
+                }}
+            }}
+        }}
+        "
+    );
 
     for node in nodes.in_order() {
         let name = AsPascalCase(node.name);
@@ -836,7 +876,7 @@ fn emit_packed_wrappers(nodes: &Nodes, out: &mut String) {
             /// SAFETY: `self` is a transparent wrapper over `Packed`.
             unsafe impl PackedAbi for {name} {{
                 #[inline]
-                unsafe fn check_kind(kind: NodeKind) -> bool {{
+                fn check_kind(kind: NodeKind) -> bool {{
                     kind == NodeKind::{name}
                 }}
             }}\n
@@ -1437,6 +1477,47 @@ fn emit_visitor(nodes: &Nodes, out: &mut String) {
     ln!(out, "type Error;");
     ln!(out);
 
+    fn visit_field(field: &Field<'_>) -> String {
+        let unpack = if !["expr", "stmt"].contains(&field.ty) {
+            format!("unsafe {{ node.unpack(ast) }}")
+        } else {
+            String::new()
+        };
+
+        if field.opt {
+            format!(
+                "if let Some(node) = parts.{name}.into() {{ self.visit_{ty}(ast, node, {unpack})?; }}",
+                ty = field.ty,
+                name = field.name,
+            )
+        } else if field.tail {
+            format!(
+                "for node in parts.{name} {{ self.visit_{ty}(ast, *node, {unpack})?; }}",
+                ty = field.ty,
+                name = field.name,
+            )
+        } else {
+            format!(
+                "let node = parts.{name}; self.visit_{ty}(ast, node, {unpack})?;",
+                ty = field.ty,
+                name = field.name,
+            )
+        }
+    }
+
+    ml!(
+        out,
+        "
+        fn visit_root(&mut self, ast: &Ast, node: Root) -> std::result::Result<(), Self::Error> {{
+            let parts = unsafe {{ node.unpack(ast) }};
+            {body}
+
+            Ok(())
+        }}\n
+        ",
+        body = visit_field(nodes.root().tail().unwrap())
+    );
+
     for (category, members) in [("stmt", &nodes.stmts), ("expr", &nodes.exprs)] {
         let category_pascal = AsPascalCase(category);
         ml!(
@@ -1447,28 +1528,6 @@ fn emit_visitor(nodes: &Nodes, out: &mut String) {
             }}\n
             "
         );
-
-        fn visit_field(field: &Field<'_>) -> String {
-            if field.opt {
-                format!(
-                    "if let Some(node) = parts.{name}.into() {{ self.visit_{ty}(ast, node)?; }}",
-                    ty = field.ty,
-                    name = field.name,
-                )
-            } else if field.tail {
-                format!(
-                    "for node in parts.{name} {{ self.visit_{ty}(ast, *node)?; }}",
-                    ty = field.ty,
-                    name = field.name,
-                )
-            } else {
-                format!(
-                    "self.visit_{ty}(ast, parts.{name})?;",
-                    ty = field.ty,
-                    name = field.name,
-                )
-            }
-        }
 
         for node in members.iter().map(|&id| &nodes.flat[id.0]) {
             let name = node.name;
@@ -1483,11 +1542,11 @@ fn emit_visitor(nodes: &Nodes, out: &mut String) {
                     .join('\n')
                     .to_string(),
                 NodeKind::VariableArity { tail } => {
-                    format!(
-                        "for node in parts.{name} {{ self.visit_{ty}(ast, *node)?; }}",
-                        ty = tail.ty,
-                        name = tail.name,
-                    )
+                    if !nodes.category(tail.ty).is_data() {
+                        visit_field(tail)
+                    } else {
+                        String::new()
+                    }
                 }
                 NodeKind::MixedArity { fields, tail } => {
                     let fields = fields
@@ -1504,6 +1563,7 @@ fn emit_visitor(nodes: &Nodes, out: &mut String) {
                 }
                 NodeKind::InlineValue { inline: _ } => String::new(),
             };
+
             ml!(
                 out,
                 "
@@ -1524,4 +1584,157 @@ fn emit_visitor(nodes: &Nodes, out: &mut String) {
     }
 
     ln!(out, "}}\n");
+}
+
+fn emit_debug_impls(nodes: &Nodes, out: &mut String) {
+    for (category, members) in [("stmt", &nodes.stmts), ("expr", &nodes.exprs)] {
+        let category_pascal = AsPascalCase(category);
+        let kinds = members.iter().map(|&id| &nodes.flat[id.0])
+            .map(|Node { name, .. }| {
+                let name_pascal = AsPascalCase(name);
+                format!("{category_pascal}Kind::{name_pascal} => {name_pascal}WithAst(ast, node.try_into().unwrap()).fmt(f)?,")
+            })
+            .join('\n');
+        ml!(
+            out,
+            "
+            struct {category_pascal}WithAst<'a>(&'a Ast, {category_pascal});
+
+            impl std::fmt::Debug for {category_pascal}WithAst<'_> {{
+                fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {{
+                    let ast = self.0;
+                    let node = self.1;
+
+                    match node.kind() {{
+                        {kinds}
+                    }}
+
+                    Ok(())
+                }}
+            }}
+
+            impl {category_pascal} {{
+                pub fn debug<'a>(self, ast: &'a Ast) -> impl std::fmt::Debug + 'a {{
+                    {category_pascal}WithAst(ast, self)
+                }}
+            }}\n
+            "
+        );
+    }
+
+    for node in nodes.in_order() {
+        let name = node.name;
+        let name_pascal = AsPascalCase(name);
+        let parts = match &node.kind {
+            NodeKind::Empty => format!("write!(f, \"{name_pascal}\")?;"),
+            NodeKind::FixedArity { fields, inline } => {
+                format!(
+                    "
+                    f.debug_tuple(\"{name_pascal}\")
+                        {inline}
+                        {fields}
+                        .finish()?;
+                    ",
+                    fields = fields
+                        .iter()
+                        .map(|Field { name, opt, .. }| {
+                            if *opt {
+                                format!(".field(&parts.{name}.into_option().map(|v| v.debug(ast)))")
+                            } else {
+                                format!(".field(&parts.{name}.debug(ast))")
+                            }
+                        })
+                        .join('\n'),
+                    inline = inline
+                        .as_ref()
+                        .map(|Inline { name, .. }| format!(".field(&parts.{name}.debug(ast))"))
+                        .unwrap_or_default()
+                )
+            }
+            NodeKind::VariableArity {
+                tail: Field {
+                    name: tail_name, ..
+                },
+            } => {
+                format!(
+                    "
+                    f.debug_tuple(\"{name_pascal}\")
+                        {tail}
+                        .finish()?;
+                    ",
+                    tail = format!(
+                        ".field(&DebugIter(parts.{tail_name}.iter().map(|v| v.debug(ast))))"
+                    ),
+                )
+            }
+            NodeKind::MixedArity {
+                fields,
+                tail: Field {
+                    name: tail_name, ..
+                },
+            } => {
+                format!(
+                    "
+                    f.debug_tuple(\"{name_pascal}\")
+                        {fields}
+                        {tail}
+                        .finish()?;
+                    ",
+                    fields = fields
+                        .iter()
+                        .map(|Field { name, opt, .. }| {
+                            if *opt {
+                                format!(".field(&parts.{name}.into_option().map(|v| v.debug(ast)))")
+                            } else {
+                                format!(".field(&parts.{name}.debug(ast))")
+                            }
+                        })
+                        .join('\n'),
+                    tail = format!(
+                        ".field(&DebugIter(parts.{tail_name}.iter().map(|v| v.debug(ast))))"
+                    ),
+                )
+            }
+            NodeKind::InlineValue {
+                inline: Inline {
+                    name: inline_name, ..
+                },
+            } => {
+                format!(
+                    "
+                    f.debug_tuple(\"{name_pascal}\")
+                        {inline}
+                        .finish()?;
+                    ",
+                    inline = format!(".field(&parts.{inline_name}.debug(ast))")
+                )
+            }
+        };
+        ml!(
+            out,
+            "
+            struct {name_pascal}WithAst<'a>(&'a Ast, {name_pascal});
+
+            impl std::fmt::Debug for {name_pascal}WithAst<'_> {{
+                fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {{
+                    let ast = self.0;
+                    let node = self.1;
+                    let parts = unsafe {{ node.unpack(ast) }};
+
+                    {parts}
+
+                    let _ = parts;
+
+                    Ok(())
+                }}
+            }}
+
+            impl {name_pascal} {{
+                pub fn debug<'a>(self, ast: &'a Ast) -> impl std::fmt::Debug + 'a {{
+                    {name_pascal}WithAst(ast, self)
+                }}
+            }}\n
+            "
+        );
+    }
 }

@@ -1,0 +1,10 @@
+---
+source: src/token/tests.rs
+expression: tokenize(&input)
+---
+[
+    Var("var", 0..3),
+    Ident("x", 4..5),
+    Eq("=", 6..7),
+    Integer("0", 8..9),
+]

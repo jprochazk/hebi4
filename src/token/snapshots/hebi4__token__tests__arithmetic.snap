@@ -1,0 +1,21 @@
+---
+source: src/token/tests.rs
+expression: tokenize(&input)
+---
+[
+    Integer("1", 0..1),
+    Plus("+", 2..3),
+    Integer("1", 4..5),
+    Integer("3", 6..7),
+    Star("*", 8..9),
+    Integer("4", 10..11),
+    Integer("1", 12..13),
+    Plus("+", 14..15),
+    Integer("7", 16..17),
+    Slash("/", 18..19),
+    Integer("2", 20..21),
+    Star("*", 22..23),
+    Integer("3", 24..25),
+    Minus("-", 26..27),
+    Integer("1", 28..29),
+]
