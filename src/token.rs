@@ -394,9 +394,9 @@ pub enum TokenKind {
 
     #[regex(r"[a-zA-Z_][a-zA-Z_0-9]*")]
     Ident,
-    #[regex(r"[0-9]([0-9_]*[0-9])?", priority = 100)]
+    #[regex(r"0|([1-9][0-9]*(_?[0-9])*)", priority = 100)]
     Integer,
-    #[regex(r"[0-9]+(\.[0-9]+)?([Ee][+-]?[0-9]+)?", priority = 10)]
+    #[regex(r"(0|[1-9][0-9]*)(\.[0-9]+)?([Ee][+-]?[0-9]+)?", priority = 10)]
     Float,
     #[regex(r#""([^"\\]|\\.)*""#)]
     String,

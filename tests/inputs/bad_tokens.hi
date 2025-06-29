@@ -1,2 +1,10 @@
 ##tokenize
+
+# random unsupported symbols
+
 $ @ ~ ! & ^ \ | '
+
+0a       # ident
+
+01       # int
+0. 0.1e  # float
