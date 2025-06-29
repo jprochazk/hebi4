@@ -756,6 +756,7 @@ fn emit_nodekind_enum(nodes: &Nodes, out: &mut String) {
         let n = node.tag_n;
         ln!(out, "    (\"{name}\", {n}),");
     }
+    ln!(out, "    (\"None\", 255),");
     ln!(out, "        ]");
     ln!(out, "    }}");
     ln!(out, "}}\n");

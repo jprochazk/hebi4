@@ -1,0 +1,37 @@
+---
+source: src/parser/tests.rs
+expression: snapshot
+---
+OK
+Root(
+    [
+        StmtExpr(
+            Block(
+                [
+                    StmtExpr(
+                        Infix(
+                            Add,
+                            Int(
+                                1,
+                            ),
+                            Int(
+                                1,
+                            ),
+                        ),
+                    ),
+                    StmtExpr(
+                        Infix(
+                            Add,
+                            Int(
+                                2,
+                            ),
+                            Int(
+                                2,
+                            ),
+                        ),
+                    ),
+                ],
+            ),
+        ),
+    ],
+)

@@ -1,0 +1,18 @@
+---
+source: src/parser/tests.rs
+expression: snapshot
+---
+OK
+Root(
+    [
+        StmtExpr(
+            Return(
+                Some(
+                    Int(
+                        100,
+                    ),
+                ),
+            ),
+        ),
+    ],
+)

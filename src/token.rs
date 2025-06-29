@@ -315,6 +315,9 @@ impl Token {
     }
 }
 
+// When adding a new kind of token, consider if it should be
+// added to `src/parser.rs@can_begin_expr`
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, logos::Logos)]
 pub enum TokenKind {
     #[token("var")]

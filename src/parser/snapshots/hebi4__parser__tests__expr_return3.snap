@@ -1,0 +1,25 @@
+---
+source: src/parser/tests.rs
+expression: snapshot
+---
+OK
+Root(
+    [
+        StmtExpr(
+            Block(
+                [
+                    StmtExpr(
+                        Return(
+                            None,
+                        ),
+                    ),
+                ],
+            ),
+        ),
+        StmtExpr(
+            Int(
+                100,
+            ),
+        ),
+    ],
+)

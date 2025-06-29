@@ -573,7 +573,24 @@ where
 
 #[inline]
 fn can_begin_expr(p: &mut Parser) -> bool {
-    todo!("can begin expr check")
+    matches!(
+        p.kind(),
+        t![return]
+            | t![do]
+            | t![break]
+            | t![continue]
+            | t![if]
+            | t!["("]
+            | t!["["]
+            | t!["{"]
+            | t![ident]
+            | t![int]
+            | t![float]
+            | t![str]
+            | t![true]
+            | t![false]
+            | t![nil]
+    )
 }
 
 #[cfg(test)]
