@@ -6,7 +6,7 @@ Run tests:
 cargo test
 ```
 
-Update snapshot tests (requires [`insta`](insta)):
+Update snapshot tests (requires [`cargo-insta`](https://crates.io/crates/cargo-insta)):
 ```
 cargo review
 ```
@@ -20,5 +20,3 @@ then running:
 cargo codegen
 ```
 
-
-[insta]: https://insta.rs
