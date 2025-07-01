@@ -154,11 +154,9 @@ fn parse_root(mut p: Parser) -> Result<Ast> {
     while !p.end() {
         body.push(parse_stmt(&mut p, &buf)?);
     }
+    let body = body.as_slice();
 
-    let root = Root {
-        body: body.as_slice(),
-    }
-    .pack(&mut p.ast);
+    let root = Root { body }.pack(&mut p.ast);
 
     Ok(p.ast.build(root))
 }
@@ -191,17 +189,11 @@ fn parse_stmt_fn(p: &mut Parser, buf: &Bump) -> Result<Spanned<Stmt>> {
     let func_node = p.open_at(t![fn])?;
 
     let name = parse_ident(p, buf)?;
-    let params = paren_list(p, buf, parse_ident)?;
+    let params = bracketed_list(p, buf, Brackets::Paren, parse_ident)?;
+    let params = params.as_slice();
     let body = parse_block(p, buf)?;
 
-    let func = p.close(
-        func_node,
-        Func {
-            name,
-            body,
-            params: params.as_slice(),
-        },
-    );
+    let func = p.close(func_node, Func { name, body, params });
     let inner = func.map_into();
 
     Ok(p.close(stmt_node, StmtExpr { inner }).map_into())
@@ -214,15 +206,10 @@ fn parse_stmt_loop(p: &mut Parser, buf: &Bump) -> Result<Spanned<Stmt>> {
     while !p.end() && !p.at(t![end]) {
         body.push(parse_stmt(p, buf)?);
     }
+    let body = body.as_slice();
     p.must(t![end])?;
 
-    Ok(p.close(
-        node,
-        Loop {
-            body: body.as_slice(),
-        },
-    )
-    .map_into())
+    Ok(p.close(node, Loop { body }).map_into())
 }
 
 fn parse_stmt_expr(p: &mut Parser, buf: &Bump) -> Result<Spanned<Stmt>> {
@@ -290,14 +277,10 @@ fn parse_block(p: &mut Parser, buf: &Bump) -> Result<Spanned<ast::Block>> {
     while !p.end() && !p.at(t![end]) {
         body.push(parse_stmt(p, buf)?);
     }
+    let body = body.as_slice();
     p.must(t![end])?;
 
-    Ok(p.close(
-        node,
-        Block {
-            body: body.as_slice(),
-        },
-    ))
+    Ok(p.close(node, Block { body }))
 }
 
 fn parse_expr_fn(p: &mut Parser, buf: &Bump) -> Result<Spanned<Expr>> {
@@ -365,7 +348,7 @@ where
 }
 
 macro_rules! token_map {
-    ($($token:tt => $into:expr),* $(,)*) => {
+    ($([$token:tt] => $into:expr),* $(,)*) => {
         |tok| match tok {
             $(t![$token] => Some($into),)*
             _ => None,
@@ -375,7 +358,7 @@ macro_rules! token_map {
 
 fn parse_expr_or(p: &mut Parser, buf: &Bump) -> Result<Spanned<Expr>> {
     let token_to_op = token_map! {
-        or => InfixOp::Or,
+        [or] => InfixOp::Or,
     };
     let next = parse_expr_and;
     parse_binop(p, buf, token_to_op, next)
@@ -383,7 +366,7 @@ fn parse_expr_or(p: &mut Parser, buf: &Bump) -> Result<Spanned<Expr>> {
 
 fn parse_expr_and(p: &mut Parser, buf: &Bump) -> Result<Spanned<Expr>> {
     let token_to_op = token_map! {
-        and => InfixOp::And,
+        [and] => InfixOp::And,
     };
     let next = parse_expr_eq;
     parse_binop(p, buf, token_to_op, next)
@@ -391,8 +374,8 @@ fn parse_expr_and(p: &mut Parser, buf: &Bump) -> Result<Spanned<Expr>> {
 
 fn parse_expr_eq(p: &mut Parser, buf: &Bump) -> Result<Spanned<Expr>> {
     let token_to_op = token_map! {
-        == => InfixOp::Eq,
-        != => InfixOp::Ne,
+        [==] => InfixOp::Eq,
+        [!=] => InfixOp::Ne,
     };
     let next = parse_expr_cmp;
     parse_binop(p, buf, token_to_op, next)
@@ -400,10 +383,10 @@ fn parse_expr_eq(p: &mut Parser, buf: &Bump) -> Result<Spanned<Expr>> {
 
 fn parse_expr_cmp(p: &mut Parser, buf: &Bump) -> Result<Spanned<Expr>> {
     let token_to_op = token_map! {
-        > => InfixOp::Gt,
-        >= => InfixOp::Ge,
-        < => InfixOp::Lt,
-        <= => InfixOp::Le,
+        [>] => InfixOp::Gt,
+        [>=] => InfixOp::Ge,
+        [<] => InfixOp::Lt,
+        [<=] => InfixOp::Le,
     };
     let next = parse_expr_add;
     parse_binop(p, buf, token_to_op, next)
@@ -411,8 +394,8 @@ fn parse_expr_cmp(p: &mut Parser, buf: &Bump) -> Result<Spanned<Expr>> {
 
 fn parse_expr_add(p: &mut Parser, buf: &Bump) -> Result<Spanned<Expr>> {
     let token_to_op = token_map! {
-        + => InfixOp::Add,
-        - => InfixOp::Sub,
+        [+] => InfixOp::Add,
+        [-] => InfixOp::Sub,
     };
     let next = parse_expr_mul;
     parse_binop(p, buf, token_to_op, next)
@@ -420,8 +403,8 @@ fn parse_expr_add(p: &mut Parser, buf: &Bump) -> Result<Spanned<Expr>> {
 
 fn parse_expr_mul(p: &mut Parser, buf: &Bump) -> Result<Spanned<Expr>> {
     let token_to_op = token_map! {
-        * => InfixOp::Mul,
-        / => InfixOp::Div,
+        [*] => InfixOp::Mul,
+        [/] => InfixOp::Div,
     };
     let next = parse_expr_prefix;
     parse_binop(p, buf, token_to_op, next)
@@ -430,7 +413,7 @@ fn parse_expr_mul(p: &mut Parser, buf: &Bump) -> Result<Spanned<Expr>> {
 fn parse_expr_prefix(p: &mut Parser, buf: &Bump) -> Result<Spanned<Expr>> {
     let op = match p.kind() {
         t![-] => PrefixOp::Minus,
-        t![not] => PrefixOp::Minus,
+        t![not] => PrefixOp::Not,
         _ => return parse_expr_postfix(p, buf),
     };
     let node = p.open();
@@ -566,20 +549,37 @@ fn parse_expr_group(p: &mut Parser, buf: &Bump) -> Result<Spanned<Expr>> {
     Ok(inner)
 }
 
+enum Brackets {
+    Paren,
+    Brace,
+    Curly,
+}
+
 #[inline]
-fn paren_list<'bump, F, T>(p: &mut Parser, buf: &'bump Bump, f: F) -> Result<Vec<'bump, T>>
+fn bracketed_list<'bump, F, T>(
+    p: &mut Parser,
+    buf: &'bump Bump,
+    brackets: Brackets,
+    f: F,
+) -> Result<Vec<'bump, T>>
 where
     F: Fn(&mut Parser, &Bump) -> Result<T>,
 {
-    p.must(t!["("])?;
+    let (opening, closing) = match brackets {
+        Brackets::Paren => (t!["("], t![")"]),
+        Brackets::Brace => (t!["["], t!["]"]),
+        Brackets::Curly => (t!["{"], t!["}"]),
+    };
+
+    p.must(opening)?;
     let mut out = temp(buf);
-    if !p.end() && !p.at(t![")"]) {
+    if !p.end() && !p.at(closing) {
         out.push(f(p, buf)?);
-        while !p.end() && p.eat(t![,]) && !p.at(t![")"]) {
+        while !p.end() && p.eat(t![,]) && !p.at(closing) {
             out.push(f(p, buf)?);
         }
     }
-    p.must(t![")"])?;
+    p.must(closing)?;
     Ok(out)
 }
 
