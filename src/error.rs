@@ -54,7 +54,7 @@ impl std::fmt::Display for ErrorDisplay<'_, '_> {
 impl std::error::Error for Error {}
 impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0.message)
+        write!(f, "error ({}): {}", self.0.span, self.0.message)
     }
 }
 
