@@ -562,7 +562,12 @@ fn parse_expr_primary(p: &mut Parser, buf: &Bump) -> Result<Spanned<Expr>> {
 }
 
 fn parse_expr_array(p: &mut Parser, buf: &Bump) -> Result<Spanned<Expr>> {
-    todo!("array expr")
+    let node = p.open();
+
+    let items = bracketed_list(p, buf, Brackets::Brace, parse_expr)?;
+    let items = items.as_slice();
+
+    Ok(p.close(node, Array { items }).map_into())
 }
 
 fn parse_expr_object(p: &mut Parser, buf: &Bump) -> Result<Spanned<Expr>> {
