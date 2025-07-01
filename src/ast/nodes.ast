@@ -64,6 +64,11 @@ expr call {
     args: [expr],
 };
 
+expr call_object {
+    callee: expr,
+    args: [object_entry],
+};
+
 expr set_var(op: AssignOp as u24) {
     name: ident,
     value: expr,
@@ -99,7 +104,7 @@ expr object {
 };
 
 data object_entry {
-    key: expr,
+    key: str,
     value: expr,
 };
 

@@ -5,3 +5,7 @@ end
 fn test(a, b, c) do
     1 + 1
 end
+
+fn test(a, b, c, ) do
+    1 + 1
+end

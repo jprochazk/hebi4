@@ -1,0 +1,22 @@
+empty {}
+
+single_arg {a=b}
+single_arg_tc {a=b,}
+
+multi_arg {a=0, b=1}
+multi_arg_tc {a=0, b=1,}
+
+single_arg_inline {a}
+single_arg_inline_tc {a,}
+
+multi_arg_mixed {a=0, b}
+multi_arg_mixed_tc {a=0, b,}
+
+multi_arg_mixed2 {a, b=0}
+multi_arg_mixed2_tc {a, b=0,}
+
+string_key {"a"=0}
+string_key_tc {"a"=0,}
+
+string_key_multi {"a"=0, "b"=1}
+string_key_multi_tc {"a"=0, "b"=1,}

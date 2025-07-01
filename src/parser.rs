@@ -423,7 +423,19 @@ fn parse_expr_prefix(p: &mut Parser, buf: &Bump) -> Result<Spanned<Expr>> {
 }
 
 fn parse_expr_postfix(p: &mut Parser, buf: &Bump) -> Result<Spanned<Expr>> {
-    let mut expr = parse_expr_primary(p, buf)?;
+    let expr = parse_expr_primary(p, buf)?;
+    if !matches!(
+        expr.kind(),
+        ExprKind::GetVar
+            | ExprKind::GetField
+            | ExprKind::GetIndex
+            | ExprKind::Call
+            | ExprKind::CallObject,
+    ) {
+        return Ok(expr);
+    }
+
+    let mut expr = expr;
     while !p.end() {
         match p.kind() {
             t!["("] => expr = parse_expr_call(p, buf, expr)?,
@@ -436,16 +448,67 @@ fn parse_expr_postfix(p: &mut Parser, buf: &Bump) -> Result<Spanned<Expr>> {
     Ok(expr)
 }
 
-fn parse_expr_call(p: &mut Parser, buf: &Bump, parent: Spanned<Expr>) -> Result<Spanned<Expr>> {
-    todo!("call expr")
+fn parse_expr_call(p: &mut Parser, buf: &Bump, callee: Spanned<Expr>) -> Result<Spanned<Expr>> {
+    let node = p.open();
+
+    let args = bracketed_list(p, buf, Brackets::Paren, parse_expr)?;
+    let args = args.as_slice();
+
+    Ok(p.close(node, Call { callee, args }).map_into())
 }
 
 fn parse_expr_call_object(
     p: &mut Parser,
     buf: &Bump,
-    parent: Spanned<Expr>,
+    callee: Spanned<Expr>,
 ) -> Result<Spanned<Expr>> {
-    todo!("call object expr")
+    let node = p.open();
+
+    let args = bracketed_list(p, buf, Brackets::Curly, parse_object_entry)?;
+    let args = args.as_slice();
+
+    Ok(p.close(node, CallObject { callee, args }).map_into())
+}
+
+fn parse_object_entry(p: &mut Parser, buf: &Bump) -> Result<Spanned<ast::ObjectEntry>> {
+    let node = p.open();
+
+    let (key, value) = match p.kind() {
+        t![ident] => {
+            let span = p.span();
+            let lexeme = p.lexeme();
+            p.advance();
+
+            let key = str_from_lexeme_span(p, lexeme, span);
+
+            let value: Spanned<Expr> = if p.eat(t![=]) {
+                parse_expr(p, buf)?
+            } else {
+                Spanned::new(
+                    GetVar {
+                        name: ident_from_lexeme_span(p, lexeme, span),
+                    }
+                    .pack(&mut p.ast),
+                    span,
+                )
+                .map_into()
+            };
+
+            (key, value)
+        }
+        t![str] => {
+            let key = parse_str(p, buf)?;
+            p.must(t![=])?;
+            let value = parse_expr(p, buf)?;
+
+            (key, value)
+        }
+        _ => return error("unexpected token", p.span()).into(),
+    };
+
+    Ok(p.close(node, ObjectEntry { key, value }))
+}
+
 fn str_from_lexeme_span(p: &mut Parser, lexeme: &str, span: Span) -> Spanned<ast::Str> {
     Spanned::new(
         Str {
@@ -583,11 +646,17 @@ fn parse_str(p: &mut Parser, buf: &Bump) -> Result<Spanned<ast::Str>> {
 mod escape;
 
 fn parse_expr_nil(p: &mut Parser, buf: &Bump) -> Result<Spanned<Expr>> {
-    todo!("nil expr")
+    let node = p.open();
+    p.must(t![nil])?;
+
+    Ok(p.close(node, Nil {}).map_into())
 }
 
 fn parse_expr_use(p: &mut Parser, buf: &Bump) -> Result<Spanned<Expr>> {
-    todo!("variable use expr")
+    let node = p.open();
+    let name = parse_ident(p, buf)?;
+
+    Ok(p.close(node, GetVar { name }).map_into())
 }
 
 fn parse_expr_group(p: &mut Parser, buf: &Bump) -> Result<Spanned<Expr>> {

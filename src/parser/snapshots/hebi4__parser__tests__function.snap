@@ -37,5 +37,26 @@ Root(
                 ],
             ),
         ),
+        StmtExpr(
+            Func(
+                Ident(
+                    "test",
+                ),
+                Block(
+                    [],
+                ),
+                [
+                    Ident(
+                        "a",
+                    ),
+                    Ident(
+                        "b",
+                    ),
+                    Ident(
+                        "c",
+                    ),
+                ],
+            ),
+        ),
     ],
 )

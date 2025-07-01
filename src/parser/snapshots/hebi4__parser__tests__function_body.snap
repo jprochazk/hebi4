@@ -61,5 +61,38 @@ Root(
                 ],
             ),
         ),
+        StmtExpr(
+            Func(
+                Ident(
+                    "test",
+                ),
+                Block(
+                    [
+                        StmtExpr(
+                            Infix(
+                                Add,
+                                Int(
+                                    1,
+                                ),
+                                Int(
+                                    1,
+                                ),
+                            ),
+                        ),
+                    ],
+                ),
+                [
+                    Ident(
+                        "a",
+                    ),
+                    Ident(
+                        "b",
+                    ),
+                    Ident(
+                        "c",
+                    ),
+                ],
+            ),
+        ),
     ],
 )
