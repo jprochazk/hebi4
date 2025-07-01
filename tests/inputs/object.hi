@@ -1,0 +1,23 @@
+var empty = {}
+
+var single_arg = {a=b}
+var single_arg_tc = {a=b,}
+
+var multi_arg = {a=0, b=1}
+var multi_arg_tc = {a=0, b=1,}
+
+var single_arg_inline = {a}
+var single_arg_inline_tc = {a,}
+
+var multi_arg_mixed = {a=0, b}
+var multi_arg_mixed_tc = {a=0, b,}
+
+var multi_arg_mixed2 = {a, b=0}
+var multi_arg_mixed2_tc = {a, b=0,}
+
+var string_key = {"a"=0}
+var string_key_tc = {"a"=0,}
+
+var string_key_multi = {"a"=0, "b"=1}
+var string_key_multi_tc = {"a"=0, "b"=1,}
+

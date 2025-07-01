@@ -566,7 +566,12 @@ fn parse_expr_array(p: &mut Parser, buf: &Bump) -> Result<Spanned<Expr>> {
 }
 
 fn parse_expr_object(p: &mut Parser, buf: &Bump) -> Result<Spanned<Expr>> {
-    todo!("object expr")
+    let node = p.open();
+
+    let entries = bracketed_list(p, buf, Brackets::Curly, parse_object_entry)?;
+    let entries = entries.as_slice();
+
+    Ok(p.close(node, Object { entries }).map_into())
 }
 
 fn parse_expr_int(p: &mut Parser, buf: &Bump) -> Result<Spanned<Expr>> {
