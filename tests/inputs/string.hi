@@ -1,0 +1,9 @@
+var simple = "test"
+
+var laughing_face = "\u{1F602}"
+
+var newline = "\x0A"
+
+var newline_tab = "\n\t"
+
+var escaped_quote = "\""

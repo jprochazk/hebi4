@@ -1,0 +1,26 @@
+---
+source: src/token/tests.rs
+expression: tokenize(&input)
+---
+[
+    Var("var", 0..3),
+    Ident("simple", 4..10),
+    Eq("=", 11..12),
+    String("\"test\"", 13..19),
+    Var("var", 21..24),
+    Ident("laughing_face", 25..38),
+    Eq("=", 39..40),
+    String("\"\\u{1F602}\"", 41..52),
+    Var("var", 54..57),
+    Ident("newline", 58..65),
+    Eq("=", 66..67),
+    String("\"\\x0A\"", 68..74),
+    Var("var", 76..79),
+    Ident("newline_tab", 80..91),
+    Eq("=", 92..93),
+    String("\"\\n\\t\"", 94..100),
+    Var("var", 102..105),
+    Ident("escaped_quote", 106..119),
+    Eq("=", 120..121),
+    String("\"\\\"\"", 122..126),
+]

@@ -1,0 +1,49 @@
+---
+source: src/parser/tests.rs
+expression: snapshot
+---
+OK
+Root(
+    [
+        Var(
+            Ident(
+                "simple",
+            ),
+            Str(
+                "test",
+            ),
+        ),
+        Var(
+            Ident(
+                "laughing_face",
+            ),
+            Str(
+                "😂",
+            ),
+        ),
+        Var(
+            Ident(
+                "newline",
+            ),
+            Str(
+                "\n",
+            ),
+        ),
+        Var(
+            Ident(
+                "newline_tab",
+            ),
+            Str(
+                "\n\t",
+            ),
+        ),
+        Var(
+            Ident(
+                "escaped_quote",
+            ),
+            Str(
+                "\"",
+            ),
+        ),
+    ],
+)

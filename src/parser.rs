@@ -446,6 +446,24 @@ fn parse_expr_call_object(
     parent: Spanned<Expr>,
 ) -> Result<Spanned<Expr>> {
     todo!("call object expr")
+fn str_from_lexeme_span(p: &mut Parser, lexeme: &str, span: Span) -> Spanned<ast::Str> {
+    Spanned::new(
+        Str {
+            value: p.ast.intern_str(lexeme),
+        }
+        .pack(&mut p.ast),
+        span,
+    )
+}
+
+fn ident_from_lexeme_span(p: &mut Parser, lexeme: &str, span: Span) -> Spanned<ast::Ident> {
+    Spanned::new(
+        Ident {
+            id: p.ast.intern_ident(lexeme),
+        }
+        .pack(&mut p.ast),
+        span,
+    )
 }
 
 fn parse_expr_index(p: &mut Parser, buf: &Bump, parent: Spanned<Expr>) -> Result<Spanned<Expr>> {
@@ -531,8 +549,38 @@ fn parse_expr_bool(p: &mut Parser, buf: &Bump) -> Result<Spanned<Expr>> {
 }
 
 fn parse_expr_str(p: &mut Parser, buf: &Bump) -> Result<Spanned<Expr>> {
-    todo!("str expr")
+    parse_str(p, buf).map(|v| v.map_into())
 }
+
+fn parse_str(p: &mut Parser, buf: &Bump) -> Result<Spanned<ast::Str>> {
+    let node = p.open();
+
+    let span = p.span();
+    let lexeme = p.lexeme();
+
+    p.must(t![str])?;
+    let value = lexeme
+        .strip_prefix('"')
+        .ok_or_else(|| error("invalid string", span))?
+        .strip_suffix('"')
+        .ok_or_else(|| error("invalid string", span))?;
+
+    let value = match escape::unescape(value) {
+        Ok(value) => value,
+        Err(err) => {
+            return error(
+                "invalid escape",
+                span.start() + err.pos - 1..span.start() + err.pos + 2,
+            )
+            .into();
+        }
+    };
+    let value = p.ast.intern_str(value.as_ref());
+
+    Ok(p.close(node, Str { value }))
+}
+
+mod escape;
 
 fn parse_expr_nil(p: &mut Parser, buf: &Bump) -> Result<Spanned<Expr>> {
     todo!("nil expr")
