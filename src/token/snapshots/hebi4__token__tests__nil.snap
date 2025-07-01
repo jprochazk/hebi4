@@ -1,0 +1,7 @@
+---
+source: src/token/tests.rs
+expression: tokenize(&input)
+---
+[
+    Nil("nil", 0..3),
+]
