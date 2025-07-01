@@ -54,5 +54,25 @@ Root(
                 ),
             ),
         ),
+        Var(
+            Ident(
+                "c",
+            ),
+            Infix(
+                And,
+                Prefix(
+                    Not,
+                    Bool(
+                        true,
+                    ),
+                ),
+                Prefix(
+                    Not,
+                    Bool(
+                        false,
+                    ),
+                ),
+            ),
+        ),
     ],
 )

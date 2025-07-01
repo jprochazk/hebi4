@@ -1,0 +1,24 @@
+---
+source: src/token/tests.rs
+expression: tokenize(&input)
+---
+[
+    Integer("0", 0..1),
+    Lt("<", 2..3),
+    Integer("1", 4..5),
+    Integer("1", 6..7),
+    Gt(">", 8..9),
+    Integer("0", 10..11),
+    Integer("1", 12..13),
+    Ge(">=", 14..16),
+    Integer("0", 17..18),
+    Integer("0", 19..20),
+    Le("<=", 21..23),
+    Integer("1", 24..25),
+    Integer("1", 26..27),
+    EqEq("==", 28..30),
+    Integer("1", 31..32),
+    Integer("0", 33..34),
+    NotEq("!=", 35..37),
+    Integer("1", 38..39),
+]

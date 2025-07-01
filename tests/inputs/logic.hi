@@ -1,3 +1,5 @@
 true or false and true or false
 
 var b = ((true or (false and true)) or false)
+
+var c = not true and not false

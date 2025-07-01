@@ -26,4 +26,12 @@ expression: tokenize(&input)
     Or("or", 69..71),
     False("false", 72..77),
     ParenR(")", 77..78),
+    Var("var", 80..83),
+    Ident("c", 84..85),
+    Eq("=", 86..87),
+    Not("not", 88..91),
+    True("true", 92..96),
+    And("and", 97..100),
+    Not("not", 101..104),
+    False("false", 105..110),
 ]
