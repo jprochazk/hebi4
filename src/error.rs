@@ -9,9 +9,9 @@ struct ErrorRepr {
     message: String,
 }
 
-pub fn error(message: impl Into<String>, span: Span) -> Error {
+pub fn error(message: impl Into<String>, span: impl Into<Span>) -> Error {
     Error(Box::new(ErrorRepr {
-        span,
+        span: span.into(),
         message: message.into(),
     }))
 }
