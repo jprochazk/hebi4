@@ -5,10 +5,7 @@ expression: snapshot
 OK
 Root(
     [
-        Var(
-            Ident(
-                "a",
-            ),
+        StmtExpr(
             Infix(
                 Or,
                 Infix(
