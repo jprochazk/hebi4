@@ -1,0 +1,61 @@
+---
+source: src/parser/tests.rs
+expression: snapshot
+---
+OK
+Root(
+    [
+        Var(
+            Ident(
+                "a",
+            ),
+            Infix(
+                Or,
+                Infix(
+                    Or,
+                    Bool(
+                        true,
+                    ),
+                    Infix(
+                        And,
+                        Bool(
+                            false,
+                        ),
+                        Bool(
+                            true,
+                        ),
+                    ),
+                ),
+                Bool(
+                    false,
+                ),
+            ),
+        ),
+        Var(
+            Ident(
+                "b",
+            ),
+            Infix(
+                Or,
+                Infix(
+                    Or,
+                    Bool(
+                        true,
+                    ),
+                    Infix(
+                        And,
+                        Bool(
+                            false,
+                        ),
+                        Bool(
+                            true,
+                        ),
+                    ),
+                ),
+                Bool(
+                    false,
+                ),
+            ),
+        ),
+    ],
+)

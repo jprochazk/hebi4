@@ -535,7 +535,16 @@ fn parse_expr_float(p: &mut Parser, buf: &Bump) -> Result<Spanned<Expr>> {
 }
 
 fn parse_expr_bool(p: &mut Parser, buf: &Bump) -> Result<Spanned<Expr>> {
-    todo!("bool expr")
+    let node = p.open();
+
+    let value = match p.kind() {
+        t![true] => true,
+        t![false] => false,
+        _ => return error("not a bool", p.span()).into(),
+    };
+    p.advance();
+
+    Ok(p.close(node, Bool { value }).map_into())
 }
 
 fn parse_expr_str(p: &mut Parser, buf: &Bump) -> Result<Spanned<Expr>> {
@@ -551,7 +560,10 @@ fn parse_expr_use(p: &mut Parser, buf: &Bump) -> Result<Spanned<Expr>> {
 }
 
 fn parse_expr_group(p: &mut Parser, buf: &Bump) -> Result<Spanned<Expr>> {
-    todo!("group expr")
+    p.must(t!["("])?;
+    let inner = parse_expr(p, buf)?;
+    p.must(t![")"])?;
+    Ok(inner)
 }
 
 #[inline]

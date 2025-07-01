@@ -1,0 +1,32 @@
+---
+source: src/token/tests.rs
+expression: tokenize(&input)
+---
+[
+    Var("var", 0..3),
+    Ident("a", 4..5),
+    Eq("=", 6..7),
+    True("true", 8..12),
+    Or("or", 13..15),
+    False("false", 16..21),
+    And("and", 22..25),
+    True("true", 26..30),
+    Or("or", 31..33),
+    False("false", 34..39),
+    Var("var", 41..44),
+    Ident("b", 45..46),
+    Eq("=", 47..48),
+    ParenL("(", 49..50),
+    ParenL("(", 50..51),
+    True("true", 51..55),
+    Or("or", 56..58),
+    ParenL("(", 59..60),
+    False("false", 60..65),
+    And("and", 66..69),
+    True("true", 70..74),
+    ParenR(")", 74..75),
+    ParenR(")", 75..76),
+    Or("or", 77..79),
+    False("false", 80..85),
+    ParenR(")", 85..86),
+]
