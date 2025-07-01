@@ -71,7 +71,7 @@ macro_rules! roundtrip_u24_op {
 }
 
 #[allow(non_camel_case_types)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct f64n(u64);
 
 impl f64n {
@@ -89,6 +89,13 @@ impl f64n {
 impl f64n {
     pub fn debug(self, _: &Ast) -> impl std::fmt::Debug + '_ {
         self
+    }
+}
+
+impl std::fmt::Debug for f64n {
+    #[inline]
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Debug::fmt(&self.get(), f)
     }
 }
 

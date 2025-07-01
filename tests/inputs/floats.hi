@@ -1,0 +1,4 @@
+var one = 1.0
+var pi = 3.14
+var exp = 2e10
+var n_exp = 2e-10

@@ -1,0 +1,41 @@
+---
+source: src/parser/tests.rs
+expression: snapshot
+---
+OK
+Root(
+    [
+        Var(
+            Ident(
+                "one",
+            ),
+            Float32(
+                1.0,
+            ),
+        ),
+        Var(
+            Ident(
+                "pi",
+            ),
+            Float64(
+                3.14,
+            ),
+        ),
+        Var(
+            Ident(
+                "exp",
+            ),
+            Float32(
+                20000000000.0,
+            ),
+        ),
+        Var(
+            Ident(
+                "n_exp",
+            ),
+            Float64(
+                2e-10,
+            ),
+        ),
+    ],
+)

@@ -587,7 +587,7 @@ fn parse_expr_int(p: &mut Parser, buf: &Bump) -> Result<Spanned<Expr>> {
     p.must(t![int])?;
     let value: u64 = lexeme
         .parse()
-        .map_err(|err| error(format!("failed to parse int: {err}"), span))?;
+        .map_err(|err| error(format!("invalid int: {err}"), span))?;
     if value > u56::MAX.get() {
         return error(
             format!(
@@ -605,7 +605,28 @@ fn parse_expr_int(p: &mut Parser, buf: &Bump) -> Result<Spanned<Expr>> {
 }
 
 fn parse_expr_float(p: &mut Parser, buf: &Bump) -> Result<Spanned<Expr>> {
-    todo!("float expr")
+    let node_f32 = p.open();
+    let node_f64 = p.open();
+
+    let lexeme = p.lexeme();
+    let span = p.span();
+    p.must(t![float])?;
+    let value: f64 = lexeme
+        .parse()
+        .map_err(|err| error(format!("invalid float: {err}"), span))?;
+
+    if (value as f32) as f64 == value {
+        Ok(p.close(
+            node_f32,
+            Float32 {
+                value: value as f32,
+            },
+        )
+        .map_into())
+    } else {
+        let value = p.ast.intern_float(value);
+        Ok(p.close(node_f64, Float64 { value }).map_into())
+    }
 }
 
 fn parse_expr_bool(p: &mut Parser, buf: &Bump) -> Result<Spanned<Expr>> {
