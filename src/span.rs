@@ -102,6 +102,11 @@ impl<T> Spanned<T> {
     }
 
     #[inline]
+    pub fn empty(inner: T) -> Self {
+        Self::new(inner, Span::empty())
+    }
+
+    #[inline]
     pub fn into_inner(self) -> T {
         self.inner
     }

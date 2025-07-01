@@ -1,7 +1,0 @@
----
-source: src/token/tests.rs
-expression: tokenize(&input)
----
-[
-    Return("return", 1..7),
-]

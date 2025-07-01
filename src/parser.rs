@@ -1,6 +1,9 @@
 use std::marker::PhantomData;
 
-use bumpalo::{Bump, collections::Vec};
+use bumpalo::{
+    Bump,
+    collections::{CollectIn, Vec},
+};
 
 use crate::{
     ast::{
@@ -265,9 +268,114 @@ fn parse_expr_continue(p: &mut Parser, _: &Bump) -> Result<Spanned<Expr>> {
 }
 
 fn parse_expr_if(p: &mut Parser, buf: &Bump) -> Result<Spanned<Expr>> {
-    assert!(p.eat(t![if]));
+    // simple:
+    //   if a do ... end
+    //   if a do ... else ... end
+    // multi:
+    //   if a do ... else if b do ... end
+    //   if a do ... else if b do ... else ... end
 
-    todo!("if expr")
+    let node_simple = p.open();
+    let node_multi = p.open_at(t![if])?;
+
+    let mut branches = temp(buf);
+    let mut tail = None;
+
+    branches.push(parse_bare_branch(p, buf)?);
+    while !p.end() && p.at(t![else]) {
+        let else_span = p.span();
+        p.advance(); // else
+
+        if p.eat(t![if]) {
+            branches.push(parse_bare_branch(p, buf)?);
+        } else if tail.is_none() {
+            if p.at(t![do]) {
+                // explicitly handle this so that stmt->expr->block doesnt pick it up
+                return error("unexpected token: `do`", p.span()).into();
+            }
+            tail = Some(parse_if_tail(p, buf, else_span)?);
+        } else {
+            // duplicate tail
+            return error("duplicate `else` branch", else_span).into();
+        }
+    }
+
+    p.must(t![end])?;
+
+    let tail = tail
+        .map(|tail| tail.map(Opt::some))
+        .unwrap_or_else(|| Spanned::empty(Opt::none()));
+    match branches.len() {
+        0 => unreachable!("always at least one branch"),
+        1 => {
+            let cond = branches[0].cond;
+            let body = branches[0].body.as_slice();
+            Ok(p.close(node_simple, IfSimple { cond, tail, body })
+                .map_into())
+        }
+
+        _ => {
+            let branches = branches
+                .into_iter()
+                .map(|b| b.map(|b| b.pack(p)))
+                .collect_in::<Vec<'_, _>>(buf);
+            let branches = branches.as_slice();
+            Ok(p.close(node_multi, IfMulti { tail, branches }).map_into())
+        }
+    }
+}
+
+struct BareBranch<'bump> {
+    cond: Spanned<Expr>,
+    body: Vec<'bump, Spanned<Stmt>>,
+}
+
+impl BareBranch<'_> {
+    fn pack(&self, p: &mut Parser) -> ast::Branch {
+        Branch {
+            cond: self.cond,
+            body: self.body.as_slice(),
+        }
+        .pack(&mut p.ast)
+    }
+}
+
+// <cond:expr> do <body:[stmt]> (?= else|end)
+fn parse_bare_branch<'bump>(
+    p: &mut Parser,
+    buf: &'bump Bump,
+) -> Result<Spanned<BareBranch<'bump>>> {
+    let start = p.span().start();
+
+    let cond = parse_expr(p, buf)?;
+
+    p.must(t![do])?;
+
+    let mut body = temp(buf);
+    while !p.end() && !p.at(t![end]) && !p.at(t![else]) {
+        body.push(parse_stmt(p, buf)?);
+    }
+
+    let end = p.span().end();
+    Ok(Spanned::new(BareBranch { cond, body }, (start..end).into()))
+}
+
+fn parse_if_tail(p: &mut Parser, buf: &Bump, else_span: Span) -> Result<Spanned<ast::Block>> {
+    assert!(p.cursor.kind(p.cursor.prev()) == t![else]);
+
+    let start = else_span.start();
+    let mut body = temp(buf);
+    while !p.end() && !p.at(t![end]) {
+        body.push(parse_stmt(p, buf)?);
+    }
+    let body = body.as_slice();
+    // don't eat `end`
+    let end = p.span().end();
+
+    Ok(Spanned::new(
+        Block { body }.pack(&mut p.ast),
+        (start..end).into(),
+    ))
 }
 
 fn parse_block(p: &mut Parser, buf: &Bump) -> Result<Spanned<ast::Block>> {
@@ -316,6 +424,9 @@ fn parse_expr(p: &mut Parser, buf: &Bump) -> Result<Spanned<Expr>> {
         t![return] => parse_expr_return(p, buf),
         t![break] => parse_expr_break(p, buf),
         t![continue] => parse_expr_continue(p, buf),
+        t![if] => parse_expr_if(p, buf),
+        t![do] => parse_block(p, buf).map(|v| v.map_into()),
+        t![fn] => parse_expr_fn(p, buf),
         _ => parse_expr_infix(p, buf),
     }
 }

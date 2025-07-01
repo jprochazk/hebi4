@@ -21,18 +21,18 @@ expr continue;
 
 expr if_simple {
     cond: expr,
-    then: expr,
-    else_: expr?,
+    body: [stmt],
+    tail: block?,
 };
 
 expr if_multi {
-    tail: block,
     branches: [branch],
+    tail: block?,
 };
 
 data branch {
     cond: expr,
-    then: expr,
+    body: [stmt],
 };
 
 expr block {

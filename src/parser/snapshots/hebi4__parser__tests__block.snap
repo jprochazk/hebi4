@@ -33,5 +33,59 @@ Root(
                 ],
             ),
         ),
+        StmtExpr(
+            Block(
+                [
+                    StmtExpr(
+                        Block(
+                            [
+                                StmtExpr(
+                                    Infix(
+                                        Add,
+                                        Int(
+                                            1,
+                                        ),
+                                        Int(
+                                            1,
+                                        ),
+                                    ),
+                                ),
+                                StmtExpr(
+                                    Infix(
+                                        Add,
+                                        Int(
+                                            2,
+                                        ),
+                                        Int(
+                                            2,
+                                        ),
+                                    ),
+                                ),
+                            ],
+                        ),
+                    ),
+                ],
+            ),
+        ),
+        Var(
+            Ident(
+                "expr",
+            ),
+            Block(
+                [
+                    StmtExpr(
+                        Infix(
+                            Add,
+                            Int(
+                                1,
+                            ),
+                            Int(
+                                1,
+                            ),
+                        ),
+                    ),
+                ],
+            ),
+        ),
     ],
 )

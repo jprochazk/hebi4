@@ -1,0 +1,18 @@
+##parse
+
+var simple =
+    if true do 0 end
+
+var ternary =
+    if true do 1 else 0 end
+
+var multi_one =
+    if true do 0
+    else if true do 1
+    end
+
+var mutli_one_else =
+    if true do 0
+    else if true do 1
+    else 2
+    end
