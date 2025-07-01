@@ -14,9 +14,12 @@ cargo review
 New tests can be created by adding a `.hi` file to [`tests/inputs`](./tests/inputs).
 These files are passed through all stages of the compiler: lexer, parser, bytecode emitter.
 
-The file may begin with a comment to filter the stages it will be tested against:
+The file may begin with a comment (`##`) to filter the stages it will be tested against:
 - `tokenize` for [`src/token.rs`](./src/token.rs)
 - `parse` for [`src/parser.rs`](./src/parser.rs)
+
+This can also be used to completely disable test files. Adding an empty comment to the top of
+the file will cause it to not be tested against _any_ stage.
 
 Multiple different stages may be combined, e.g. `tokenize,parse` will run only through those
 two stages, but not through the bytecode emit.
