@@ -167,7 +167,7 @@ fn parse_root(mut p: Parser) -> Result<Ast> {
 fn parse_stmt(p: &mut Parser, buf: &Bump) -> Result<Spanned<Stmt>> {
     match p.kind() {
         t![var] => parse_stmt_var(p, buf),
-        t![fn] => parse_stmt_fn(p, buf),
+        t![fn] => parse_stmt_func_decl(p, buf),
         t![loop] => parse_stmt_loop(p, buf),
         _ => parse_stmt_expr(p, buf),
     }
@@ -187,19 +187,17 @@ fn parse_stmt_var(p: &mut Parser, buf: &Bump) -> Result<Spanned<Stmt>> {
 }
 
 /// `"fn" name:IDENT "(" param:IDENT,* ")" "do" stmt* "end"`
-fn parse_stmt_fn(p: &mut Parser, buf: &Bump) -> Result<Spanned<Stmt>> {
-    let stmt_node = p.open();
-    let func_node = p.open_at(t![fn])?;
+fn parse_stmt_func_decl(p: &mut Parser, buf: &Bump) -> Result<Spanned<Stmt>> {
+    let bare = parse_bare_func(p, buf)?;
 
-    let name = parse_ident(p, buf)?;
-    let params = bracketed_list(p, buf, Brackets::Paren, parse_ident)?;
-    let params = params.as_slice();
-    let body = parse_block(p, buf)?;
+    let name = bare.name.ok_or_else(|| {
+        let span = bare.params.span.start()..bare.params.span.start() + 1;
+        error("expected function name", span)
+    })?;
+    let body = bare.body;
+    let params = bare.params.as_slice();
 
-    let func = p.close(func_node, Func { name, body, params });
-    let inner = func.map_into();
-
-    Ok(p.close(stmt_node, StmtExpr { inner }).map_into())
+    Ok(Spanned::new(FuncDecl { name, body, params }.pack(&mut p.ast), bare.span).map_into())
 }
 
 fn parse_stmt_loop(p: &mut Parser, buf: &Bump) -> Result<Spanned<Stmt>> {
@@ -238,7 +236,7 @@ fn parse_expr_top_level(p: &mut Parser, buf: &Bump) -> Result<Spanned<Expr>> {
         t![continue] => parse_expr_continue(p, buf),
         t![if] => parse_expr_if(p, buf),
         t![do] => parse_block(p, buf).map(|v| v.map_into()),
-        t![fn] => parse_expr_fn(p, buf),
+        t![fn] => parse_expr_func_anon(p, buf),
         _ => parse_expr_assign(p, buf),
     }
 }
@@ -357,7 +355,7 @@ fn parse_bare_branch<'bump>(
     }
 
     let end = p.span().end();
-    Ok(Spanned::new(BareBranch { cond, body }, (start..end).into()))
+    Ok(Spanned::new(BareBranch { cond, body }, start..end))
 }
 
 fn parse_if_tail(p: &mut Parser, buf: &Bump, else_span: Span) -> Result<Spanned<ast::Block>> {
@@ -372,10 +370,7 @@ fn parse_if_tail(p: &mut Parser, buf: &Bump, else_span: Span) -> Result<Spanned<
     // don't eat `end`
     let end = p.span().end();
 
-    Ok(Spanned::new(
-        Block { body }.pack(&mut p.ast),
-        (start..end).into(),
-    ))
+    Ok(Spanned::new(Block { body }.pack(&mut p.ast), start..end))
 }
 
 fn parse_block(p: &mut Parser, buf: &Bump) -> Result<Spanned<ast::Block>> {
@@ -391,10 +386,47 @@ fn parse_block(p: &mut Parser, buf: &Bump) -> Result<Spanned<ast::Block>> {
     Ok(p.close(node, Block { body }))
 }
 
-fn parse_expr_fn(p: &mut Parser, buf: &Bump) -> Result<Spanned<Expr>> {
-    assert!(p.eat(t![fn]));
+fn parse_expr_func_anon(p: &mut Parser, buf: &Bump) -> Result<Spanned<Expr>> {
+    let bare = parse_bare_func(p, buf)?;
 
-    todo!("fn expr")
+    Ok(bare
+        .map(|func| {
+            FuncAnon {
+                name: match func.name {
+                    Some(name) => name.map(Opt::some),
+                    None => Spanned::empty(Opt::none()),
+                },
+                body: func.body,
+                params: func.params.as_slice(),
+            }
+            .pack(&mut p.ast)
+        })
+        .map_into())
+}
+
+struct BareFunc<'bump> {
+    name: Option<Spanned<ast::Ident>>,
+    params: Spanned<Vec<'bump, Spanned<ast::Ident>>>,
+    body: Spanned<ast::Block>,
+}
+
+fn parse_bare_func<'bump>(p: &mut Parser, buf: &'bump Bump) -> Result<Spanned<BareFunc<'bump>>> {
+    let start = p.span().start();
+    p.must(t![fn])?;
+
+    let name = if p.at(t![ident]) {
+        Some(parse_ident(p, buf)?)
+    } else {
+        None
+    };
+    let params_start = p.span().start();
+    let params = bracketed_list(p, buf, Brackets::Paren, parse_ident)?;
+    let params_end = p.cursor.span(p.cursor.prev()).end();
+    let params = Spanned::new(params, params_start..params_end);
+    let body = parse_block(p, buf)?;
+
+    let end = p.cursor.span(p.cursor.prev()).end();
+    Ok(Spanned::new(BareFunc { name, params, body }, start..end))
 }
 
 fn parse_expr_assign(p: &mut Parser, buf: &Bump) -> Result<Spanned<Expr>> {
@@ -426,7 +458,7 @@ fn parse_expr(p: &mut Parser, buf: &Bump) -> Result<Spanned<Expr>> {
         t![continue] => parse_expr_continue(p, buf),
         t![if] => parse_expr_if(p, buf),
         t![do] => parse_block(p, buf).map(|v| v.map_into()),
-        t![fn] => parse_expr_fn(p, buf),
+        t![fn] => parse_expr_func_anon(p, buf),
         _ => parse_expr_infix(p, buf),
     }
 }

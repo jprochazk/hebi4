@@ -1,0 +1,65 @@
+---
+source: src/parser/tests.rs
+expression: snapshot
+---
+OK
+Root(
+    [
+        Var(
+            Ident(
+                "empty",
+            ),
+            FuncAnon(
+                None,
+                Block(
+                    [],
+                ),
+                [],
+            ),
+        ),
+        Var(
+            Ident(
+                "args",
+            ),
+            FuncAnon(
+                None,
+                Block(
+                    [],
+                ),
+                [
+                    Ident(
+                        "a",
+                    ),
+                    Ident(
+                        "b",
+                    ),
+                    Ident(
+                        "c",
+                    ),
+                ],
+            ),
+        ),
+        Var(
+            Ident(
+                "args_tc",
+            ),
+            FuncAnon(
+                None,
+                Block(
+                    [],
+                ),
+                [
+                    Ident(
+                        "a",
+                    ),
+                    Ident(
+                        "b",
+                    ),
+                    Ident(
+                        "c",
+                    ),
+                ],
+            ),
+        ),
+    ],
+)

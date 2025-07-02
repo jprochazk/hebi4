@@ -5,58 +5,52 @@ expression: snapshot
 OK
 Root(
     [
-        StmtExpr(
-            Func(
-                Ident(
-                    "test",
-                ),
-                Block(
-                    [],
-                ),
+        FuncDecl(
+            Ident(
+                "test",
+            ),
+            Block(
                 [],
             ),
+            [],
         ),
-        StmtExpr(
-            Func(
-                Ident(
-                    "test",
-                ),
-                Block(
-                    [],
-                ),
-                [
-                    Ident(
-                        "a",
-                    ),
-                    Ident(
-                        "b",
-                    ),
-                    Ident(
-                        "c",
-                    ),
-                ],
+        FuncDecl(
+            Ident(
+                "test",
             ),
+            Block(
+                [],
+            ),
+            [
+                Ident(
+                    "a",
+                ),
+                Ident(
+                    "b",
+                ),
+                Ident(
+                    "c",
+                ),
+            ],
         ),
-        StmtExpr(
-            Func(
-                Ident(
-                    "test",
-                ),
-                Block(
-                    [],
-                ),
-                [
-                    Ident(
-                        "a",
-                    ),
-                    Ident(
-                        "b",
-                    ),
-                    Ident(
-                        "c",
-                    ),
-                ],
+        FuncDecl(
+            Ident(
+                "test",
             ),
+            Block(
+                [],
+            ),
+            [
+                Ident(
+                    "a",
+                ),
+                Ident(
+                    "b",
+                ),
+                Ident(
+                    "c",
+                ),
+            ],
         ),
     ],
 )

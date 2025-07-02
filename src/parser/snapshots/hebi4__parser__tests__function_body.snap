@@ -5,94 +5,88 @@ expression: snapshot
 OK
 Root(
     [
-        StmtExpr(
-            Func(
-                Ident(
-                    "test",
-                ),
-                Block(
-                    [
-                        StmtExpr(
-                            Infix(
-                                Add,
-                                Int(
-                                    1,
-                                ),
-                                Int(
-                                    1,
-                                ),
-                            ),
-                        ),
-                    ],
-                ),
-                [],
+        FuncDecl(
+            Ident(
+                "test",
             ),
-        ),
-        StmtExpr(
-            Func(
-                Ident(
-                    "test",
-                ),
-                Block(
-                    [
-                        StmtExpr(
-                            Infix(
-                                Add,
-                                Int(
-                                    1,
-                                ),
-                                Int(
-                                    1,
-                                ),
+            Block(
+                [
+                    StmtExpr(
+                        Infix(
+                            Add,
+                            Int(
+                                1,
+                            ),
+                            Int(
+                                1,
                             ),
                         ),
-                    ],
-                ),
-                [
-                    Ident(
-                        "a",
-                    ),
-                    Ident(
-                        "b",
-                    ),
-                    Ident(
-                        "c",
                     ),
                 ],
             ),
+            [],
         ),
-        StmtExpr(
-            Func(
-                Ident(
-                    "test",
-                ),
-                Block(
-                    [
-                        StmtExpr(
-                            Infix(
-                                Add,
-                                Int(
-                                    1,
-                                ),
-                                Int(
-                                    1,
-                                ),
+        FuncDecl(
+            Ident(
+                "test",
+            ),
+            Block(
+                [
+                    StmtExpr(
+                        Infix(
+                            Add,
+                            Int(
+                                1,
+                            ),
+                            Int(
+                                1,
                             ),
                         ),
-                    ],
-                ),
-                [
-                    Ident(
-                        "a",
-                    ),
-                    Ident(
-                        "b",
-                    ),
-                    Ident(
-                        "c",
                     ),
                 ],
             ),
+            [
+                Ident(
+                    "a",
+                ),
+                Ident(
+                    "b",
+                ),
+                Ident(
+                    "c",
+                ),
+            ],
+        ),
+        FuncDecl(
+            Ident(
+                "test",
+            ),
+            Block(
+                [
+                    StmtExpr(
+                        Infix(
+                            Add,
+                            Int(
+                                1,
+                            ),
+                            Int(
+                                1,
+                            ),
+                        ),
+                    ),
+                ],
+            ),
+            [
+                Ident(
+                    "a",
+                ),
+                Ident(
+                    "b",
+                ),
+                Ident(
+                    "c",
+                ),
+            ],
         ),
     ],
 )

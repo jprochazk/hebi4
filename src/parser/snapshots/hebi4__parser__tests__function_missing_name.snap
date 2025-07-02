@@ -1,0 +1,8 @@
+---
+source: src/parser/tests.rs
+expression: snapshot
+---
+ERROR
+expected function name
+3 |  fn () do end
+  |     ^

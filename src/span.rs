@@ -97,8 +97,11 @@ pub struct Spanned<T> {
 
 impl<T> Spanned<T> {
     #[inline]
-    pub fn new(inner: T, span: Span) -> Self {
-        Self { inner, span }
+    pub fn new(inner: T, span: impl Into<Span>) -> Self {
+        Self {
+            inner,
+            span: span.into(),
+        }
     }
 
     #[inline]

@@ -1,0 +1,5 @@
+##parse
+
+var empty = fn() do end
+var args = fn(a, b, c) do end
+var args_tc = fn(a, b, c, ) do end

@@ -39,8 +39,14 @@ expr block {
     body: [stmt],
 };
 
-expr func {
+stmt func_decl {
     name: ident,
+    body: block,
+    params: [ident],
+};
+
+expr func_anon {
+    name: ident?,
     body: block,
     params: [ident],
 };
