@@ -125,90 +125,79 @@ impl FloatId {
     }
 }
 
-pub struct Ast {
-    root: Root,
-    nodes: Vec<Packed>,
-    spans: Vec<Span>,
-    strings: Interner<StrId>,
-    idents: Interner<IdentId>,
-    floats: SimpleInterner<FloatId, f64n>,
-}
+pub use private::Ast;
+mod private {
+    use super::*;
 
-pub struct AstBuilder {
-    nodes: Vec<Packed>,
-    spans: Vec<Span>,
-    strings: Interner<StrId>,
-    idents: Interner<IdentId>,
-    floats: SimpleInterner<FloatId, f64n>,
-}
-
-impl AstBuilder {
-    pub(crate) fn new(tokens: &Tokens<'_>) -> Self {
-        Self {
-            // le shrug
-            nodes: Vec::with_capacity(tokens.len() / 2),
-            spans: Vec::with_capacity(tokens.len() / 2),
-            strings: Interner::with_capacity(tokens.len() / 16),
-            idents: Interner::with_capacity(tokens.len() / 8),
-
-            // really spitballin here
-            floats: SimpleInterner::with_capacity(128),
-        }
+    pub struct Ast {
+        root: Option<Root>,
+        pub(crate) nodes: Vec<Packed>,
+        pub(crate) spans: Vec<Span>,
+        pub(crate) strings: Interner<StrId>,
+        pub(crate) idents: Interner<IdentId>,
+        pub(crate) floats: SimpleInterner<FloatId, f64n>,
     }
 
-    pub(crate) fn build(self, root: Root) -> Ast {
-        let Self {
-            nodes,
-            spans,
-            strings,
-            idents,
-            floats,
-        } = self;
+    impl Ast {
+        pub(crate) fn new(tokens: &Tokens<'_>) -> Self {
+            Self {
+                root: None,
 
-        Ast {
-            root,
-            nodes,
-            spans,
-            strings,
-            idents,
-            floats,
-        }
-    }
+                // le shrug
+                nodes: Vec::with_capacity(tokens.len() / 2),
+                spans: Vec::with_capacity(tokens.len() / 2),
+                strings: Interner::with_capacity(tokens.len() / 16),
+                idents: Interner::with_capacity(tokens.len() / 8),
 
-    pub(crate) fn intern_ident(&mut self, ident: &str) -> IdentId {
-        self.idents.intern(ident)
-    }
-
-    pub(crate) fn intern_str(&mut self, str: &str) -> StrId {
-        self.strings.intern(str)
-    }
-
-    pub(crate) fn intern_float(&mut self, v: f64) -> FloatId {
-        self.floats.intern(f64n::new(v))
-    }
-
-    fn append(&mut self, nodes: &[Spanned<Packed>]) -> u32 {
-        let index = self.nodes.len() as u32;
-
-        self.spans.reserve(nodes.len());
-        self.nodes.reserve(nodes.len());
-
-        let spans_mem = self.spans.spare_capacity_mut();
-        let nodes_mem = self.nodes.spare_capacity_mut();
-        for (i, node) in nodes.iter().enumerate() {
-            unsafe {
-                spans_mem.get_unchecked_mut(i).write(node.span);
-                nodes_mem.get_unchecked_mut(i).write(node.into_inner());
+                // really spitballin here
+                floats: SimpleInterner::with_capacity(128),
             }
         }
 
-        unsafe {
-            let new_len = self.nodes.len() + nodes.len();
-            self.spans.set_len(new_len);
-            self.nodes.set_len(new_len);
+        pub(crate) fn set_root(&mut self, root: Root) {
+            assert!(self.root.is_none());
+            self.root = Some(root);
         }
 
-        index
+        pub(crate) fn root(&self) -> Root {
+            self.root.unwrap()
+        }
+
+        pub(crate) fn intern_ident(&mut self, ident: &str) -> IdentId {
+            self.idents.intern(ident)
+        }
+
+        pub(crate) fn intern_str(&mut self, str: &str) -> StrId {
+            self.strings.intern(str)
+        }
+
+        pub(crate) fn intern_float(&mut self, v: f64) -> FloatId {
+            self.floats.intern(f64n::new(v))
+        }
+
+        pub(super) fn append(&mut self, nodes: &[Spanned<Packed>]) -> u32 {
+            let index = self.nodes.len() as u32;
+
+            self.spans.reserve(nodes.len());
+            self.nodes.reserve(nodes.len());
+
+            let spans_mem = self.spans.spare_capacity_mut();
+            let nodes_mem = self.nodes.spare_capacity_mut();
+            for (i, node) in nodes.iter().enumerate() {
+                unsafe {
+                    spans_mem.get_unchecked_mut(i).write(node.span);
+                    nodes_mem.get_unchecked_mut(i).write(node.into_inner());
+                }
+            }
+
+            unsafe {
+                let new_len = self.nodes.len() + nodes.len();
+                self.spans.set_len(new_len);
+                self.nodes.set_len(new_len);
+            }
+
+            index
+        }
     }
 }
 
@@ -236,6 +225,6 @@ roundtrip_u56_id!(FloatId);
 
 impl std::fmt::Debug for Ast {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.root.debug(self).fmt(f)
+        self.root().debug(self).fmt(f)
     }
 }

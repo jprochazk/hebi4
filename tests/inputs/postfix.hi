@@ -1,0 +1,13 @@
+##parse
+
+var use = x
+
+var field = x.a
+
+var index = x[0]
+
+var combined = x.a[0]
+
+var combined_inverse = x[0].a
+
+var many = x.a.b.c[0][1][2]

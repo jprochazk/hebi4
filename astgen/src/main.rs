@@ -673,11 +673,13 @@ fn assign_tag_numbers(nodes: &mut Nodes<'_>) {
 
 use std::fmt::Write as _;
 
+/// Emit a line
 macro_rules! ln {
     ($f:ident, $($tt:tt)*) => (writeln!($f, $($tt)*).unwrap());
     ($f:ident) => (writeln!($f).unwrap());
 }
 
+/// Emit multi-line string
 macro_rules! ml {
     ($f:ident, $($tt:tt)*) => (indoc::writedoc!($f, $($tt)*).unwrap());
 }
@@ -721,7 +723,7 @@ fn emit_prelude(out: &mut String) {
         // See `astgen/src/main.rs` and `astgen/src/runtime.rs`
 
         use super::{{
-            Ast, AstBuilder,
+            Ast,
             IdentId, StrId, FloatId,
             AssignOp, InfixOp, PrefixOp,
         }};
@@ -942,6 +944,28 @@ fn emit_packed_wrappers(nodes: &Nodes, out: &mut String) {
 
 fn emit_node_parts(nodes: &Nodes, out: &mut String) {
     ln!(out, "pub mod parts {{ use super::Opt;");
+
+    for (category, members) in [("stmt", &nodes.stmts), ("expr", &nodes.exprs)] {
+        let name = AsPascalCase(category);
+
+        ml!(
+            out,
+            "
+            pub enum {name} {{
+                {variants}
+            }}
+            ",
+            variants = members
+                .iter()
+                .map(|&id| &nodes.flat[id.0])
+                .map(|node| {
+                    let kind = AsPascalCase(node.name);
+                    format!("{kind}(super::{kind}),")
+                })
+                .join('\n')
+        );
+    }
+
     for node in nodes.in_order() {
         let name = AsPascalCase(node.name);
         let lifetime = if node.has_tail() { "<'a>" } else { "" };
@@ -1057,7 +1081,7 @@ fn emit_pack_impls(nodes: &Nodes, out: &mut String) {
                 type Node = {name};
 
                 #[inline]
-                fn pack(self, ast: &mut AstBuilder) -> Self::Node {{
+                fn pack(self, ast: &mut Ast) -> Self::Node {{
             "
         );
         match &node.kind {
@@ -1193,6 +1217,32 @@ fn emit_pack_impls(nodes: &Nodes, out: &mut String) {
 }
 
 fn emit_unpack_impls(nodes: &Nodes, out: &mut String) {
+    for (category, members) in [("stmt", &nodes.stmts), ("expr", &nodes.exprs)] {
+        let name = AsPascalCase(category);
+        ml!(
+            out,
+            "
+            impl Unpack for {name} {{
+                type Node<'a> = parts::{name};
+
+                #[inline]
+                unsafe fn unpack<'a>(self, ast: &'a Ast) -> Self::Node<'a> {{
+                    match self.kind() {{
+                        {kinds}
+                    }}
+                }}
+            }}
+            ",
+            kinds = members.iter()
+                .map(|&id| &nodes.flat[id.0])
+                .map(|node| {
+                    let kind = AsPascalCase(node.name);
+                    format!("{name}Kind::{kind} => parts::{name}::{kind}(unsafe {{ PackedNode::from_packed(self.0) }}),")
+                })
+                .join('\n')
+        );
+    }
+
     for node in nodes.in_order() {
         let name = AsPascalCase(node.name);
         let lifetime = if node.has_tail() { "<'a>" } else { "" };

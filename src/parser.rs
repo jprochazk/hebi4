@@ -7,8 +7,7 @@ use bumpalo::{
 
 use crate::{
     ast::{
-        self, Ast, AstBuilder, Expr, ExprKind, InfixOp, Opt, Pack, PackedNode, PrefixOp, Stmt,
-        spanned::*, u56,
+        self, AssignOp, Ast, Expr, ExprKind, InfixOp, Opt, Pack, PrefixOp, Stmt, spanned::*, u56,
     },
     error::{Error, error},
     span::{Span, Spanned},
@@ -24,14 +23,14 @@ pub fn parse(tokens: &Tokens<'_>) -> Result<Ast> {
 
 struct Parser<'t, 'src> {
     cursor: TokenCursor<'src, 't>,
-    ast: AstBuilder,
+    ast: Ast,
 }
 
 impl<'t, 'src> Parser<'t, 'src> {
     fn new(tokens: &'t Tokens<'src>) -> Self {
         Self {
             cursor: tokens.cursor(),
-            ast: AstBuilder::new(tokens),
+            ast: Ast::new(tokens),
         }
     }
 
@@ -161,7 +160,9 @@ fn parse_root(mut p: Parser) -> Result<Ast> {
 
     let root = Root { body }.pack(&mut p.ast);
 
-    Ok(p.ast.build(root))
+    p.ast.set_root(root);
+
+    Ok(p.ast)
 }
 
 fn parse_stmt(p: &mut Parser, buf: &Bump) -> Result<Spanned<Stmt>> {
@@ -430,23 +431,36 @@ fn parse_bare_func<'bump>(p: &mut Parser, buf: &'bump Bump) -> Result<Spanned<Ba
 }
 
 fn parse_expr_assign(p: &mut Parser, buf: &Bump) -> Result<Spanned<Expr>> {
+    let start = p.span().start();
+
     let lhs = parse_expr(p, buf)?;
     let op = match p.kind() {
-        t![=] => None,
-        t![+=] => Some(InfixOp::Add),
-        t![-=] => Some(InfixOp::Sub),
-        t![*=] => Some(InfixOp::Mul),
-        t![/=] => Some(InfixOp::Div),
+        t![=] => AssignOp::None,
+        t![+=] => AssignOp::Add,
+        t![-=] => AssignOp::Sub,
+        t![*=] => AssignOp::Mul,
+        t![/=] => AssignOp::Div,
         _ => return Ok(lhs),
     };
     p.advance(); // eat op
     let value = parse_expr(p, buf)?;
+    let end = p.cursor.span(p.cursor.prev()).end();
+    let span = start..end;
 
-    use ExprKind as E;
-    match lhs.kind() {
-        E::GetIndex => todo!("index assignment"),
-        E::GetField => todo!("field assignment"),
-        E::GetVar => todo!("variable assignment"),
+    use ast::nodes::{Unpack as _, parts::Expr as E};
+    match unsafe { lhs.unpack(&p.ast) } {
+        E::GetIndex(base) => {
+            let base = lhs.map(|_| base);
+            Ok(Spanned::new(SetIndex { base, value, op }.pack(&mut p.ast), span).map_into())
+        }
+        E::GetField(base) => {
+            let base = lhs.map(|_| base);
+            Ok(Spanned::new(SetField { base, value, op }.pack(&mut p.ast), span).map_into())
+        }
+        E::GetVar(base) => {
+            let base = lhs.map(|_| base);
+            Ok(Spanned::new(SetVar { base, value, op }.pack(&mut p.ast), span).map_into())
+        }
         _ => error("invalid assignment target", lhs.span).into(),
     }
 }

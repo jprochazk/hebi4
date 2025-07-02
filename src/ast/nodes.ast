@@ -55,14 +55,29 @@ expr get_var {
     name: ident,
 };
 
+expr set_var(op: AssignOp as u24) {
+    base: get_var,
+    value: expr,
+};
+
 expr get_field {
     parent: expr,
     key: ident,
 };
 
+expr set_field(op: AssignOp as u24) {
+    base: get_field,
+    value: expr,
+};
+
 expr get_index {
     parent: expr,
     key: expr,
+};
+
+expr set_index(op: AssignOp as u24) {
+    base: get_index,
+    value: expr,
 };
 
 expr call {
@@ -73,23 +88,6 @@ expr call {
 expr call_object {
     callee: expr,
     args: [object_entry],
-};
-
-expr set_var(op: AssignOp as u24) {
-    name: ident,
-    value: expr,
-};
-
-expr set_field(op: AssignOp as u24) {
-    parent: expr,
-    key: ident,
-    value: expr,
-};
-
-expr set_index(op: AssignOp as u24) {
-    parent: expr,
-    key: expr,
-    value: expr,
 };
 
 expr infix(op: InfixOp as u24) {

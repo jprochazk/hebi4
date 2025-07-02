@@ -7,7 +7,6 @@
 // the time of writing.
 
 pub struct Ast {}
-pub struct AstBuilder {}
 pub struct IdentId {}
 pub struct StrId {}
 pub struct FloatId {}
@@ -578,7 +577,7 @@ impl std::error::Error for NodeCastError {}
 pub trait Pack {
     type Node;
 
-    fn pack(self, ast: &mut AstBuilder) -> Self::Node;
+    fn pack(self, ast: &mut Ast) -> Self::Node;
 }
 
 pub trait Unpack {
