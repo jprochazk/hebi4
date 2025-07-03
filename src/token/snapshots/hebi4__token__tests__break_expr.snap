@@ -4,6 +4,6 @@ expression: tokenize(&input)
 ---
 [
     Loop("loop", 0..4),
-    Break("break", 9..14),
-    End("end", 15..18),
+    Break("break", 7..12),
+    End("end", 13..16),
 ]
