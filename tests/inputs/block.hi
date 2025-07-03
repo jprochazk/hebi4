@@ -1,15 +1,15 @@
 ##parse
 
 do
-    1 + 1
-    2 + 2
+  1 + 1
+  2 + 2
 end
 
 do
-    do
-        1 + 1
-        2 + 2
-    end
+  do
+    1 + 1
+    2 + 2
+  end
 end
 
 var expr = do 1 + 1 end

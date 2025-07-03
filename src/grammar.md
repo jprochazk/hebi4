@@ -221,9 +221,6 @@ expr_infix =
 ```
 
 a unary expression.
-syntax like "not not" and "--" is not allowed.
-the parser should still consume all "-" and "not" tokens, but emit a syntax error
-if more than one appears in a row.
 ```
 expr_prefix =
     "-" expr_suffix

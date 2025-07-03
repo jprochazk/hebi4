@@ -1,6 +1,6 @@
 ##parse
 
 loop
-    continue
-    break
+  continue
+  break
 end
