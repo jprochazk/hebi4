@@ -1,0 +1,27 @@
+##parse
+
+fn fib_rec(n) do
+  if n < 2 do
+    n
+  else
+    fib(n-1) + fib(n-2)
+  end
+end
+
+fn fib_iter(n) do
+  if n < 2 do return n end
+
+  var prev = 0
+  var curr = 1
+  var i = 2
+  loop
+    if i > n do break end
+    i += 1
+
+    var next = prev + curr
+    prev = curr
+    curr = next
+  end
+
+  return curr
+end

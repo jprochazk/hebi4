@@ -1,0 +1,34 @@
+##parse
+
+fn selection_sort(arr) do
+  var n = len(arr)
+  var i = 0
+  loop
+    if i >= n - 1 do
+      break
+    end
+
+    var min_idx = i
+    var j = i + 1
+    loop
+      if j >= n do
+        break
+      end
+      if arr[j] < arr[min_idx] do
+        min_idx = j
+      end
+      j = j + 1
+    end
+
+    if min_idx != i do
+      var tmp = arr[i]
+      arr[i] = arr[min_idx]
+      arr[min_idx] = tmp
+    end
+
+    i = i + 1
+  end
+
+  return arr
+end
+

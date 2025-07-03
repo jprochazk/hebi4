@@ -1,0 +1,23 @@
+##parse
+
+fn is_prime(n) do
+  if n < 2 do
+    return false
+  end
+
+  var i = 2
+  loop
+    if i * i > n do
+      break
+    end
+
+    if n / i * i == n do
+      return false
+    end
+
+    i = i + 1
+  end
+
+  return true
+end
+
