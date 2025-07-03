@@ -1,0 +1,23 @@
+if true do
+  0
+end
+
+if false do
+  0
+else
+  1
+end
+
+if true do
+  0
+else if false do
+  1
+end
+
+if false do
+  0
+else if true do
+  1
+else
+  2
+end

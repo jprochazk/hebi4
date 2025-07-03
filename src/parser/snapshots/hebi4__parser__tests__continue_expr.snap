@@ -1,0 +1,16 @@
+---
+source: src/parser/tests.rs
+expression: snapshot
+---
+OK
+Root(
+    [
+        Loop(
+            [
+                StmtExpr(
+                    Continue,
+                ),
+            ],
+        ),
+    ],
+)

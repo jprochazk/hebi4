@@ -24,6 +24,7 @@ pub fn parse(tokens: &Tokens<'_>) -> Result<Ast> {
 struct Parser<'t, 'src> {
     cursor: TokenCursor<'src, 't>,
     ast: Ast,
+    loop_depth: u32,
 }
 
 impl<'t, 'src> Parser<'t, 'src> {
@@ -31,6 +32,7 @@ impl<'t, 'src> Parser<'t, 'src> {
         Self {
             cursor: tokens.cursor(),
             ast: Ast::new(tokens),
+            loop_depth: 0,
         }
     }
 
@@ -204,12 +206,16 @@ fn parse_stmt_func_decl(p: &mut Parser, buf: &Bump) -> Result<Spanned<Stmt>> {
 fn parse_stmt_loop(p: &mut Parser, buf: &Bump) -> Result<Spanned<Stmt>> {
     let node = p.open_at(t![loop])?;
 
+    p.loop_depth += 1;
+
     let mut body = temp(buf);
     while !p.end() && !p.at(t![end]) {
         body.push(parse_stmt(p, buf)?);
     }
     let body = body.as_slice();
     p.must(t![end])?;
+
+    p.loop_depth -= 1;
 
     Ok(p.close(node, Loop { body }).map_into())
 }
@@ -235,7 +241,7 @@ fn parse_expr_top_level(p: &mut Parser, buf: &Bump) -> Result<Spanned<Expr>> {
         t![return] => parse_expr_return(p, buf),
         t![break] => parse_expr_break(p, buf),
         t![continue] => parse_expr_continue(p, buf),
-        t![if] => parse_expr_if(p, buf),
+        t![if] => parse_expr_if(p, buf, true),
         t![do] => parse_block(p, buf).map(|v| v.map_into()),
         t![fn] => parse_expr_func_anon(p, buf),
         _ => parse_expr_assign(p, buf),
@@ -255,18 +261,28 @@ fn parse_expr_return(p: &mut Parser, buf: &Bump) -> Result<Spanned<Expr>> {
 }
 
 fn parse_expr_break(p: &mut Parser, _: &Bump) -> Result<Spanned<Expr>> {
+    let span = p.span();
     let node = p.open_at(t![break])?;
+
+    if p.loop_depth == 0 {
+        return error("`break` outside of a loop", span).into();
+    }
 
     Ok(p.close(node, Break {}).map_into())
 }
 
 fn parse_expr_continue(p: &mut Parser, _: &Bump) -> Result<Spanned<Expr>> {
+    let span = p.span();
     let node = p.open_at(t![continue])?;
+
+    if p.loop_depth == 0 {
+        return error("`continue` outside of a loop", span).into();
+    }
 
     Ok(p.close(node, Continue {}).map_into())
 }
 
-fn parse_expr_if(p: &mut Parser, buf: &Bump) -> Result<Spanned<Expr>> {
+fn parse_expr_if(p: &mut Parser, buf: &Bump, is_top_level: bool) -> Result<Spanned<Expr>> {
     // simple:
     //   if a do ... end
     //   if a do ... else ... end
@@ -299,11 +315,21 @@ fn parse_expr_if(p: &mut Parser, buf: &Bump) -> Result<Spanned<Expr>> {
         }
     }
 
+    let end_span = p.span();
     p.must(t![end])?;
 
     let tail = tail
         .map(|tail| tail.map(Opt::some))
         .unwrap_or_else(|| Spanned::empty(Opt::none()));
+
+    if tail.is_none() && !is_top_level {
+        return error(
+            "if expression without `else` is not allowed in this context",
+            end_span,
+        )
+        .into();
+    }
+
     match branches.len() {
         0 => unreachable!("always at least one branch"),
         1 => {
@@ -424,7 +450,11 @@ fn parse_bare_func<'bump>(p: &mut Parser, buf: &'bump Bump) -> Result<Spanned<Ba
     let params = bracketed_list(p, buf, Brackets::Paren, parse_ident)?;
     let params_end = p.cursor.span(p.cursor.prev()).end();
     let params = Spanned::new(params, params_start..params_end);
+
+    let prev_loop_depth = p.loop_depth;
+    p.loop_depth = 0;
     let body = parse_block(p, buf)?;
+    p.loop_depth = prev_loop_depth;
 
     let end = p.cursor.span(p.cursor.prev()).end();
     Ok(Spanned::new(BareFunc { name, params, body }, start..end))
@@ -470,7 +500,7 @@ fn parse_expr(p: &mut Parser, buf: &Bump) -> Result<Spanned<Expr>> {
         t![return] => parse_expr_return(p, buf),
         t![break] => parse_expr_break(p, buf),
         t![continue] => parse_expr_continue(p, buf),
-        t![if] => parse_expr_if(p, buf),
+        t![if] => parse_expr_if(p, buf, false),
         t![do] => parse_block(p, buf).map(|v| v.map_into()),
         t![fn] => parse_expr_func_anon(p, buf),
         _ => parse_expr_infix(p, buf),

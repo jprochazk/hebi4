@@ -1,0 +1,14 @@
+---
+source: src/token/tests.rs
+expression: tokenize(&input)
+---
+[
+    Var("var", 0..3),
+    Ident("x", 4..5),
+    Eq("=", 6..7),
+    If("if", 8..10),
+    True("true", 11..15),
+    Do("do", 16..18),
+    Integer("0", 19..20),
+    End("end", 21..24),
+]

@@ -1,0 +1,8 @@
+---
+source: src/parser/tests.rs
+expression: snapshot
+---
+ERROR
+`break` outside of a loop
+1 |  break
+  |  ^^^^^

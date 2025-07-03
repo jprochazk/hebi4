@@ -1,0 +1,9 @@
+---
+source: src/token/tests.rs
+expression: tokenize(&input)
+---
+[
+    Loop("loop", 0..4),
+    Continue("continue", 9..17),
+    End("end", 18..21),
+]

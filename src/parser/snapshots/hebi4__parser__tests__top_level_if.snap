@@ -5,23 +5,32 @@ expression: snapshot
 OK
 Root(
     [
-        Var(
-            Ident(
-                "simple",
-            ),
+        StmtExpr(
             IfSimple(
                 Bool(
                     true,
+                ),
+                None,
+                [
+                    StmtExpr(
+                        Int(
+                            0,
+                        ),
+                    ),
+                ],
+            ),
+        ),
+        StmtExpr(
+            IfSimple(
+                Bool(
+                    false,
                 ),
                 Some(
                     Block(
                         [
                             StmtExpr(
-                                Prefix(
-                                    Minus,
-                                    Int(
-                                        1,
-                                    ),
+                                Int(
+                                    1,
                                 ),
                             ),
                         ],
@@ -36,53 +45,9 @@ Root(
                 ],
             ),
         ),
-        Var(
-            Ident(
-                "ternary",
-            ),
-            IfSimple(
-                Bool(
-                    true,
-                ),
-                Some(
-                    Block(
-                        [
-                            StmtExpr(
-                                Int(
-                                    0,
-                                ),
-                            ),
-                        ],
-                    ),
-                ),
-                [
-                    StmtExpr(
-                        Int(
-                            1,
-                        ),
-                    ),
-                ],
-            ),
-        ),
-        Var(
-            Ident(
-                "multi_one",
-            ),
+        StmtExpr(
             IfMulti(
-                Some(
-                    Block(
-                        [
-                            StmtExpr(
-                                Prefix(
-                                    Minus,
-                                    Int(
-                                        1,
-                                    ),
-                                ),
-                            ),
-                        ],
-                    ),
-                ),
+                None,
                 [
                     Branch(
                         Bool(
@@ -98,7 +63,7 @@ Root(
                     ),
                     Branch(
                         Bool(
-                            true,
+                            false,
                         ),
                         [
                             StmtExpr(
@@ -111,10 +76,7 @@ Root(
                 ],
             ),
         ),
-        Var(
-            Ident(
-                "mutli_one_else",
-            ),
+        StmtExpr(
             IfMulti(
                 Some(
                     Block(
@@ -130,7 +92,7 @@ Root(
                 [
                     Branch(
                         Bool(
-                            true,
+                            false,
                         ),
                         [
                             StmtExpr(
