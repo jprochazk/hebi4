@@ -3,6 +3,6 @@ source: src/parser/tests.rs
 expression: snapshot
 ---
 ERROR
-if expression without `else` is not allowed in this context
+expected `else`
 1 |  var x = if true do 0 end
   |                       ^^^

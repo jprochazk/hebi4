@@ -323,11 +323,7 @@ fn parse_expr_if(p: &mut Parser, buf: &Bump, is_top_level: bool) -> Result<Spann
         .unwrap_or_else(|| Spanned::empty(Opt::none()));
 
     if tail.is_none() && !is_top_level {
-        return error(
-            "if expression without `else` is not allowed in this context",
-            end_span,
-        )
-        .into();
+        return error("expected `else`", end_span).into();
     }
 
     match branches.len() {
