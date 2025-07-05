@@ -19,7 +19,7 @@ pub enum AssignOp {
 }
 
 impl AssignOp {
-    pub fn debug(self, _: &Ast) -> impl std::fmt::Debug + '_ {
+    pub fn debug(&self, _: &Ast) -> impl std::fmt::Debug + '_ {
         self
     }
 }
@@ -36,7 +36,7 @@ pub enum InfixOp {
 }
 
 impl InfixOp {
-    pub fn debug(self, _: &Ast) -> impl std::fmt::Debug + '_ {
+    pub fn debug(&self, _: &Ast) -> impl std::fmt::Debug + '_ {
         self
     }
 }
@@ -49,7 +49,7 @@ pub enum PrefixOp {
 }
 
 impl PrefixOp {
-    pub fn debug(self, _: &Ast) -> impl std::fmt::Debug + '_ {
+    pub fn debug(&self, _: &Ast) -> impl std::fmt::Debug + '_ {
         self
     }
 }
@@ -87,7 +87,7 @@ impl f64n {
 }
 
 impl f64n {
-    pub fn debug(self, _: &Ast) -> impl std::fmt::Debug + '_ {
+    pub fn debug(&self, _: &Ast) -> impl std::fmt::Debug + '_ {
         self
     }
 }
@@ -108,20 +108,20 @@ declare_intern_id!(pub IdentId);
 declare_intern_id!(pub FloatId);
 
 impl StrId {
-    pub fn debug(self, ast: &Ast) -> impl std::fmt::Debug + '_ {
-        ast.strings.get(self).unwrap()
+    pub fn debug<'a>(&self, ast: &'a Ast) -> impl std::fmt::Debug + 'a {
+        ast.strings.get(*self).unwrap()
     }
 }
 
 impl IdentId {
-    pub fn debug(self, ast: &Ast) -> impl std::fmt::Debug + '_ {
-        ast.idents.get(self).unwrap()
+    pub fn debug<'a>(&self, ast: &'a Ast) -> impl std::fmt::Debug + 'a {
+        ast.idents.get(*self).unwrap()
     }
 }
 
 impl FloatId {
-    pub fn debug(self, ast: &Ast) -> impl std::fmt::Debug + '_ {
-        ast.floats.get(self).unwrap()
+    pub fn debug<'a>(&self, ast: &'a Ast) -> impl std::fmt::Debug + 'a {
+        ast.floats.get(*self).unwrap()
     }
 }
 
@@ -159,8 +159,12 @@ mod private {
             self.root = Some(root);
         }
 
-        pub(crate) fn root(&self) -> Root {
-            self.root.unwrap()
+        pub(crate) fn root(&self) -> Node<'_, Root> {
+            let root = self.root.as_ref().unwrap();
+            Node {
+                ast: self,
+                node: root,
+            }
         }
 
         pub(crate) fn intern_ident(&mut self, ident: &str) -> IdentId {
