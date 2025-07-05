@@ -1,5 +1,9 @@
+use std::borrow::Cow;
+
+use bumpalo::{Bump, collections::Vec, vec};
+
 use crate::{
-    ast::Ast,
+    ast::{Ast, Ident, Stmt},
     error::{Error, Result, error},
 };
 
@@ -9,26 +13,48 @@ pub fn emit(ast: &Ast) -> Result<Module> {
 
 pub struct Module {}
 
-struct State {
-    module: Module,
+struct ModuleState {}
+
+pub struct Function {}
+
+struct FunctionState<'func, 'ast, 'bump> {
+    parent: Option<&'func mut FunctionState<'func, 'ast, 'bump>>,
+
+    name: Cow<'ast, str>,
+
+    // todo: params
+    scopes: Vec<'bump, Vec<'bump, Var<'ast>>>,
 }
 
-impl State {
-    #[inline]
-    fn new() -> Self {
-        Self { module: Module {} }
-    }
+struct Var<'ast> {
+    name: Cow<'ast, str>,
+    register: u8,
 }
 
-fn emit_root(mut p: State, ast: &Ast) -> Result<Module> {
-    for stmt in ast.root().body() {
-        match stmt.kind() {
-            crate::ast::StmtKind::Var(node) => todo!(),
-            crate::ast::StmtKind::Loop(node) => todo!(),
-            crate::ast::StmtKind::StmtExpr(node) => todo!(),
-            crate::ast::StmtKind::FuncDecl(node) => todo!(),
+impl<'func, 'ast, 'bump> FunctionState<'func, 'ast, 'bump> {
+    fn new(
+        parent: Option<&'func mut FunctionState<'func, 'ast, 'bump>>,
+        name: Cow<'ast, str>,
+        buf: &'bump Bump,
+    ) -> Self {
+        Self {
+            parent,
+            name,
+            scopes: vec![in buf; vec![in buf]],
         }
     }
+}
+
+fn emit_func<'func, 'ast, 'bump>(
+    m: &mut ModuleState,
+    f: Option<&'func mut FunctionState<'func, 'ast, 'bump>>,
+    buf: &'bump Bump,
+    ast: &'ast Ast,
+    name: Cow<'ast, str>,
+    params: &'ast [Ident],
+    body: &'ast [Stmt],
+) -> Result<Function> {
+    let mut f = FunctionState::new(f, name, buf);
 
     todo!()
 }
