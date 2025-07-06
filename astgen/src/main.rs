@@ -65,11 +65,11 @@ fn main() {
         std::fs::create_dir_all(outfile.parent().unwrap_or(outfile))
             .expect("failed to create parent directories");
         std::fs::write(&outfile, out).expect("failed to write file");
-        run(format!("rustfmt {}", outfile.display()));
+        cmd(format!("rustfmt {}", outfile.display()));
     }
 }
 
-fn run(cmd: impl AsRef<str>) {
+fn cmd(cmd: impl AsRef<str>) {
     let cmd = cmd.as_ref();
     let mut parts = cmd.split_ascii_whitespace();
     let Some(cmd) = parts.next() else {
@@ -85,7 +85,8 @@ fn run(cmd: impl AsRef<str>) {
         .unwrap();
     let status = p.wait().unwrap();
     if !status.success() {
-        panic!("command exited with non-zero exit code");
+        eprintln!("command exited with non-zero exit code");
+        std::process::exit(1);
     }
 }
 

@@ -15,6 +15,7 @@ pub enum AssignOp {
     Add,
     Sub,
     Mul,
+    // TODO: integer division
     Div,
 }
 
@@ -32,6 +33,7 @@ pub enum InfixOp {
     Eq, Ne,
     Gt, Ge, Lt, Le,
     Add, Sub,
+    // TODO: integer division
     Mul, Div
 }
 

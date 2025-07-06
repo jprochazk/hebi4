@@ -14,4 +14,4 @@ uitest = { path = "./uitest" }
 insta = { version = "1.43.1" }
 
 [workspace]
-members = ["astgen", "uitest"]
+members = ["asmgen", "astgen", "uitest", "xtask"]

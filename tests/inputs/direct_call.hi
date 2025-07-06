@@ -1,0 +1,8 @@
+##emit
+
+fn test(a, b, c) do
+    print(a, b, c)
+end
+
+test(1, 2, 3)
+

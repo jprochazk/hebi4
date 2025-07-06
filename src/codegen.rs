@@ -1,3 +1,5 @@
+pub mod asm;
+
 use std::borrow::Cow;
 
 use bumpalo::{Bump, collections::Vec, vec};
