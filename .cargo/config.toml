@@ -1,3 +1,3 @@
 [alias]
-review = "insta test --review --unreferenced delete"
+review = "insta test --test-runner nextest --review --unreferenced delete"
 codegen = "run --release --quiet -p xtask codegen"
