@@ -15,3 +15,14 @@ mod parser;
 mod codegen;
 
 mod vm;
+
+pub use error::Result;
+pub use vm::Value;
+
+pub fn eval(code: &str) -> Result<vm::Value> {
+    let tokens = token::tokenize(code);
+    let ast = parser::parse(&tokens)?;
+    let module = codegen::emit(&ast)?;
+
+    todo!()
+}

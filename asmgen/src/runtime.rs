@@ -158,7 +158,7 @@ macro_rules! declare_operand_type {
             }
 
             #[inline(always)]
-            pub fn new(v: $ty) -> Self {
+            pub unsafe fn new_unchecked(v: $ty) -> Self {
                 Self(v)
             }
         }

@@ -6,10 +6,46 @@ use crate::{
     span::Span,
 };
 
-#[repr(u8)]
+pub struct Module {}
+
+// TODO: colocate data (?)
+pub struct FuncInfo {
+    pub name: Box<str>,
+    pub nparams: u8,
+    pub nstack: u8,
+    pub code: Box<[Instruction]>,
+    pub literals: Box<[Literal]>,
+    pub dbg: Box<dbg::FuncDebugInfo>,
+}
+
+pub mod dbg {
+    use super::*;
+
+    pub struct FuncDebugInfo {
+        pub spans: Box<[Span]>,
+        pub locals: Box<[Local]>,
+    }
+
+    pub struct Local {
+        pub name: Box<str>,
+        pub span: Span,
+        pub reg: Reg,
+    }
+}
+
+// NOTE: `Value` and `Literal` must be partialy bit-compatible
+// TODO: check this at compile time
+
+#[repr(C, u64)]
+pub enum Literal {
+    Int(i64) = 0,
+    Float(f64) = 1,
+}
+
+#[repr(C, u64)]
 pub enum Value {
-    Int(i64),
-    Float(f64),
+    Int(i64) = 0,
+    Float(f64) = 1,
 }
 
 pub struct Context {}
