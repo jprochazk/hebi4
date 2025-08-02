@@ -9,7 +9,7 @@ Root(
             Ident(
                 "x",
             ),
-            Int(
+            Int32(
                 0,
             ),
         ),
@@ -17,7 +17,7 @@ Root(
             Ident(
                 "y",
             ),
-            Int(
+            Int32(
                 1,
             ),
         ),

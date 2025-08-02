@@ -19,12 +19,6 @@ pub enum AssignOp {
     Div,
 }
 
-impl AssignOp {
-    pub fn debug(&self, _: &Ast) -> impl std::fmt::Debug + '_ {
-        self
-    }
-}
-
 #[rustfmt::skip]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
@@ -37,23 +31,11 @@ pub enum InfixOp {
     Mul, Div
 }
 
-impl InfixOp {
-    pub fn debug(&self, _: &Ast) -> impl std::fmt::Debug + '_ {
-        self
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum PrefixOp {
     Minus,
     Not,
-}
-
-impl PrefixOp {
-    pub fn debug(&self, _: &Ast) -> impl std::fmt::Debug + '_ {
-        self
-    }
 }
 
 macro_rules! roundtrip_u24_op {
@@ -72,6 +54,7 @@ macro_rules! roundtrip_u24_op {
     };
 }
 
+/// Float which can't hold a NaN.
 #[allow(non_camel_case_types)]
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct f64n(u64);
@@ -88,12 +71,6 @@ impl f64n {
     }
 }
 
-impl f64n {
-    pub fn debug(&self, _: &Ast) -> impl std::fmt::Debug + '_ {
-        self
-    }
-}
-
 impl std::fmt::Debug for f64n {
     #[inline]
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -107,25 +84,8 @@ roundtrip_u24_op!(PrefixOp);
 
 declare_intern_id!(pub StrId);
 declare_intern_id!(pub IdentId);
+declare_intern_id!(pub IntId);
 declare_intern_id!(pub FloatId);
-
-impl StrId {
-    pub fn debug<'a>(&self, ast: &'a Ast) -> impl std::fmt::Debug + 'a {
-        ast.strings.get(*self).unwrap()
-    }
-}
-
-impl IdentId {
-    pub fn debug<'a>(&self, ast: &'a Ast) -> impl std::fmt::Debug + 'a {
-        ast.idents.get(*self).unwrap()
-    }
-}
-
-impl FloatId {
-    pub fn debug<'a>(&self, ast: &'a Ast) -> impl std::fmt::Debug + 'a {
-        ast.floats.get(*self).unwrap()
-    }
-}
 
 pub use private::Ast;
 mod private {
@@ -137,6 +97,7 @@ mod private {
         pub(crate) spans: Vec<Span>,
         pub(crate) strings: Interner<StrId>,
         pub(crate) idents: Interner<IdentId>,
+        pub(crate) ints: SimpleInterner<IntId, i64>,
         pub(crate) floats: SimpleInterner<FloatId, f64n>,
     }
 
@@ -152,6 +113,7 @@ mod private {
                 idents: Interner::with_capacity(tokens.len() / 8),
 
                 // really spitballin here
+                ints: SimpleInterner::with_capacity(128),
                 floats: SimpleInterner::with_capacity(128),
             }
         }
@@ -175,6 +137,10 @@ mod private {
 
         pub(crate) fn intern_str(&mut self, str: &str) -> StrId {
             self.strings.intern(str)
+        }
+
+        pub(crate) fn intern_int(&mut self, v: i64) -> IntId {
+            self.ints.intern(v)
         }
 
         pub(crate) fn intern_float(&mut self, v: f64) -> FloatId {
@@ -227,10 +193,67 @@ macro_rules! roundtrip_u56_id {
 
 roundtrip_u56_id!(StrId);
 roundtrip_u56_id!(IdentId);
+roundtrip_u56_id!(IntId);
 roundtrip_u56_id!(FloatId);
 
 impl std::fmt::Debug for Ast {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.root().debug(self).fmt(f)
+        self.root().fmt(f)
     }
 }
+
+macro_rules! interned_node_get {
+    ($ty:ty, $out:ty, $kind:ident, $what_str:literal) => {
+        impl<'a> Node<'a, $ty> {
+            pub fn get(&self) -> &'a $out {
+                self.ast
+                    .$kind
+                    .get(self.id().value)
+                    .expect(concat!($what_str, " exists in `self.ast`"))
+            }
+        }
+    };
+}
+
+interned_node_get!(Ident, str, idents, "ident");
+interned_node_get!(Str, str, strings, "string");
+interned_node_get!(Float64, f64n, floats, "float");
+interned_node_get!(Int64, i64, ints, "integer");
+
+macro_rules! interned_value_debug {
+    ($ty:ty, $kind:ident) => {
+        impl<'a> std::fmt::Debug for ValueNode<'a, $ty> {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                std::fmt::Debug::fmt(
+                    self.ast
+                        .$kind
+                        .get(self.value)
+                        .expect("interned value exists in `self.ast`"),
+                    f,
+                )
+            }
+        }
+    };
+}
+
+interned_value_debug!(StrId, strings);
+interned_value_debug!(IdentId, idents);
+interned_value_debug!(IntId, ints);
+interned_value_debug!(FloatId, floats);
+
+macro_rules! delegate_value_debug {
+    ($ty:ty) => {
+        impl<'a> std::fmt::Debug for ValueNode<'a, $ty> {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                std::fmt::Debug::fmt(&self.value, f)
+            }
+        }
+    };
+}
+
+delegate_value_debug!(u32);
+delegate_value_debug!(f32);
+delegate_value_debug!(bool);
+delegate_value_debug!(InfixOp);
+delegate_value_debug!(PrefixOp);
+delegate_value_debug!(AssignOp);

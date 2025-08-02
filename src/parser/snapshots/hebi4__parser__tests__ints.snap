@@ -1,0 +1,41 @@
+---
+source: src/parser/tests.rs
+expression: snapshot
+---
+OK
+Root(
+    [
+        Var(
+            Ident(
+                "zero",
+            ),
+            Int32(
+                0,
+            ),
+        ),
+        Var(
+            Ident(
+                "one",
+            ),
+            Int32(
+                1,
+            ),
+        ),
+        Var(
+            Ident(
+                "i32_max",
+            ),
+            Int32(
+                2147483647,
+            ),
+        ),
+        Var(
+            Ident(
+                "i64_max",
+            ),
+            Int64(
+                9223372036854775807,
+            ),
+        ),
+    ],
+)

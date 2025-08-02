@@ -9,6 +9,7 @@
 pub struct Ast {}
 pub struct IdentId {}
 pub struct StrId {}
+pub struct IntId {}
 pub struct FloatId {}
 
 #[derive(Clone, Copy)]
@@ -82,22 +83,6 @@ use private::Sealed;
 
 use std::marker::PhantomData;
 
-trait DebugWithAstExt {
-    fn debug(self, ast: &Ast) -> impl std::fmt::Debug + '_;
-}
-
-impl DebugWithAstExt for f32 {
-    fn debug(self, _: &Ast) -> impl std::fmt::Debug + '_ {
-        self
-    }
-}
-
-impl DebugWithAstExt for bool {
-    fn debug(self, _: &Ast) -> impl std::fmt::Debug + '_ {
-        self
-    }
-}
-
 #[allow(non_camel_case_types)]
 #[derive(Clone, Copy, Hash)]
 #[repr(packed)]
@@ -156,12 +141,6 @@ impl Ord for u24 {
 impl std::fmt::Debug for u24 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         <u32 as std::fmt::Debug>::fmt(&self.get(), f)
-    }
-}
-
-impl u24 {
-    pub fn debug(self, _: &Ast) -> impl std::fmt::Debug + '_ {
-        self
     }
 }
 
@@ -234,12 +213,6 @@ impl std::fmt::Debug for u56 {
     }
 }
 
-impl u56 {
-    pub fn debug(self, _: &Ast) -> impl std::fmt::Debug + '_ {
-        self
-    }
-}
-
 trait IntoU56 {
     fn into_u56(self) -> u56;
 }
@@ -270,6 +243,18 @@ impl IntoU56 for f32 {
 impl FromU56 for f32 {
     fn from_u56(v: u56) -> Self {
         f32::from_bits(v.get() as u32)
+    }
+}
+
+impl IntoU56 for u32 {
+    fn into_u56(self) -> u56 {
+        unsafe { u56::new_unchecked(self as u64) }
+    }
+}
+
+impl FromU56 for u32 {
+    fn from_u56(v: u56) -> Self {
+        v.get() as u32
     }
 }
 
@@ -587,11 +572,167 @@ pub struct Node<'a, T: PackedAbi> {
     pub(super) node: &'a T,
 }
 
+impl<'a, T: PackedAbi> Clone for Node<'a, T> {
+    fn clone(&self) -> Self {
+        Node {
+            ast: self.ast,
+            node: self.node,
+        }
+    }
+}
+
+impl<'a, T: PackedAbi> Copy for Node<'a, T> {}
+
 impl<'a, T: PackedAbi> std::ops::Deref for Node<'a, T> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
         self.node
+    }
+}
+
+#[derive(Clone, Copy)]
+pub struct ValueNode<'a, T> {
+    pub(super) ast: &'a Ast,
+    pub(super) value: T,
+}
+
+impl<'a, T> std::ops::Deref for ValueNode<'a, T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        &self.value
+    }
+}
+
+pub struct NodeList<'a, T> {
+    pub(super) ast: &'a Ast,
+    pub(super) nodes: &'a [T],
+}
+
+impl<'a, T: PackedAbi> NodeList<'a, T> {
+    #[inline]
+    pub fn empty(ast: &'a Ast) -> Self {
+        NodeList { ast, nodes: &[] }
+    }
+
+    #[inline]
+    pub fn len(&self) -> usize {
+        self.nodes.len()
+    }
+
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.nodes.is_empty()
+    }
+
+    #[inline]
+    pub unsafe fn get_unchecked(&self, index: usize) -> Node<'a, T> {
+        Node {
+            ast: self.ast,
+            node: unsafe { self.nodes.get_unchecked(index) },
+        }
+    }
+
+    #[inline]
+    pub fn get(&self, index: usize) -> Option<Node<'a, T>> {
+        if index >= self.nodes.len() {
+            return None;
+        }
+
+        Some(unsafe { self.get_unchecked(index) })
+    }
+
+    #[inline]
+    pub fn slice<I>(&self, range: I) -> Option<NodeList<'a, T>>
+    where
+        I: std::slice::SliceIndex<[T], Output = [T]>,
+    {
+        self.nodes.get(range).map(|nodes| NodeList {
+            ast: self.ast,
+            nodes,
+        })
+    }
+
+    #[inline]
+    pub fn last(&self) -> Option<Node<'a, T>> {
+        if self.is_empty() {
+            return None;
+        }
+
+        Some(unsafe { self.get_unchecked(self.len() - 1) })
+    }
+
+    #[inline]
+    pub fn iter(&self) -> NodeListIter<'a, T> {
+        NodeListIter {
+            list: self.clone(),
+            front: 0,
+            back: self.nodes.len().wrapping_sub(1),
+        }
+    }
+}
+
+impl<'a, T: PackedAbi> Clone for NodeList<'a, T> {
+    fn clone(&self) -> Self {
+        Self {
+            ast: self.ast,
+            nodes: self.nodes,
+        }
+    }
+}
+
+impl<'a, T: PackedAbi> Copy for NodeList<'a, T> {}
+
+impl<'a, T: PackedAbi> IntoIterator for NodeList<'a, T> {
+    type Item = Node<'a, T>;
+
+    type IntoIter = NodeListIter<'a, T>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
+    }
+}
+
+pub struct NodeListIter<'a, T> {
+    list: NodeList<'a, T>,
+    front: usize,
+    back: usize,
+}
+
+impl<'a, T: PackedAbi> Iterator for NodeListIter<'a, T> {
+    type Item = Node<'a, T>;
+
+    #[inline]
+    fn next(&mut self) -> Option<Self::Item> {
+        let Some(node) = self.list.get(self.front) else {
+            return None;
+        };
+        self.front = self.front.wrapping_add(1);
+        Some(node)
+    }
+}
+
+impl<'a, T: PackedAbi> DoubleEndedIterator for NodeListIter<'a, T> {
+    #[inline]
+    fn next_back(&mut self) -> Option<Self::Item> {
+        let Some(node) = self.list.get(self.back) else {
+            return None;
+        };
+        self.back = self.back.wrapping_sub(1);
+        Some(node)
+    }
+}
+
+impl<'a, T: PackedAbi> std::iter::FusedIterator for NodeListIter<'a, T> {}
+
+impl<'a, T: PackedAbi> Clone for NodeListIter<'a, T> {
+    fn clone(&self) -> Self {
+        NodeListIter {
+            list: self.list.clone(),
+            front: self.front,
+            back: self.back,
+        }
     }
 }
 
@@ -648,6 +789,25 @@ impl<T: PackedAbi> Opt<T> {
             true => Some(unsafe { self.unwrap_unchecked() }),
             false => None,
         }
+    }
+}
+
+impl<'a, T: PackedAbi> Node<'a, Opt<T>> {
+    #[inline]
+    pub fn as_option(&self) -> Option<Node<'a, T>> {
+        self.node.as_option().map(|node| Node {
+            ast: self.ast,
+            node,
+        })
+    }
+}
+
+impl<'a, T: PackedAbi> std::fmt::Debug for Node<'a, Opt<T>>
+where
+    Node<'a, T>: std::fmt::Debug,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Debug::fmt(&self.as_option(), f)
     }
 }
 

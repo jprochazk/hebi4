@@ -17,7 +17,7 @@ Root(
             ),
         ),
         StmtExpr(
-            Int(
+            Int32(
                 100,
             ),
         ),

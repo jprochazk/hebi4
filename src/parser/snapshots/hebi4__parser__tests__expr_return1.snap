@@ -8,7 +8,7 @@ Root(
         StmtExpr(
             Return(
                 Some(
-                    Int(
+                    Int32(
                         100,
                     ),
                 ),

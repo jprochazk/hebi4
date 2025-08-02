@@ -19,7 +19,7 @@ Root(
                             StmtExpr(
                                 Prefix(
                                     Minus,
-                                    Int(
+                                    Int32(
                                         1,
                                     ),
                                 ),
@@ -29,7 +29,7 @@ Root(
                 ),
                 [
                     StmtExpr(
-                        Int(
+                        Int32(
                             0,
                         ),
                     ),
@@ -48,7 +48,7 @@ Root(
                     Block(
                         [
                             StmtExpr(
-                                Int(
+                                Int32(
                                     0,
                                 ),
                             ),
@@ -57,7 +57,7 @@ Root(
                 ),
                 [
                     StmtExpr(
-                        Int(
+                        Int32(
                             1,
                         ),
                     ),
@@ -75,7 +75,7 @@ Root(
                             StmtExpr(
                                 Prefix(
                                     Minus,
-                                    Int(
+                                    Int32(
                                         1,
                                     ),
                                 ),
@@ -90,7 +90,7 @@ Root(
                         ),
                         [
                             StmtExpr(
-                                Int(
+                                Int32(
                                     0,
                                 ),
                             ),
@@ -102,7 +102,7 @@ Root(
                         ),
                         [
                             StmtExpr(
-                                Int(
+                                Int32(
                                     1,
                                 ),
                             ),
@@ -120,7 +120,7 @@ Root(
                     Block(
                         [
                             StmtExpr(
-                                Int(
+                                Int32(
                                     2,
                                 ),
                             ),
@@ -134,7 +134,7 @@ Root(
                         ),
                         [
                             StmtExpr(
-                                Int(
+                                Int32(
                                     0,
                                 ),
                             ),
@@ -146,7 +146,7 @@ Root(
                         ),
                         [
                             StmtExpr(
-                                Int(
+                                Int32(
                                     1,
                                 ),
                             ),

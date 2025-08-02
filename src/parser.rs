@@ -7,7 +7,7 @@ use bumpalo::{
 
 use crate::{
     ast::{
-        self, AssignOp, Ast, Expr, ExprKind, InfixOp, Opt, Pack, PrefixOp, Stmt, spanned::*, u56,
+        self, AssignOp, Ast, Expr, InfixOp, NodeKind, Opt, Pack, Packed, PrefixOp, Stmt, spanned::*,
     },
     error::{Result, error},
     span::{Span, Spanned},
@@ -37,17 +37,6 @@ impl<'t, 'src> State<'t, 'src> {
     #[inline]
     fn kind(&self) -> TokenKind {
         let token = self.cursor.current();
-        self.cursor.kind(token)
-    }
-
-    #[inline]
-    fn current(&self) -> Token {
-        self.cursor.current()
-    }
-
-    #[inline]
-    fn peek(&self) -> TokenKind {
-        let token = self.cursor.peek();
         self.cursor.kind(token)
     }
 
@@ -468,17 +457,19 @@ fn parse_expr_assign(p: &mut State, buf: &Bump) -> Result<Spanned<Expr>> {
     let end = p.cursor.span(p.cursor.prev()).end();
     let span = start..end;
 
-    match lhs.kind() {
-        ExprKind::GetIndex(&base) => {
-            let base = lhs.map(|_| base);
+    match Packed::kind(&lhs.into_inner().into()) {
+        NodeKind::GetIndex => {
+            let base =
+                lhs.map(|lhs| ast::GetIndex::try_from(lhs).expect("node should be GetIndex"));
             Ok(Spanned::new(SetIndex { base, value, op }.pack(&mut p.ast), span).map_into())
         }
-        ExprKind::GetField(&base) => {
-            let base = lhs.map(|_| base);
+        NodeKind::GetField => {
+            let base =
+                lhs.map(|lhs| ast::GetField::try_from(lhs).expect("node should be GetField"));
             Ok(Spanned::new(SetField { base, value, op }.pack(&mut p.ast), span).map_into())
         }
-        ExprKind::GetVar(&base) => {
-            let base = lhs.map(|_| base);
+        NodeKind::GetVar => {
+            let base = lhs.map(|lhs| ast::GetVar::try_from(lhs).expect("node should be GetVar"));
             Ok(Spanned::new(SetVar { base, value, op }.pack(&mut p.ast), span).map_into())
         }
         _ => error("invalid assignment target", lhs.span).into(),
@@ -602,12 +593,12 @@ fn parse_expr_prefix(p: &mut State, buf: &Bump) -> Result<Spanned<Expr>> {
 fn parse_expr_postfix(p: &mut State, buf: &Bump) -> Result<Spanned<Expr>> {
     let expr = parse_expr_primary(p, buf)?;
     if !matches!(
-        expr.kind(),
-        ExprKind::GetVar(..)
-            | ExprKind::GetField(..)
-            | ExprKind::GetIndex(..)
-            | ExprKind::Call(..)
-            | ExprKind::CallObject(..),
+        Packed::kind(&expr.into_inner().into()),
+        NodeKind::GetVar
+            | NodeKind::GetField
+            | NodeKind::GetIndex
+            | NodeKind::Call
+            | NodeKind::CallObject
     ) {
         return Ok(expr);
     }
@@ -689,7 +680,7 @@ fn parse_object_entry(p: &mut State, buf: &Bump) -> Result<Spanned<ast::ObjectEn
 fn str_from_lexeme_span(p: &mut State, lexeme: &str, span: Span) -> Spanned<ast::Str> {
     Spanned::new(
         Str {
-            value: p.ast.intern_str(lexeme),
+            id: p.ast.intern_str(lexeme),
         }
         .pack(&mut p.ast),
         span,
@@ -756,32 +747,92 @@ fn parse_expr_object(p: &mut State, buf: &Bump) -> Result<Spanned<Expr>> {
     Ok(p.close(node, Object { entries }).map_into())
 }
 
-fn parse_expr_int(p: &mut State, buf: &Bump) -> Result<Spanned<Expr>> {
-    let node = p.open();
+fn parse_expr_int(p: &mut State, _: &Bump) -> Result<Spanned<Expr>> {
+    let node32 = p.open();
+    let node64 = p.open();
 
     let lexeme = p.lexeme();
     let span = p.span();
     p.must(t![int])?;
-    let value: u64 = lexeme
-        .parse()
+    let value: i64 = i64_from_str_with_underscores(lexeme)
         .map_err(|err| error(format!("invalid int: {err}"), span))?;
-    if value > u56::MAX.get() {
-        return error(
-            format!(
-                "int ({}) is larger than u56::MAX ({})",
-                value,
-                u56::MAX.get()
-            ),
-            span,
-        )
-        .into();
+    if value <= i32::MAX as i64 {
+        let value = value as u32;
+        Ok(p.close(node32, Int32 { value }).map_into())
+    } else if value <= i64::MAX as i64 {
+        let id = p.ast.intern_int(value);
+        Ok(p.close(node64, Int64 { id }).map_into())
+    } else {
+        return error("integer would overflow", span).into();
     }
-    let value = u56::new(value);
-
-    Ok(p.close(node, Int { value }).map_into())
 }
 
-fn parse_expr_float(p: &mut State, buf: &Bump) -> Result<Spanned<Expr>> {
+// TODO: strip underscores from int, then parse
+//       ...or maybe just parse manually
+
+#[derive(Debug, Clone)]
+pub enum IntParseError {
+    InvalidDigit,
+    Overflow,
+}
+
+impl std::fmt::Display for IntParseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            IntParseError::InvalidDigit => f.write_str("invalid digit"),
+            IntParseError::Overflow => f.write_str("integer would overflow"),
+        }
+    }
+}
+
+impl std::error::Error for IntParseError {}
+
+fn i64_from_str_with_underscores(s: &str) -> Result<i64, IntParseError> {
+    // Largely taken from Rust's `core::num` module, licensed MIT.
+    // Specialized to `i64` in decimal, ignores underscores.
+
+    let mut digits = s.as_bytes();
+    let mut result: i64 = 0;
+
+    if s.is_empty() {
+        unreachable!("ICE: empty integer");
+    }
+
+    // NOTE: `std` first checks for potential overflow and uses a faster
+    //       unchecked loop in case it's not possible, but for us that's
+    //       harder to determine without reading the full string to get
+    //       the number of digits, and that seems not worth it.
+    while let [char, rest @ ..] = digits {
+        let char = *char;
+
+        // NOTE: valid placement of `_` is checked by tokenizer,
+        //       here we just ignore them
+        if char == b'_' {
+            digits = rest;
+            continue;
+        }
+
+        // multiply first, then look at the result later.
+        let mul = result.checked_mul(10);
+        let x = match (char as char).to_digit(10) {
+            Some(v) => v as i64,
+            None => return Err(IntParseError::InvalidDigit),
+        };
+        result = match mul {
+            Some(v) => v,
+            None => return Err(IntParseError::Overflow),
+        };
+        result = match result.checked_add(x) {
+            Some(v) => v,
+            None => return Err(IntParseError::Overflow),
+        };
+        digits = rest;
+    }
+
+    Ok(result)
+}
+
+fn parse_expr_float(p: &mut State, _: &Bump) -> Result<Spanned<Expr>> {
     let node_f32 = p.open();
     let node_f64 = p.open();
 
@@ -801,12 +852,12 @@ fn parse_expr_float(p: &mut State, buf: &Bump) -> Result<Spanned<Expr>> {
         )
         .map_into())
     } else {
-        let value = p.ast.intern_float(value);
-        Ok(p.close(node_f64, Float64 { value }).map_into())
+        let id = p.ast.intern_float(value);
+        Ok(p.close(node_f64, Float64 { id }).map_into())
     }
 }
 
-fn parse_expr_bool(p: &mut State, buf: &Bump) -> Result<Spanned<Expr>> {
+fn parse_expr_bool(p: &mut State, _: &Bump) -> Result<Spanned<Expr>> {
     let node = p.open();
 
     let value = match p.kind() {
@@ -823,7 +874,7 @@ fn parse_expr_str(p: &mut State, buf: &Bump) -> Result<Spanned<Expr>> {
     parse_str(p, buf).map(|v| v.map_into())
 }
 
-fn parse_str(p: &mut State, buf: &Bump) -> Result<Spanned<ast::Str>> {
+fn parse_str(p: &mut State, _: &Bump) -> Result<Spanned<ast::Str>> {
     let node = p.open();
 
     let span = p.span();
@@ -846,14 +897,14 @@ fn parse_str(p: &mut State, buf: &Bump) -> Result<Spanned<ast::Str>> {
             .into();
         }
     };
-    let value = p.ast.intern_str(value.as_ref());
+    let id = p.ast.intern_str(value.as_ref());
 
-    Ok(p.close(node, Str { value }))
+    Ok(p.close(node, Str { id }))
 }
 
 mod escape;
 
-fn parse_expr_nil(p: &mut State, buf: &Bump) -> Result<Spanned<Expr>> {
+fn parse_expr_nil(p: &mut State, _: &Bump) -> Result<Spanned<Expr>> {
     let node = p.open();
     p.must(t![nil])?;
 

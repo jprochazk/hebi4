@@ -14,10 +14,10 @@ Root(
                     StmtExpr(
                         Infix(
                             Add,
-                            Int(
+                            Int32(
                                 1,
                             ),
-                            Int(
+                            Int32(
                                 1,
                             ),
                         ),
@@ -35,10 +35,10 @@ Root(
                     StmtExpr(
                         Infix(
                             Add,
-                            Int(
+                            Int32(
                                 1,
                             ),
-                            Int(
+                            Int32(
                                 1,
                             ),
                         ),
@@ -66,10 +66,10 @@ Root(
                     StmtExpr(
                         Infix(
                             Add,
-                            Int(
+                            Int32(
                                 1,
                             ),
-                            Int(
+                            Int32(
                                 1,
                             ),
                         ),

@@ -15,7 +15,7 @@ Root(
                         Ident(
                             "low",
                         ),
-                        Int(
+                        Int32(
                             0,
                         ),
                     ),
@@ -39,7 +39,7 @@ Root(
                                     ),
                                 ],
                             ),
-                            Int(
+                            Int32(
                                 1,
                             ),
                         ),
@@ -88,7 +88,7 @@ Root(
                                             ),
                                         ),
                                     ),
-                                    Int(
+                                    Int32(
                                         2,
                                     ),
                                 ),
@@ -174,7 +174,7 @@ Root(
                                                                     "mid",
                                                                 ),
                                                             ),
-                                                            Int(
+                                                            Int32(
                                                                 1,
                                                             ),
                                                         ),
@@ -199,7 +199,7 @@ Root(
                                                             "mid",
                                                         ),
                                                     ),
-                                                    Int(
+                                                    Int32(
                                                         1,
                                                     ),
                                                 ),
@@ -218,7 +218,7 @@ Root(
                     StmtExpr(
                         Prefix(
                             Minus,
-                            Int(
+                            Int32(
                                 1,
                             ),
                         ),

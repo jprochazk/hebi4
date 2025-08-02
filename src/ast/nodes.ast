@@ -112,14 +112,15 @@ data object_entry {
     value: expr,
 };
 
-expr int(value: u56 as u56);
+expr int32(value: u32 as u32);
+expr int64(id: IntId as u32);
 
 expr float32(value: f32 as u32);
-expr float64(value: FloatId as u32);
+expr float64(id: FloatId as u32);
 
 expr bool(value: bool as u32);
 
-expr str(value: StrId as u32);
+expr str(id: StrId as u32);
 
 expr nil;
 

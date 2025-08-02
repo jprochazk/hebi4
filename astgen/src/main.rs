@@ -726,7 +726,7 @@ fn emit_prelude(out: &mut String) {
 
         use super::{{
             Ast,
-            IdentId, StrId, FloatId,
+            IdentId, StrId, IntId, FloatId,
             AssignOp, InfixOp, PrefixOp,
         }};
         use crate::span::{{Spanned, Span}};
@@ -775,16 +775,20 @@ fn emit_category_kind_enums(nodes: &Nodes, out: &mut String) {
         for node in members.iter().copied() {
             let node = &nodes.flat[node.0];
             let name = AsPascalCase(node.name);
-            ln!(out, "    {name}(&'a {name}) = NodeKind::{name} as u8,");
+            ln!(
+                out,
+                "    {name}(Node<'a, {name}>) = NodeKind::{name} as u8,"
+            );
         }
         ln!(out, "}}\n");
         ml!(
             out,
             "
-            impl {category_name} {{
+            impl<'a> Node<'a, {category_name}> {{
                 #[inline]
-                pub fn kind(&self) -> {category_name}Kind {{
-                    match self.0.kind() {{
+                pub fn kind(&self) -> {category_name}Kind<'a> {{
+                    let node: &'a {category_name} = &*self.node;
+                    match node.0.kind() {{
                         {kinds}
                         // SAFETY: guaranteed to be a valid `Stmt`
                         _ => unsafe {{ std::hint::unreachable_unchecked() }}
@@ -798,7 +802,7 @@ fn emit_category_kind_enums(nodes: &Nodes, out: &mut String) {
                 .map(|node| {
                     let name = AsPascalCase(node.name);
                     format!(
-                        "NodeKind::{name} => {category_name}Kind::{name}(unsafe {{ {name}::from_packed(&self.0) }}),"
+                        "NodeKind::{name} => {category_name}Kind::{name}(Node {{ ast: self.ast, node: unsafe {{ {name}::from_packed(&node.0) }} }}),"
                     )
                 })
                 .join('\n')
@@ -914,7 +918,7 @@ fn emit_packed_wrappers(nodes: &Nodes, out: &mut String) {
                 type Error = NodeCastError;
                 #[inline]
                 fn try_from(v: Stmt) -> Result<Self, Self::Error> {{
-                    if !matches!(v.kind(), StmtKind::{name}(..)) {{
+                    if !matches!(v.0.kind(), NodeKind::{name}) {{
                         return Err(NodeCastError);
                     }}
 
@@ -941,7 +945,7 @@ fn emit_packed_wrappers(nodes: &Nodes, out: &mut String) {
                 type Error = NodeCastError;
                 #[inline]
                 fn try_from(v: Expr) -> Result<Self, Self::Error> {{
-                    if !matches!(v.kind(), ExprKind::{name}(..)) {{
+                    if !matches!(v.0.kind(), NodeKind::{name}) {{
                         return Err(NodeCastError);
                     }}
 
@@ -1402,12 +1406,12 @@ fn emit_field_getters(nodes: &Nodes, out: &mut String) {
                         out,
                         "
                         #[inline(always)]
-                        pub fn {field}(&self) -> &'a {ty} {{
+                        pub fn {field}(&self) -> Node<'a, {ty}> {{
                             const OFFSET: usize = {i};
                             let repr = unsafe {{ self.node.0.as_{repr}() }};
                             let index = repr.index as usize;
                             let node = unsafe {{ self.ast.nodes.get_unchecked(index + OFFSET) }};
-                            unsafe {{ <{ty}>::from_packed(node) }}
+                            Node {{ ast: self.ast, node: unsafe {{ <{ty}>::from_packed(node) }} }}
                         }}\n
                         ",
                         field = field.name,
@@ -1420,9 +1424,9 @@ fn emit_field_getters(nodes: &Nodes, out: &mut String) {
                         out,
                         "
                         #[inline(always)]
-                        pub fn {inline}(&self) -> {ty} {{
+                        pub fn {inline}(&self) -> ValueNode<'a, {ty}> {{
                             let repr = unsafe {{ self.node.0.as_fixed_arity_inline() }};
-                            <{ty}>::from_u24(repr.value)
+                            ValueNode {{ ast: self.ast, value: <{ty}>::from_u24(repr.value) }}
                         }}
                         ",
                         inline = inline.name,
@@ -1436,13 +1440,13 @@ fn emit_field_getters(nodes: &Nodes, out: &mut String) {
                     out,
                     "
                     #[inline]
-                    pub fn {tail}(&self) -> &'a [{ty}] {{
+                    pub fn {tail}(&self) -> NodeList<'a, {ty}> {{
                         const OFFSET: usize = {i};
                         let repr = unsafe {{ self.node.0.as_variable_arity() }};
                         let index = repr.index as usize;
                         let length = repr.length.get() as usize;
                         let nodes = unsafe {{ self.ast.nodes.get_unchecked(index + OFFSET..index + OFFSET + length) }};
-                        unsafe {{ {ty}::from_packed_slice(nodes) }}
+                        NodeList {{ ast: self.ast, nodes: unsafe {{ {ty}::from_packed_slice(nodes) }} }}
                     }}\n
                     ",
                     tail = tail.name,
@@ -1455,12 +1459,12 @@ fn emit_field_getters(nodes: &Nodes, out: &mut String) {
                         out,
                         "
                         #[inline(always)]
-                        pub fn {field}(&self) -> &'a {ty} {{
+                        pub fn {field}(&self) -> Node<'a, {ty}> {{
                             const OFFSET: usize = {i};
                             let repr = unsafe {{ self.node.0.as_mixed_arity() }};
                             let index = repr.index as usize;
                             let node = unsafe {{ self.ast.nodes.get_unchecked(index + OFFSET) }};
-                            unsafe {{ <{ty}>::from_packed(node) }}
+                            Node {{ ast: self.ast, node: unsafe {{ <{ty}>::from_packed(node) }} }}
                         }}\n
                         ",
                         field = field.name,
@@ -1474,13 +1478,13 @@ fn emit_field_getters(nodes: &Nodes, out: &mut String) {
                     out,
                     "
                     #[inline]
-                    pub fn {tail}(&self) -> &'a [{ty}] {{
+                    pub fn {tail}(&self) -> NodeList<'a, {ty}> {{
                         const OFFSET: usize = {i};
                         let repr = unsafe {{ self.node.0.as_mixed_arity() }};
                         let index = repr.index as usize;
                         let length = repr.tail_length.get() as usize;
                         let nodes = unsafe {{ self.ast.nodes.get_unchecked(index + OFFSET..index + OFFSET + length) }};
-                        unsafe {{ {ty}::from_packed_slice(nodes) }}
+                        NodeList {{ ast: self.ast, nodes: unsafe {{ {ty}::from_packed_slice(nodes) }} }}
                     }}\n
                     ",
                     tail = tail.name,
@@ -1492,9 +1496,9 @@ fn emit_field_getters(nodes: &Nodes, out: &mut String) {
                     out,
                     "
                     #[inline(always)]
-                    pub fn {inline}(&self) -> {ty} {{
+                    pub fn {inline}(&self) -> ValueNode<'a, {ty}> {{
                         let repr = unsafe {{ self.node.0.as_inline() }};
-                        <{ty}>::from_u56(repr.value)
+                        ValueNode {{ ast: self.ast, value: <{ty}>::from_u56(repr.value) }}
                     }}
                     ",
                     inline = inline.name,
@@ -1517,7 +1521,7 @@ fn emit_span_getters(nodes: &Nodes, out: &mut String) {
 
         // span getters are not perf sensitive, so we keep bounds checks
 
-        ln!(out, "impl {name} {{");
+        ln!(out, "impl<'a> Node<'a, {name}> {{");
         match &node.kind {
             NodeKind::Empty => {
                 // no internal spans
@@ -1532,10 +1536,10 @@ fn emit_span_getters(nodes: &Nodes, out: &mut String) {
                         out,
                         "
                         #[inline]
-                        pub fn {field}_span(&self, ast: &Ast) -> Span {{
+                        pub fn {field}_span(&self) -> Span {{
                             let repr = unsafe {{ self.0.as_{repr}() }};
                             let index = repr.index as usize;
-                            ast.spans[index + {i}]
+                            self.ast.spans[index + {i}]
                         }}\n
                         ",
                         field = field.name.strip_suffix('_').unwrap_or(field.name),
@@ -1549,11 +1553,11 @@ fn emit_span_getters(nodes: &Nodes, out: &mut String) {
                     out,
                     "
                     #[inline]
-                    pub fn {tail}_spans<'a>(&self, ast: &'a Ast) -> &'a [Span] {{
+                    pub fn {tail}_spans(&self) -> &'a [Span] {{
                         let repr = unsafe {{ self.0.as_variable_arity() }};
                         let index = repr.index as usize;
                         let length = repr.length.get() as usize;
-                        &ast.spans[index..index+length]
+                        &self.ast.spans[index..index+length]
                     }}\n
                     ",
                     tail = tail.name.strip_suffix('_').unwrap_or(tail.name),
@@ -1565,10 +1569,10 @@ fn emit_span_getters(nodes: &Nodes, out: &mut String) {
                         out,
                         "
                         #[inline]
-                        pub fn {field}_span(&self, ast: &Ast) -> Span {{
+                        pub fn {field}_span(&self) -> Span {{
                             let repr = unsafe {{ self.0.as_mixed_arity() }};
                             let index = repr.index as usize;
-                            ast.spans[index + {i}]
+                            self.ast.spans[index + {i}]
                         }}\n
                         ",
                         field = field.name.strip_suffix('_').unwrap_or(field.name),
@@ -1581,11 +1585,11 @@ fn emit_span_getters(nodes: &Nodes, out: &mut String) {
                     out,
                     "
                     #[inline]
-                    pub fn {tail}_spans<'a>(&self, ast: &'a Ast) -> &'a [Span] {{
+                    pub fn {tail}_spans(&self) -> &'a [Span] {{
                         let repr = unsafe {{ self.0.as_mixed_arity() }};
                         let index = {tail_start} + repr.index as usize;
                         let tail_length = repr.tail_length.get() as usize;
-                        &ast.spans[index..index + tail_length]
+                        &self.ast.spans[index..index + tail_length]
                     }}\n
                     ",
                     tail = tail.name.strip_suffix('_').unwrap_or(tail.name),
@@ -1774,7 +1778,7 @@ fn emit_debug_impls(nodes: &Nodes, out: &mut String) {
             .map(|Node { name, .. }| {
                 let name_pascal = AsPascalCase(name);
                 format!(
-                    "{category_pascal}Kind::{name_pascal}(node) => std::fmt::Debug::fmt(&Node {{ ast: self.ast, node }}, f),"
+                    "{category_pascal}Kind::{name_pascal}(node) => std::fmt::Debug::fmt(&node, f),"
                 )
             })
             .join('\n');
@@ -1783,15 +1787,9 @@ fn emit_debug_impls(nodes: &Nodes, out: &mut String) {
             "
             impl<'a> std::fmt::Debug for Node<'a, {category_pascal}> {{
                 fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {{
-                    match self.node.kind() {{
+                    match self.kind() {{
                         {kinds}
                     }}
-                }}
-            }}
-
-            impl {category_pascal} {{
-                pub fn debug<'a>(&'a self, ast: &'a Ast) -> impl std::fmt::Debug + 'a {{
-                    Node {{ ast, node: self }}
                 }}
             }}\n
             "
@@ -1815,19 +1813,15 @@ fn emit_debug_impls(nodes: &Nodes, out: &mut String) {
                         .iter()
                         .map(|Field { name, opt, .. }| {
                             if *opt {
-                                format!(
-                                    ".field(&self.{name}().as_option().map(|v| v.debug(self.ast)))"
-                                )
+                                format!(".field(&self.{name}().as_option())")
                             } else {
-                                format!(".field(&self.{name}().debug(self.ast))")
+                                format!(".field(&self.{name}())")
                             }
                         })
                         .join('\n'),
                     inline = inline
                         .as_ref()
-                        .map(|Inline { name, .. }| format!(
-                            ".field(&self.{name}().debug(self.ast))"
-                        ))
+                        .map(|Inline { name, .. }| format!(".field(&self.{name}())"))
                         .unwrap_or_default()
                 )
             }
@@ -1842,9 +1836,7 @@ fn emit_debug_impls(nodes: &Nodes, out: &mut String) {
                         {tail}
                         .finish()?;
                     ",
-                    tail = format!(
-                        ".field(&DebugIter(self.{tail_name}().iter().map(|v| v.debug(self.ast))))"
-                    ),
+                    tail = format!(".field(&DebugIter(self.{tail_name}().iter()))"),
                 )
             }
             NodeKind::MixedArity {
@@ -1864,17 +1856,13 @@ fn emit_debug_impls(nodes: &Nodes, out: &mut String) {
                         .iter()
                         .map(|Field { name, opt, .. }| {
                             if *opt {
-                                format!(
-                                    ".field(&self.{name}().as_option().map(|v| v.debug(self.ast)))"
-                                )
+                                format!(".field(&self.{name}().as_option())")
                             } else {
-                                format!(".field(&self.{name}().debug(self.ast))")
+                                format!(".field(&self.{name}())")
                             }
                         })
                         .join('\n'),
-                    tail = format!(
-                        ".field(&DebugIter(self.{tail_name}().iter().map(|v| v.debug(self.ast))))"
-                    ),
+                    tail = format!(".field(&DebugIter(self.{tail_name}().iter()))"),
                 )
             }
             NodeKind::InlineValue {
@@ -1888,7 +1876,7 @@ fn emit_debug_impls(nodes: &Nodes, out: &mut String) {
                         {inline}
                         .finish()?;
                     ",
-                    inline = format!(".field(&self.{inline_name}().debug(self.ast))")
+                    inline = format!(".field(&self.{inline_name}())")
                 )
             }
         };
@@ -1900,12 +1888,6 @@ fn emit_debug_impls(nodes: &Nodes, out: &mut String) {
                     {parts}
 
                     Ok(())
-                }}
-            }}
-
-            impl {name_pascal} {{
-                pub fn debug<'a>(&'a self, ast: &'a Ast) -> impl std::fmt::Debug + 'a {{
-                    Node {{  ast, node: self }}
                 }}
             }}\n
             "

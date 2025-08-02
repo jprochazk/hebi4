@@ -8,10 +8,10 @@ Root(
         StmtExpr(
             Infix(
                 Add,
-                Int(
+                Int32(
                     1,
                 ),
-                Int(
+                Int32(
                     1,
                 ),
             ),
@@ -19,10 +19,10 @@ Root(
         StmtExpr(
             Infix(
                 Mul,
-                Int(
+                Int32(
                     3,
                 ),
-                Int(
+                Int32(
                     4,
                 ),
             ),
@@ -32,26 +32,26 @@ Root(
                 Sub,
                 Infix(
                     Add,
-                    Int(
+                    Int32(
                         1,
                     ),
                     Infix(
                         Mul,
                         Infix(
                             Div,
-                            Int(
+                            Int32(
                                 7,
                             ),
-                            Int(
+                            Int32(
                                 2,
                             ),
                         ),
-                        Int(
+                        Int32(
                             3,
                         ),
                     ),
                 ),
-                Int(
+                Int32(
                     1,
                 ),
             ),
