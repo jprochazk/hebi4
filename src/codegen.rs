@@ -1,7 +1,9 @@
-pub mod asm;
+#[macro_use]
+pub mod opcodes;
 
 use std::borrow::Cow;
 
+use crate::vm::{Context, Value};
 use bumpalo::{Bump, collections::Vec, vec};
 
 use crate::{

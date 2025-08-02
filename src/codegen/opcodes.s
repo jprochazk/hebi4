@@ -2,57 +2,74 @@
 nop = 0x00;
 
 /* Move value from register `src` to register `dst`. */
-mov dst:reg src:reg = 0x01;
+mov dst:reg src:reg = auto;
+
+# TODO: module variables, closure captures, field loads
 
 # Value instructions
 
 /* Load `nil` value into register `dst`. */
-lnil dst:reg = 0x02;
+lnil dst:reg = auto;
 
 /* Load 16-bit integer `v` into register `dst`. */
-linti dst:reg v:imm16 = 0x03;
+lsmi dst:reg v:imm16 = auto;
+
+/* Load literal `true` into register `dst`. */
+ltrue dst:reg = auto;
+
+/* Load literal `false` into register `dst`. */
+lfalse dst:reg = auto;
 
 /*
  * Load literal by `id` into register `dst`.
  *
- * `id` stores a 64-bit integer.
+ * `id` holds a 64-bit integer.
  */
-lintc dst:reg id:lit = 0x04;
+lint dst:reg id:lit = auto;
 
-/* Load literal `true` into register `dst`. */
-ltrue dst:reg = 0x05;
+/*
+ * Load literal by `id` into register `dst`.
+ *
+ * `id` holds a 64-bit float.
+ */
+lnum dst:reg id:lit = auto;
 
-/* Load literal `false` into register `dst`. */
-lfalse dst:reg = 0x06;
+/*
+ * Load literal by `id` into register `dst`.
+ *
+ * `id` holds a string literal.
+ */
+lstr dst:reg id:lit = auto;
 
 /*
  * Load closure function by `id` into register `dst`.
  *
- * `id` stores a ClosureInfo.
+ * `id` holds a ClosureInfo.
  */
-lfncl dst:reg id:lit = 0x10;
+lcli dst:reg id:lit = auto;
 
 /*
  * Load function by `id` into register `dst`.
  *
- * `id` stores a FuncInfo.
+ * `id` holds a FuncInfo.
  *
  * This implies no captures, but the resulting object
  * is still a `Closure`.
  */
-lfunc dst:reg id:lit = 0x11;
+lfni dst:reg id:lit = auto;
 
+# TODO: constant arrays/objects don't need to use stack space at all
 /*
  * Load array with values in range `dst..dst+len`.
  */
-larr dst:reg len:imm8 = 0x12;
+larr dst:reg len:imm8 = auto;
 
 /*
  * Load object with key-value pairs in range `dst..dst+len`.
  *
  * There are total `len*2` values in the range.
  */
-lobj dst:reg len:imm8 = 0x13;
+lobj dst:reg len:imm8 = auto;
 
 # In hebi4's VM, there is only one `jmp` instruction with
 # a signed offset (stored as u24 with a bias).
@@ -62,59 +79,92 @@ lobj dst:reg len:imm8 = 0x13;
 # If a given comparison yields `true`, they skip the `jmp`.
 
 /* Adjust instruction pointer by `rel`. */
-jmp rel:imm24 = 0x30;
+jmp rel:imm24 = auto;
 
-/* If `v` coerced to bool is `true`, skip next instruction. */
-test v:reg = auto;
+/* Skip `jmp` if `v` coerced to bool is `true` */
+istrue v:reg = auto;
+/**
+ * If `v` coerced to bool is `true`:
+ * - Set `dst` to original `v`
+ * - Skip `jmp`
+ */
+istruec dst:reg v:reg = auto;
 
-/* If `lhs == rhs`, skip next instruction. */
-eq lhs:reg rhs:reg = auto;
-/* If `lhs == rhs`, skip next instruction. */
-eqi lhs:reg rhs:imm16 = auto;
-/* If `lhs == rhs`, skip next instruction. */
-eqc lhs:reg rhs:lit = auto;
+/* Skip `jmp` if `v` coerced to bool is `false` */
+isfalse v:reg = auto;
+/**
+ * If `v` coerced to bool is `false`:
+ * - Set `dst` to original `v`
+ * - Skip `jmp`
+ */
+isfalsec dst:reg v:reg = auto;
 
-/* If `lhs < rhs`, skip next instruction. */
-lt lhs:reg rhs:reg = auto;
-/* If `lhs < rhs`, skip next instruction. */
-lti lhs:reg rhs:imm16 = auto;
-/* If `lhs < rhs`, skip next instruction. */
-ltc lhs:reg rhs:lit = auto;
+/* Skip `jmp` if `lhs < rhs` (register, register) */
+islt lhs:reg rhs:reg = auto;
+/* Skip `jmp` if `lhs <= rhs` (register, register) */
+isle lhs:reg rhs:reg = auto;
+/* Skip `jmp` if `lhs > rhs` (register, register) */
+isgt lhs:reg rhs:reg = auto;
+/* Skip `jmp` if `lhs >= rhs` (register, register) */
+isge lhs:reg rhs:reg = auto;
 
-/* If `lhs <= rhs`, skip next instruction. */
-le lhs:reg rhs:reg = auto;
-/* If `lhs <= rhs`, skip next instruction. */
-lei lhs:reg rhs:imm16 = auto;
-/* If `lhs <= rhs`, skip next instruction. */
-lec lhs:reg rhs:lit = auto;
+/* Skip `jmp` if `lhs == rhs` (register, register) */
+iseq lhs:reg rhs:reg = auto;
+/* Skip `jmp` if `lhs != rhs` (register, register) */
+isne lhs:reg rhs:reg = auto;
+
+# Specialized for certain kinds of constants:
+
+/* Skip `jmp` if `lhs == rhs` (register, literal string) */
+iseqs lhs:reg rhs:lit = auto;
+/* Skip `jmp` if `lhs != rhs` (register, literal string) */
+isnes lhs:reg rhs:lit = auto;
+
+/* Skip `jmp` if `lhs == rhs` (register, literal number) */
+iseqn lhs:reg rhs:lit = auto;
+/* Skip `jmp` if `lhs != rhs` (register, literal number) */
+isnen lhs:reg rhs:lit = auto;
+
+/* Skip `jmp` if `lhs == rhs` (register, primitive) */
+iseqp lhs:reg rhs:imm8 = auto;
+/* Skip `jmp` if `lhs != rhs` (register, primitive) */
+isnep lhs:reg rhs:imm8 = auto;
 
 # Binary instructions
 
-/* `dst = lhs + rhs`, `lhs`/`rhs` must be numeric. */
-add dst:reg lhs:reg rhs:reg = 0x50;
-/* `dst = lhs + rhs`, `lhs` must be numeric. */
-addi dst:reg lhs:reg rhs:imm8 = auto;
+/* `dst = lhs + rhs` (register, register) */
+addvv dst:reg lhs:reg rhs:reg = auto;
+/* `dst = lhs + rhs` (register, literal) */
+addvn dst:reg lhs:reg rhs:lit8 = auto;
+/* `dst = lhs + rhs` (literal, register) */
+addnv dst:reg lhs:lit8 rhs:reg = auto;
 
-/* `dst = lhs - rhs`, `lhs`/`rhs` must be numeric. */
-sub dst:reg lhs:reg rhs:reg = auto;
-/* `dst = lhs - rhs`, `lhs` must be numeric. */
-subi dst:reg lhs:reg rhs:imm8 = auto;
+/* `dst = lhs - rhs` (register, register) */
+subvv dst:reg lhs:reg rhs:reg = auto;
+/* `dst = lhs - rhs` (register, literal) */
+subvn dst:reg lhs:reg rhs:lit8 = auto;
+/* `dst = lhs - rhs` (literal, register) */
+subnv dst:reg lhs:lit8 rhs:reg = auto;
 
-/* `dst = lhs * rhs`, `lhs`/`rhs` must be numeric. */
-mul dst:reg lhs:reg rhs:reg = auto;
-/* `dst = lhs * rhs`, `lhs` must be numeric. */
-muli dst:reg lhs:reg rhs:imm8 = auto;
+/* `dst = lhs * rhs` (register, register) */
+mulvv dst:reg lhs:reg rhs:reg = auto;
+/* `dst = lhs * rhs` (register, literal) */
+mulvn dst:reg lhs:reg rhs:lit8 = auto;
+/* `dst = lhs * rhs` (literal, register) */
+mulnv dst:reg lhs:lit8 rhs:reg = auto;
 
-/* `dst = lhs / rhs`, `lhs`/`rhs` must be numeric. */
-div dst:reg lhs:reg rhs:reg = auto;
-/* `dst = lhs / rhs`, `lhs` must be numeric. */
-divi dst:reg lhs:reg rhs:imm8 = auto;
+/* `dst = lhs / rhs` (register, register) */
+divvv dst:reg lhs:reg rhs:reg = auto;
+/* `dst = lhs / rhs` (register, literal) */
+divvn dst:reg lhs:reg rhs:lit8 = auto;
+/* `dst = lhs / rhs` (literal, register) */
+divnv dst:reg lhs:lit8 rhs:reg = auto;
 
 # Unary instructions
 
-/* `dst = -rhs`, `rhs` must be numeric. */
+/* `dst = -rhs` */
 unm dst:reg rhs:reg = auto;
-/* `dst = not rhs`, `rhs` must be bool. */
+/* `dst = not rhs` */
 not dst:reg rhs:reg = auto;
 
 # Function calls
@@ -149,7 +199,7 @@ not dst:reg rhs:reg = auto;
 #   [.., callee, arg0, arg1, .., argN, .., <dead intermediates>]
 #
 # When the `call` instruction is dispatched, it performs various checks,
-# then constructs a new stack frame with its based at `callee`:
+# then constructs a new stack frame with its base at `callee`:
 #
 #   old: [.., callee, arg0, arg1, .., argN]
 #   new:     [ret,    arg0, arg1, .., argN, local0, local1, .., localN]
@@ -166,12 +216,14 @@ not dst:reg rhs:reg = auto;
 # so the new stack can re-use those slots. This greatly reduces the total
 # number of stack slots needed for function calls.
 
+# TODO: specialize for differing number of arguments
+
 /*
  * `dst = func(dst+1..dst+1+args)`
  */
-call dst:reg func:reg args:imm8 = 0x70;
+call dst:reg func:reg args:imm8 = auto;
 
-# Due to (intentional) limitations of Hebi's syntax as semantics, it is
+# Due to (intentional) limitations of Hebi's syntax and semantics, it is
 # possible to statically know that a given variable may only ever contain
 # a function, and also exactly which function. The latter means we can
 # retrieve the required number of arguments whenever emitting this kind of

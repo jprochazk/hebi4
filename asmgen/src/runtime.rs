@@ -1,15 +1,17 @@
-pub struct Value {
-    pub tag: u64,
-    pub data: u64,
-}
+struct Nop;
 
-pub struct Context {}
+#[repr(C)]
+pub struct JumpTable {
+    nop: Op<Nop>,
+}
 
 //file-start
 
 mod private {
     pub trait Sealed {}
 }
+
+use super::{Context, Value};
 
 pub trait OperandPack: private::Sealed + Sized {}
 
@@ -20,13 +22,26 @@ pub struct StackPtr(*mut Value);
 pub struct InstructionPtr(*const u32);
 
 #[repr(transparent)]
-pub struct JumpTablePtr(*const ());
+pub struct JumpTablePtr(*const OpaqueOp);
+
+#[derive(Debug, Clone, Copy)]
+#[repr(u8)]
+pub enum Control {
+    Yield = 0,
+    Error = 1,
+}
+
+const _: () = {
+    use std::mem::align_of;
+    assert!(align_of::<JumpTable>() == align_of::<[OpaqueOp; 1]>());
+};
 
 #[repr(transparent)]
 pub struct ContextPtr(*mut Context);
+
 #[allow(non_camel_case_types)]
 #[derive(Clone, Copy, Hash)]
-#[repr(packed)]
+#[repr(C, packed)]
 pub struct u24([u8; 3]);
 
 impl u24 {
@@ -86,58 +101,49 @@ impl std::fmt::Debug for u24 {
 }
 
 #[cfg(not(windows))]
-macro_rules! fn_type_abi {
+macro_rules! Op {
     (
-        unsafe fn($($ty:ty),* $(,)?)
+        fn ($($ty:ty),* $(,)?) -> $ret:ty
     ) => {
-        unsafe extern "C" fn($($ty),*)
+        unsafe extern "C" fn($($ty),*) -> $ret
     };
 }
 
 #[cfg(windows)]
-macro_rules! fn_type_abi {
+macro_rules! Op {
     (
-        unsafe fn($($ty:ty),* $(,)?)
+        fn ($($ty:ty),* $(,)?) -> $ret:ty
     ) => {
-        unsafe extern "sysv64" fn($($ty),*)
+        unsafe extern "sysv64" fn($($ty),*) -> $ret
     };
 }
 
 #[cfg(not(windows))]
-macro_rules! fn_decl_abi {
+macro_rules! op {
     (
-        unsafe fn $name:ident($($i:ident : $ty:ty),* $(,)?) -> $ret:ty $body:block
+        unsafe extern "?" fn $name:ident($($i:ident : $ty:ty),* $(,)?) -> $ret:ty $body:block
     ) => {
-        unsafe extern "C" fn $name($($i: $ty),*) -> $ret $body
+        unsafe extern "C" fn $name($($i:$ty),*) -> $ret $body
     };
 }
 
 #[cfg(windows)]
-macro_rules! fn_decl_abi {
+macro_rules! op {
     (
-        unsafe fn $name:ident($($i:ident : $ty:ty),* $(,)?) -> $ret:ty $body:block
+        unsafe extern "?" fn $name:ident($($i:ident : $ty:ty),* $(,)?) -> $ret:ty $body:block
     ) => {
-        unsafe extern "sysv64" fn $name($($i: $ty),*) -> $ret $body
+        unsafe extern "sysv64" fn $name($($i:$ty),*) -> $ret $body
     };
 }
 
-const fn _static_check_operands<T: OperandPack>(
-    _: fn_type_abi!(unsafe fn(T, JumpTablePtr, StackPtr, InstructionPtr)),
-) {
-}
+pub type Op<Operands> =
+    Op!(fn(Operands, JumpTablePtr, StackPtr, InstructionPtr, ContextPtr) -> Control);
 
-macro_rules! op {
-    ($name:ident) => {{
-        const _: () = {
-            let _: fn_type_abi!(unsafe fn(_, JumpTablePtr, StackPtr, InstructionPtr)) = $name;
-            let _ = _static_check_operands($name);
-        };
+#[repr(transparent)]
+pub struct Operands(u32);
 
-        $name
-    }};
-}
-
-pub type Op<Operands> = fn_type_abi!(unsafe fn(Operands, JumpTablePtr, StackPtr, InstructionPtr));
+pub type OpaqueOp =
+    Op!(fn(Operands, JumpTablePtr, StackPtr, InstructionPtr, ContextPtr) -> Control);
 
 macro_rules! declare_operand_type {
     ($name:ident, $ty:ident) => {
@@ -183,8 +189,21 @@ macro_rules! declare_operand_types {
 
 declare_operand_types! {
     Reg(u8 as usize),
+
     Lit(u16 as usize),
+    Lit8(u8 as usize),
+
     Imm8(u8 as usize),
     Imm16(i16),
     Imm24(u24),
 }
+
+const fn assert_bit_equal<A, B>(a: &A, b: &B) {
+    let a: [u32; 1] = unsafe { (a as *const A as *const [u32; 1]).read() };
+    let b: [u32; 1] = unsafe { (b as *const B as *const [u32; 1]).read() };
+    if a[0] != b[0] {
+        panic!("not bit equal");
+    }
+}
+
+// ...

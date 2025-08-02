@@ -13,8 +13,6 @@ fn main() {
 
     let out = emit(instructions);
 
-    println!("{out}");
-
     if outfile == "-" {
         use std::io::Write as _;
         std::io::stdout().write_all(out.as_bytes()).unwrap();
@@ -82,7 +80,7 @@ impl<'a> Instructions<'a> {
 
 #[derive(Debug, Clone)]
 struct Instruction<'a> {
-    /// Short of the opcode.
+    /// Short name of the opcode.
     name: &'a str,
 
     /// Block comment placed before the opcode
@@ -96,6 +94,23 @@ struct Instruction<'a> {
     opcode: u8,
 
     operands: Operands<'a>,
+}
+
+impl Instruction<'_> {
+    fn type_name(&self) -> impl std::fmt::Display + '_ {
+        struct VariantName<'a>(&'a str);
+        impl std::fmt::Display for VariantName<'_> {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                use std::fmt::Write as _;
+                let first_char = self.0.chars().nth(0).unwrap().to_ascii_uppercase();
+                let first_char_byte_len = first_char.len_utf8();
+                f.write_char(first_char)?;
+                f.write_str(&self.0[first_char_byte_len..])
+            }
+        }
+
+        VariantName(self.name)
+    }
 }
 
 // An operand may use at most 24 bits, here are different valid
@@ -124,6 +139,41 @@ enum Operands<'a> {
     },
 }
 
+impl Operands<'_> {
+    fn fields(&self, r#pub: bool) -> String {
+        let vis = if r#pub { "pub " } else { "" };
+        match self {
+            Operands::None => format!("_a: u8, _b: u8, _c: u8"),
+            Operands::A8 { a } => format!("{vis}{}: {}, _b: u8, _c: u8", a.name, a.ty),
+            Operands::A24 { a } => format!("{vis}{}: {}", a.name, a.ty),
+            Operands::A8B8 { a, b } => {
+                format!(
+                    "{vis}{}: {}, {vis}{}: {}, _c: u8",
+                    a.name, a.ty, b.name, b.ty
+                )
+            }
+            Operands::A8B16 { a, b } => {
+                format!("{vis}{}: {}, {vis}{}: {}", a.name, a.ty, b.name, b.ty)
+            }
+            Operands::A8B8C8 { a, b, c } => format!(
+                "{vis}{}: {}, {vis}{}: {}, {vis}{}: {}",
+                a.name, a.ty, b.name, b.ty, c.name, c.ty
+            ),
+        }
+    }
+
+    fn count(&self) -> u8 {
+        match self {
+            Operands::None => 0,
+            Operands::A8 { a: _ } => 1,
+            Operands::A24 { a: _ } => 1,
+            Operands::A8B8 { a: _, b: _ } => 2,
+            Operands::A8B16 { a: _, b: _ } => 2,
+            Operands::A8B8C8 { a: _, b: _, c: _ } => 3,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 struct Operand<'a> {
     /// Operand name
@@ -141,6 +191,9 @@ enum OperandType {
     /// 16-bit literal ID
     Lit,
 
+    /// 8-bit literal ID
+    Lit8,
+
     /// 8-bit value
     Imm8,
 
@@ -156,10 +209,28 @@ impl OperandType {
         match self {
             OperandType::Reg => 8,
             OperandType::Lit => 16,
+            OperandType::Lit8 => 8,
             OperandType::Imm8 => 8,
             OperandType::Imm16 => 16,
             OperandType::Imm24 => 24,
         }
+    }
+
+    fn str(&self) -> &'static str {
+        match self {
+            OperandType::Reg => "Reg",
+            OperandType::Lit => "Lit",
+            OperandType::Lit8 => "Lit8",
+            OperandType::Imm8 => "Imm8",
+            OperandType::Imm16 => "Imm16",
+            OperandType::Imm24 => "Imm24",
+        }
+    }
+}
+
+impl std::fmt::Display for OperandType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.str())
     }
 }
 
@@ -208,7 +279,7 @@ fn parse(s: &str) -> Instructions {
         // 2. remainder is an instruction
 
         let instruction = parse_instruction(description, previous_opcode, docs);
-        previous_opcode = instruction.opcode + 1;
+        previous_opcode = instruction.opcode;
         instructions.add(instruction);
     }
 
@@ -238,6 +309,7 @@ fn parse_instruction(s: &str, previous_opcode: u8, docs: String) -> Instruction 
         let ty = match ty {
             "reg" => OperandType::Reg,
             "lit" => OperandType::Lit,
+            "lit8" => OperandType::Lit8,
             "imm8" => OperandType::Imm8,
             "imm16" => OperandType::Imm16,
             "imm24" => OperandType::Imm24,
@@ -289,7 +361,7 @@ fn parse_hex_u8(s: &str) -> Option<u8> {
     u8::from_str_radix(s, 16).ok()
 }
 
-use std::fmt::Write as _;
+use std::fmt::{Display, Write as _};
 
 /// Emit a line
 macro_rules! ln {
@@ -333,8 +405,8 @@ fn emit(is: Instructions) -> String {
     emit_runtime(&mut o);
     emit_instruction_enum(&mut o, &is);
     emit_operand_structs(&mut o, &is);
+    emit_instruction_asm(&mut o, &is);
     emit_jump_table(&mut o, &is);
-    emit_disasm(&mut o, &is);
 
     o
 }
@@ -361,21 +433,158 @@ fn emit_runtime(out: &mut String) {
         .unwrap_or(runtime);
 
     out.push_str(runtime);
+    out.push('\n');
 }
 
 fn emit_instruction_enum(o: &mut String, is: &Instructions) {
-    // ...
+    ml!(
+        o,
+        "
+        #[derive(Clone, Copy)]
+        #[repr(u8, align(4))]
+        pub enum Instruction {{
+        {instructions}
+        }}
+
+        // assert compatibility with `u32`
+        const _: () = assert!(std::mem::size_of::<Instruction>() == std::mem::size_of::<u32>());
+        const _: () = assert!(std::mem::align_of::<Instruction>() == std::mem::align_of::<u32>());
+
+        ",
+        instructions = is
+            .flat
+            .iter()
+            .map(|i| {
+                let name = i.type_name();
+                let opcode = i.opcode;
+                let fields = i.operands.fields(false);
+                format!("    {name} {{ {fields} }} = {opcode},")
+            })
+            .join("\n")
+    );
 }
 
 fn emit_operand_structs(o: &mut String, is: &Instructions) {
-    // ...
+    for i in &is.flat {
+        ml!(
+            o,
+            "
+            #[derive(Clone, Copy)]
+            #[repr(C, align(4))]
+            pub struct {name} {{
+            _op: u8,
+            {fields}
+            }}
+
+            ",
+            name = i.type_name(),
+            fields = i.operands.fields(true),
+        );
+
+        // assert on field stability
+        ml!(
+            o,
+            "
+            const _: () = assert!(std::mem::size_of::<{name}>() == std::mem::size_of::<Instruction>());
+            const _: () = assert!(std::mem::align_of::<{name}>() == std::mem::align_of::<Instruction>());
+            const _: () = assert_bit_equal(
+                &{name} {{ _op: {opcode}, {fields} }},
+                &Instruction::{name} {{ {fields} }},
+            );
+
+            ",
+            name = i.type_name(),
+            opcode = i.opcode,
+            fields = match i.operands {
+                Operands::None => format!("_a: 0x7A, _b: 0x7B, _c: 0x7C"),
+                Operands::A8 { a } => format!("{}: {}(0x7A), _b: 0x7B, _c: 0x7C", a.name, a.ty),
+                Operands::A24 { a } => format!("{}: {}(u24::new(0x7A7B7C))", a.name, a.ty),
+                Operands::A8B8 { a, b } => format!(
+                    "{}: {}(0x7A), {}: {}(0x7B), _c: 0x7C",
+                    a.name, a.ty, b.name, b.ty
+                ),
+                Operands::A8B16 { a, b } =>
+                    format!("{}: {}(0x7A), {}: {}(0x7B7C)", a.name, a.ty, b.name, b.ty),
+                Operands::A8B8C8 { a, b, c } => format!(
+                    "{}: {}(0x7A), {}: {}(0x7B), {}: {}(0x7C)",
+                    a.name, a.ty, b.name, b.ty, c.name, c.ty
+                ),
+            },
+        );
+    }
+}
+
+fn emit_instruction_asm(o: &mut String, is: &Instructions) {
+    let instructions = is
+        .flat
+        .iter()
+        .map(|i| {
+            let name = i.name;
+            let cname = i.type_name();
+            let args = match i.operands {
+                Operands::None => String::new(),
+                Operands::A8 { a } => format!("{}: {}", a.name, a.ty),
+                Operands::A24 { a } => format!("{}: {}", a.name, a.ty),
+                Operands::A8B8 { a, b } => format!("{}: {}, {}: {}", a.name, a.ty, b.name, b.ty),
+                Operands::A8B16 { a, b } => format!("{}: {}, {}: {}", a.name, a.ty, b.name, b.ty),
+                Operands::A8B8C8 { a, b, c } => format!(
+                    "{}: {}, {}: {}, {}: {},",
+                    a.name, a.ty, b.name, b.ty, c.name, c.ty
+                ),
+            };
+            let fields = match i.operands {
+                Operands::None => format!("{{ _a: 0x7F, _b: 0x7F, _c: 0x7F }}"),
+                Operands::A8 { a } => format!("{{ {}, _b: 0x7F, _c: 0x7F }}", a.name),
+                Operands::A24 { a } => format!("{{ {} }}", a.name),
+                Operands::A8B8 { a, b } => format!("{{ {}, {}, _c: 0x7F }}", a.name, b.name),
+                Operands::A8B16 { a, b } => format!("{{ {}, {} }}", a.name, b.name),
+                Operands::A8B8C8 { a, b, c } => format!("{{ {}, {}, {} }}", a.name, b.name, c.name),
+            };
+            format!("pub fn {name}({args}) -> Instruction {{ Instruction::{cname} {fields} }}")
+        })
+        .join('\n');
+    ml!(
+        o,
+        "
+        pub mod asm {{
+            use super::*;
+        {instructions}
+        }}
+        "
+    );
 }
 
 fn emit_jump_table(o: &mut String, is: &Instructions) {
-    // ...
-}
+    ml!(
+        o,
+        "
+        #[repr(C)]
+        pub struct JumpTable {{
+        {instructions}
+        }}
 
-fn emit_disasm(o: &mut String, is: &Instructions) {
+        impl JumpTable {{
+            #[inline]
+            fn as_ptr(&self) -> JumpTablePtr {{
+                let ptr = &raw const self.{first_instruction};
+                JumpTablePtr(ptr.cast())
+            }}
+        }}
+
+
+        ",
+        first_instruction = is.flat.iter().next().unwrap().name,
+        instructions = is
+            .flat
+            .iter()
+            .map(|i| {
+                let name = i.name;
+                let type_name = i.type_name();
+                format!("    pub {name}: Op<{type_name}>,")
+            })
+            .join("\n")
+    );
+
     // ...
 }
 
@@ -451,4 +660,41 @@ as the operand type.
 
 */
 
-mod asdf;
+pub struct Join<Iter, Sep>
+where
+    Iter: Iterator,
+{
+    iter: Iter,
+    sep: Sep,
+}
+
+impl<Iter, Sep> std::fmt::Display for Join<Iter, Sep>
+where
+    Iter: Iterator + Clone,
+    <Iter as Iterator>::Item: std::fmt::Display,
+    Sep: std::fmt::Display,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut iter = self.iter.clone().peekable();
+        while let Some(item) = iter.next() {
+            write!(f, "{item}")?;
+            if iter.peek().is_some() {
+                write!(f, "{}", self.sep)?;
+            }
+        }
+        Ok(())
+    }
+}
+
+pub trait JoinIter: Sized + Iterator {
+    fn join<Sep>(self, sep: Sep) -> Join<Self, Sep>;
+}
+
+impl<Iter> JoinIter for Iter
+where
+    Iter: Sized + Iterator + Clone,
+{
+    fn join<Sep>(self, sep: Sep) -> Join<Self, Sep> {
+        Join { iter: self, sep }
+    }
+}

@@ -11,4 +11,7 @@ mod token;
 mod ast;
 mod parser;
 
+#[macro_use]
 mod codegen;
+
+mod vm;
