@@ -5,6 +5,8 @@ pub struct JumpTable {
     nop: Op<Nop>,
 }
 
+pub enum Literal {}
+
 //file-start
 
 mod private {
@@ -15,14 +17,25 @@ use super::{Context, Value};
 
 pub trait OperandPack: private::Sealed + Sized {}
 
+#[derive(Clone, Copy)]
 #[repr(transparent)]
-pub struct StackPtr(*mut Value);
+pub struct Sp(pub(crate) *mut Value);
 
+#[derive(Clone, Copy)]
 #[repr(transparent)]
-pub struct InstructionPtr(*const u32);
+pub struct Ip(pub(crate) *const u32);
 
+#[derive(Clone, Copy)]
 #[repr(transparent)]
-pub struct JumpTablePtr(*const OpaqueOp);
+pub struct Jt(pub(crate) *const OpaqueOp);
+
+#[derive(Clone, Copy)]
+#[repr(transparent)]
+pub struct Lp(pub(crate) *const Literal);
+
+#[derive(Clone, Copy)]
+#[repr(transparent)]
+pub struct Ctx(pub(crate) *mut Context);
 
 #[derive(Debug, Clone, Copy)]
 #[repr(u8)]
@@ -35,9 +48,6 @@ const _: () = {
     use std::mem::align_of;
     assert!(align_of::<JumpTable>() == align_of::<[OpaqueOp; 1]>());
 };
-
-#[repr(transparent)]
-pub struct ContextPtr(*mut Context);
 
 #[allow(non_camel_case_types)]
 #[derive(Clone, Copy, Hash)]
@@ -136,14 +146,12 @@ macro_rules! op {
     };
 }
 
-pub type Op<Operands> =
-    Op!(fn(Operands, JumpTablePtr, StackPtr, InstructionPtr, ContextPtr) -> Control);
+pub type Op<Operands> = Op!(fn(Operands, Jt, Sp, Lp, Ip, Ctx) -> Control);
 
 #[repr(transparent)]
 pub struct Operands(u32);
 
-pub type OpaqueOp =
-    Op!(fn(Operands, JumpTablePtr, StackPtr, InstructionPtr, ContextPtr) -> Control);
+pub type OpaqueOp = Op!(fn(Operands, Jt, Sp, Lp, Ip, Ctx) -> Control);
 
 macro_rules! declare_operand_type {
     ($name:ident, $ty:ident) => {
