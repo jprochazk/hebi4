@@ -1,3 +1,5 @@
+#![allow(dead_code, unused_variables)] // TEMP
+
 pub mod span;
 
 pub mod error;
@@ -17,12 +19,13 @@ mod codegen;
 mod vm;
 
 pub use error::Result;
-pub use vm::Value;
+
+pub use vm::{Chunk, Value, Vm};
 
 pub fn eval(code: &str) -> Result<vm::Value> {
     let tokens = token::tokenize(code);
     let ast = parser::parse(&tokens)?;
-    let module = codegen::emit(&ast)?;
+    let chunk = codegen::emit(&ast)?;
 
     todo!()
 }

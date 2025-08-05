@@ -8,6 +8,7 @@ logos = "0.15.0"
 hashbrown = "0.15.4"
 rustc-hash = "2.1.1"
 bumpalo = { version = "3.18.1", features = ["collections", "std", "allocator-api2"] }
+beef = "0.5.2"
 
 [dev-dependencies]
 uitest = { path = "./uitest" }

@@ -757,7 +757,7 @@ fn parse_expr_int(p: &mut State, _: &Bump) -> Result<Spanned<Expr>> {
     let value: i64 = i64_from_str_with_underscores(lexeme)
         .map_err(|err| error(format!("invalid int: {err}"), span))?;
     if value <= i32::MAX as i64 {
-        let value = value as u32;
+        let value = value as i32;
         Ok(p.close(node32, Int32 { value }).map_into())
     } else if value <= i64::MAX as i64 {
         let id = p.ast.intern_int(value);

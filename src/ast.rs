@@ -253,6 +253,7 @@ macro_rules! delegate_value_debug {
 
 delegate_value_debug!(u32);
 delegate_value_debug!(f32);
+delegate_value_debug!(i32);
 delegate_value_debug!(bool);
 delegate_value_debug!(InfixOp);
 delegate_value_debug!(PrefixOp);

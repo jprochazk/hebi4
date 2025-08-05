@@ -1,4 +1,4 @@
-#![allow(dead_code)] // may be used in output
+#![allow(dead_code, unused_variables)] // may be used in output
 
 // This file contains the "dependencies" for the generated output.
 // They are placed here because they also require parts of the generated output to exist,
@@ -255,6 +255,18 @@ impl IntoU56 for u32 {
 impl FromU56 for u32 {
     fn from_u56(v: u56) -> Self {
         v.get() as u32
+    }
+}
+
+impl IntoU56 for i32 {
+    fn into_u56(self) -> u56 {
+        unsafe { u56::new_unchecked(self as u64) }
+    }
+}
+
+impl FromU56 for i32 {
+    fn from_u56(v: u56) -> Self {
+        v.get() as i32
     }
 }
 

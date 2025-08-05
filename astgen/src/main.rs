@@ -35,6 +35,8 @@
 //!
 //!
 
+#![allow(dead_code)]
+
 // TODO: statically prevent one AST's nodes from being used with another AST
 // - each node gains an invariant lifetime
 // - retrieving a node will brand it with its AST's lifetime
@@ -301,6 +303,7 @@ fn is_lowercase_ty(v: &str) -> bool {
     match v {
         "u56" => true,
         "u32" => true,
+        "i32" => true,
         "u24" => true,
         "f32" => true,
         "bool" => true,
@@ -311,6 +314,7 @@ fn is_lowercase_ty(v: &str) -> bool {
 fn is_builtin_ty(v: &str) -> bool {
     match v {
         "u32" => true,
+        "i32" => true,
         "f32" => true,
         "bool" => true,
         _ => false,

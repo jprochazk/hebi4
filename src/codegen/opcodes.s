@@ -1,52 +1,52 @@
 /* Do nothing. */
-nop = 0x00;
+nop;
 
 /* Move value from register `src` to register `dst`. */
-mov dst:reg src:reg = auto;
+mov dst:reg src:reg;
 
 # TODO: module variables, closure captures, field loads
 
 # Value instructions
 
 /* Load `nil` value into register `dst`. */
-lnil dst:reg = auto;
+lnil dst:reg;
 
 /* Load 16-bit integer `v` into register `dst`. */
-lsmi dst:reg v:imm16 = auto;
+lsmi dst:reg v:imm16;
 
 /* Load literal `true` into register `dst`. */
-ltrue dst:reg = auto;
+ltrue dst:reg;
 
 /* Load literal `false` into register `dst`. */
-lfalse dst:reg = auto;
+lfalse dst:reg;
 
 /*
  * Load literal by `id` into register `dst`.
  *
  * `id` holds a 64-bit integer.
  */
-lint dst:reg id:lit = auto;
+lint dst:reg id:lit;
 
 /*
  * Load literal by `id` into register `dst`.
  *
  * `id` holds a 64-bit float.
  */
-lnum dst:reg id:lit = auto;
+lnum dst:reg id:lit;
 
 /*
  * Load literal by `id` into register `dst`.
  *
  * `id` holds a string literal.
  */
-lstr dst:reg id:lit = auto;
+lstr dst:reg id:lit;
 
 /*
  * Load closure function by `id` into register `dst`.
  *
  * `id` holds a ClosureInfo.
  */
-lcli dst:reg id:lit = auto;
+lcli dst:reg id:lit;
 
 /*
  * Load function by `id` into register `dst`.
@@ -56,20 +56,20 @@ lcli dst:reg id:lit = auto;
  * This implies no captures, but the resulting object
  * is still a `Closure`.
  */
-lfni dst:reg id:lit = auto;
+lfni dst:reg id:lit;
 
 # TODO: constant arrays/objects don't need to use stack space at all
 /*
  * Load array with values in range `dst..dst+len`.
  */
-larr dst:reg len:imm8 = auto;
+larr dst:reg len:imm8;
 
 /*
  * Load object with key-value pairs in range `dst..dst+len`.
  *
  * There are total `len*2` values in the range.
  */
-lobj dst:reg len:imm8 = auto;
+lobj dst:reg len:imm8;
 
 # In hebi4's VM, there is only one `jmp` instruction with
 # a signed offset (stored as u24 with a bias).
@@ -79,93 +79,93 @@ lobj dst:reg len:imm8 = auto;
 # If a given comparison yields `true`, they skip the `jmp`.
 
 /* Adjust instruction pointer by `rel`. */
-jmp rel:imm24 = auto;
+jmp rel:imm24;
 
 /* Skip `jmp` if `v` coerced to bool is `true` */
-istrue v:reg = auto;
+istrue v:reg;
 /**
  * If `v` coerced to bool is `true`:
  * - Set `dst` to original `v`
  * - Skip `jmp`
  */
-istruec dst:reg v:reg = auto;
+istruec dst:reg v:reg;
 
 /* Skip `jmp` if `v` coerced to bool is `false` */
-isfalse v:reg = auto;
+isfalse v:reg;
 /**
  * If `v` coerced to bool is `false`:
  * - Set `dst` to original `v`
  * - Skip `jmp`
  */
-isfalsec dst:reg v:reg = auto;
+isfalsec dst:reg v:reg;
 
 /* Skip `jmp` if `lhs < rhs` (register, register) */
-islt lhs:reg rhs:reg = auto;
+islt lhs:reg rhs:reg;
 /* Skip `jmp` if `lhs <= rhs` (register, register) */
-isle lhs:reg rhs:reg = auto;
+isle lhs:reg rhs:reg;
 /* Skip `jmp` if `lhs > rhs` (register, register) */
-isgt lhs:reg rhs:reg = auto;
+isgt lhs:reg rhs:reg;
 /* Skip `jmp` if `lhs >= rhs` (register, register) */
-isge lhs:reg rhs:reg = auto;
+isge lhs:reg rhs:reg;
 
 /* Skip `jmp` if `lhs == rhs` (register, register) */
-iseq lhs:reg rhs:reg = auto;
+iseq lhs:reg rhs:reg;
 /* Skip `jmp` if `lhs != rhs` (register, register) */
-isne lhs:reg rhs:reg = auto;
+isne lhs:reg rhs:reg;
 
 # Specialized for certain kinds of constants:
 
 /* Skip `jmp` if `lhs == rhs` (register, literal string) */
-iseqs lhs:reg rhs:lit = auto;
+iseqs lhs:reg rhs:lit;
 /* Skip `jmp` if `lhs != rhs` (register, literal string) */
-isnes lhs:reg rhs:lit = auto;
+isnes lhs:reg rhs:lit;
 
 /* Skip `jmp` if `lhs == rhs` (register, literal number) */
-iseqn lhs:reg rhs:lit = auto;
+iseqn lhs:reg rhs:lit;
 /* Skip `jmp` if `lhs != rhs` (register, literal number) */
-isnen lhs:reg rhs:lit = auto;
+isnen lhs:reg rhs:lit;
 
 /* Skip `jmp` if `lhs == rhs` (register, primitive) */
-iseqp lhs:reg rhs:imm8 = auto;
+iseqp lhs:reg rhs:imm8;
 /* Skip `jmp` if `lhs != rhs` (register, primitive) */
-isnep lhs:reg rhs:imm8 = auto;
+isnep lhs:reg rhs:imm8;
 
 # Binary instructions
 
 /* `dst = lhs + rhs` (register, register) */
-addvv dst:reg lhs:reg rhs:reg = auto;
+addvv dst:reg lhs:reg rhs:reg;
 /* `dst = lhs + rhs` (register, literal) */
-addvn dst:reg lhs:reg rhs:lit8 = auto;
+addvn dst:reg lhs:reg rhs:lit8;
 /* `dst = lhs + rhs` (literal, register) */
-addnv dst:reg lhs:lit8 rhs:reg = auto;
+addnv dst:reg lhs:lit8 rhs:reg;
 
 /* `dst = lhs - rhs` (register, register) */
-subvv dst:reg lhs:reg rhs:reg = auto;
+subvv dst:reg lhs:reg rhs:reg;
 /* `dst = lhs - rhs` (register, literal) */
-subvn dst:reg lhs:reg rhs:lit8 = auto;
+subvn dst:reg lhs:reg rhs:lit8;
 /* `dst = lhs - rhs` (literal, register) */
-subnv dst:reg lhs:lit8 rhs:reg = auto;
+subnv dst:reg lhs:lit8 rhs:reg;
 
 /* `dst = lhs * rhs` (register, register) */
-mulvv dst:reg lhs:reg rhs:reg = auto;
+mulvv dst:reg lhs:reg rhs:reg;
 /* `dst = lhs * rhs` (register, literal) */
-mulvn dst:reg lhs:reg rhs:lit8 = auto;
+mulvn dst:reg lhs:reg rhs:lit8;
 /* `dst = lhs * rhs` (literal, register) */
-mulnv dst:reg lhs:lit8 rhs:reg = auto;
+mulnv dst:reg lhs:lit8 rhs:reg;
 
 /* `dst = lhs / rhs` (register, register) */
-divvv dst:reg lhs:reg rhs:reg = auto;
+divvv dst:reg lhs:reg rhs:reg;
 /* `dst = lhs / rhs` (register, literal) */
-divvn dst:reg lhs:reg rhs:lit8 = auto;
+divvn dst:reg lhs:reg rhs:lit8;
 /* `dst = lhs / rhs` (literal, register) */
-divnv dst:reg lhs:lit8 rhs:reg = auto;
+divnv dst:reg lhs:lit8 rhs:reg;
 
 # Unary instructions
 
 /* `dst = -rhs` */
-unm dst:reg rhs:reg = auto;
+unm dst:reg rhs:reg;
 /* `dst = not rhs` */
-not dst:reg rhs:reg = auto;
+not dst:reg rhs:reg;
 
 # Function calls
 #
@@ -221,7 +221,7 @@ not dst:reg rhs:reg = auto;
 /*
  * `dst = func(dst+1..dst+1+args)`
  */
-call dst:reg func:reg args:imm8 = auto;
+call dst:reg func:reg args:imm8;
 
 # Due to (intentional) limitations of Hebi's syntax and semantics, it is
 # possible to statically know that a given variable may only ever contain
@@ -235,7 +235,13 @@ call dst:reg func:reg args:imm8 = auto;
 /*
  * `dst = funcs[id](dst..dst+funcs[id].args)`
  */
-fastcall dst:reg id:lit = auto;
+fastcall dst:reg id:fnid;
 
 /* Return from current call */
-ret = auto;
+ret;
+
+/* Stop execution. */
+stop;
+
+/* Triggers a panic. Never generated by the compiler. */
+trap;

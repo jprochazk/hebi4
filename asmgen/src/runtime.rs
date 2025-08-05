@@ -1,3 +1,6 @@
+#![allow(dead_code, unused_macros)] // may be used in output
+#![allow(unsafe_op_in_unsafe_fn)]
+
 struct Nop;
 
 #[repr(C)]
@@ -5,15 +8,13 @@ pub struct JumpTable {
     nop: Op<Nop>,
 }
 
-pub enum Literal {}
-
 //file-start
 
 mod private {
     pub trait Sealed {}
 }
 
-use super::{Context, Value};
+use super::{Context, Control, Literal, Value};
 
 pub trait OperandPack: private::Sealed + Sized {}
 
@@ -23,7 +24,14 @@ pub struct Sp(pub(crate) *mut Value);
 
 #[derive(Clone, Copy)]
 #[repr(transparent)]
-pub struct Ip(pub(crate) *const u32);
+pub struct Ip(pub(crate) *const RawInstruction);
+
+#[derive(Clone, Copy)]
+#[repr(C, align(4))]
+pub struct RawInstruction {
+    pub(crate) tag: u8,
+    pub(crate) payload: [u8; 3],
+}
 
 #[derive(Clone, Copy)]
 #[repr(transparent)]
@@ -36,13 +44,6 @@ pub struct Lp(pub(crate) *const Literal);
 #[derive(Clone, Copy)]
 #[repr(transparent)]
 pub struct Ctx(pub(crate) *mut Context);
-
-#[derive(Debug, Clone, Copy)]
-#[repr(u8)]
-pub enum Control {
-    Yield = 0,
-    Error = 1,
-}
 
 const _: () = {
     use std::mem::align_of;
@@ -110,6 +111,12 @@ impl std::fmt::Debug for u24 {
     }
 }
 
+impl std::fmt::Display for u24 {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        <u32 as std::fmt::Display>::fmt(&self.get(), f)
+    }
+}
+
 #[cfg(not(windows))]
 macro_rules! Op {
     (
@@ -146,15 +153,36 @@ macro_rules! op {
     };
 }
 
+macro_rules! jump_table {
+    {
+        $($op:ident),* $(,)?
+    } => {
+        JumpTable {
+            $($op: {
+                type __Operands = $crate::codegen::opcodes::__operands::$op;
+                const __OP: unsafe fn(__Operands, Jt, Sp, Lp, Ip, Ctx) -> Control = $op;
+
+                {
+                    op! {
+                        unsafe extern "?" fn $op(args: RawInstruction, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control {
+                            let args: __Operands = core::mem::transmute(args);
+                            __OP(args, jt, sp, lp, ip, ctx)
+                        }
+                    }
+
+                    $op
+                }
+            }),*
+        }
+    };
+}
+
 pub type Op<Operands> = Op!(fn(Operands, Jt, Sp, Lp, Ip, Ctx) -> Control);
 
-#[repr(transparent)]
-pub struct Operands(u32);
-
-pub type OpaqueOp = Op!(fn(Operands, Jt, Sp, Lp, Ip, Ctx) -> Control);
+pub type OpaqueOp = Op!(fn(RawInstruction, Jt, Sp, Lp, Ip, Ctx) -> Control);
 
 macro_rules! declare_operand_type {
-    ($name:ident, $ty:ident) => {
+    ($name:ident, $ty:ident, $fmt:literal) => {
         #[derive(Clone, Copy)]
         #[repr(transparent)]
         pub struct $name($ty);
@@ -169,41 +197,86 @@ macro_rules! declare_operand_type {
             pub unsafe fn new_unchecked(v: $ty) -> Self {
                 Self(v)
             }
-        }
-    };
-    ($name:ident, $ty:ident, $zx_ty:ident) => {
-        declare_operand_type!($name, $ty);
 
-        impl $name {
             #[inline(always)]
-            pub fn zx(self) -> $zx_ty {
-                self.0 as $zx_ty
+            pub fn zx(self) -> usize {
+                self.0.zx()
+            }
+
+            #[inline(always)]
+            pub fn sz(self) -> isize {
+                self.0.sz()
+            }
+        }
+
+        impl std::fmt::Display for $name {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                write!(f, $fmt, self.0)
             }
         }
     };
 }
 
+trait ExtendEx: Sized {
+    fn zx(self) -> usize;
+    fn sz(self) -> isize;
+}
+
+macro_rules! extend_primitive {
+    ($ty:ty) => {
+        impl ExtendEx for $ty {
+            #[inline(always)]
+            fn zx(self) -> usize {
+                self as usize
+            }
+
+            #[inline(always)]
+            fn sz(self) -> isize {
+                self as isize
+            }
+        }
+    };
+}
+
+extend_primitive!(u8);
+extend_primitive!(u16);
+extend_primitive!(i16);
+
+impl ExtendEx for u24 {
+    #[inline(always)]
+    fn zx(self) -> usize {
+        self.get() as usize
+    }
+
+    #[inline(always)]
+    fn sz(self) -> isize {
+        self.get() as isize
+    }
+}
+
 macro_rules! declare_operand_types {
     (
         $(
-            $name:ident( $ty:ident $(as $zx_ty:ident)? )
+            $name:ident($ty:ident) = $fmt:literal
         ),* $(,)?
     ) => {
         $(
-            declare_operand_type!($name, $ty $(, $zx_ty)?);
+            declare_operand_type!($name, $ty, $fmt);
         )*
     };
 }
 
 declare_operand_types! {
-    Reg(u8 as usize),
+    Reg(u8) = "r{}",
 
-    Lit(u16 as usize),
-    Lit8(u8 as usize),
+    Lit(u16) = "l{}",
+    Lit8(u8) = "l{}",
 
-    Imm8(u8 as usize),
-    Imm16(i16),
-    Imm24(u24),
+    FnId(u16) = "fn{}",
+
+    Imm8(u8) = "{}",
+    Imm16(i16) = "{}",
+    Imm24(u24) = "{}",
 }
 
 const fn assert_bit_equal<A, B>(a: &A, b: &B) {

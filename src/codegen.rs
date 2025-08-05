@@ -4,11 +4,11 @@ pub mod opcodes;
 use crate::{
     ast::{self, Expr, Node, NodeList},
     span::Span,
-    vm::{self, Context, FuncInfo, Literal, Module, Value},
+    vm::{self, Chunk, Context, Control, FuncInfo, Literal, Value},
 };
 use bumpalo::{Bump, collections::Vec, vec};
 use hashbrown::HashMap;
-use opcodes::{Imm16, Instruction, Lit, Reg, asm};
+use opcodes::{FnId, Imm16, Instruction, Lit, Reg, asm};
 use std::borrow::Cow;
 
 use crate::{
@@ -19,8 +19,8 @@ use crate::{
 macro_rules! f {
     ($m:expr) => {
         unsafe {
-            debug_assert!(!($m).funcs.is_empty());
-            ($m).funcs.last_mut().unwrap_unchecked()
+            debug_assert!(!($m).func_stack.is_empty());
+            ($m).func_stack.last_mut().unwrap_unchecked()
         }
     };
 }
@@ -34,12 +34,12 @@ macro_rules! asm {
     };
 }
 
-pub fn emit(ast: &Ast) -> Result<Module> {
+pub fn emit(ast: &Ast) -> Result<Chunk> {
     let buf = &Bump::new();
-    let mut m = ModuleState {
+    let mut m = State {
         buf,
-        funcs: vec![in buf],
-        literals: Literals::new(buf),
+        func_stack: vec![in buf],
+        func_table: vec![in buf],
     };
     let main = emit_func(
         &mut m,
@@ -50,16 +50,13 @@ pub fn emit(ast: &Ast) -> Result<Module> {
         ast.root().body(),
     )?;
 
-    Ok(Module {
-        main,
-        literals: m.literals.flat.into_iter().collect(),
-    })
+    Ok(Chunk::new(main, m.func_table.into_iter().collect()))
 }
 
-struct ModuleState<'ast, 'bump> {
+struct State<'ast, 'bump> {
     buf: &'bump Bump,
-    funcs: Vec<'bump, FunctionState<'ast, 'bump>>,
-    literals: Literals<'bump>,
+    func_stack: Vec<'bump, FunctionState<'ast, 'bump>>,
+    func_table: Vec<'bump, FuncInfo>,
 }
 
 struct FunctionState<'ast, 'bump> {
@@ -67,6 +64,7 @@ struct FunctionState<'ast, 'bump> {
     scopes: Vec<'bump, Vec<'bump, Local<'ast>>>,
     ra: RegAlloc,
     code: Vec<'bump, Instruction>,
+    literals: Literals<'bump>,
     dbg: FunctionDebug<'bump>,
 }
 
@@ -117,13 +115,6 @@ impl<'bump> Literals<'bump> {
             }
         }
     }
-
-    fn func(&mut self, v: FuncInfo, span: Span) -> Result<Lit> {
-        let id = Self::next_id(&mut self.flat, span)?;
-        self.flat.push(Literal::Func(Box::new(v)));
-
-        Ok(id)
-    }
 }
 
 impl RegAlloc {
@@ -167,6 +158,7 @@ impl<'ast, 'bump> FunctionState<'ast, 'bump> {
             scopes: vec![in buf],
             ra: RegAlloc::new(),
             code: vec![in buf],
+            literals: Literals::new(buf),
 
             dbg: FunctionDebug {
                 spans: vec![in buf],
@@ -218,7 +210,7 @@ impl<'ast, 'bump> FunctionState<'ast, 'bump> {
     }
 }
 
-impl<'ast, 'bump> ModuleState<'ast, 'bump> {
+impl<'ast, 'bump> State<'ast, 'bump> {
     fn begin_scope(&mut self, buf: &'bump Bump) {
         f!(self).begin_scope(buf);
     }
@@ -227,12 +219,13 @@ impl<'ast, 'bump> ModuleState<'ast, 'bump> {
         f!(self).end_scope()
     }
 
+    // TODO: error when running out of registers
     fn reg(&mut self) -> Reg {
-        f!(self).ra.alloc()
+        f!(self).reg()
     }
 
     fn rfree(&mut self, reg: Reg) {
-        f!(self).ra.free(reg);
+        f!(self).rfree(reg);
     }
 
     fn decl_local(&mut self, name: &'ast str, span: Span) {
@@ -242,16 +235,28 @@ impl<'ast, 'bump> ModuleState<'ast, 'bump> {
     fn emit(&mut self, inst: Instruction, span: Span) {
         f!(self).emit(inst, span)
     }
+
+    fn finish_function(&mut self, f: FuncInfo, span: Span) -> Result<FnId> {
+        let id = self.func_table.len();
+        if id > u16::MAX as usize {
+            return error("too many functions", span).into();
+        }
+        let id = unsafe { FnId::new_unchecked(id as u16) };
+
+        self.func_table.push(f);
+
+        Ok(id)
+    }
 }
 
 fn emit_func<'ast, 'bump>(
-    m: &mut ModuleState<'ast, 'bump>,
+    m: &mut State<'ast, 'bump>,
     name: Cow<'ast, str>,
     span: Span,
     params: NodeList<'ast, Ident>,
     param_spans: &'ast [Span],
     body: NodeList<'ast, Stmt>,
-) -> Result<Lit> {
+) -> Result<FnId> {
     if params.len() > u8::MAX as usize {
         return error(
             "too many parameters, maximum is 256",
@@ -261,7 +266,7 @@ fn emit_func<'ast, 'bump>(
     }
 
     let f = FunctionState::new(name, m.buf);
-    m.funcs.push(f);
+    m.func_stack.push(f);
 
     {
         m.begin_scope(m.buf);
@@ -274,31 +279,33 @@ fn emit_func<'ast, 'bump>(
 
         emit_stmt_list_with_tail(m, body, Some(ret_reg))?;
 
+        asm! {
+            in m;
+            ret
+        };
+
         m.end_scope();
     }
-    let f = m.funcs.pop().expect("function stack is empty");
+    let f = m.func_stack.pop().expect("function stack is empty");
 
-    let f = FuncInfo {
-        name: f.name.into(),
-        nparams: params.len() as u8,
-        nstack: f.ra.num,
-        code: f.code.into_iter().collect(),
-        dbg: Box::new(crate::vm::dbg::FuncDebugInfo {
+    let f = FuncInfo::new(
+        f.name.into_owned(),
+        params.len() as u8,
+        f.ra.num,
+        f.code.into_iter().collect(),
+        f.literals.flat.into_iter().collect(),
+        crate::vm::dbg::FuncDebugInfo {
             spans: f.dbg.spans.into_iter().collect(),
             locals: f.dbg.locals.into_iter().collect(),
-        }),
-    };
+        },
+    );
 
-    let id = m.literals.func(f, span)?;
+    let id = m.finish_function(f, span)?;
 
     Ok(id)
 }
 
-fn emit_stmt_list_with_tail(
-    m: &mut ModuleState,
-    list: NodeList<Stmt>,
-    dst: Option<Reg>,
-) -> Result<()> {
+fn emit_stmt_list_with_tail(m: &mut State, list: NodeList<Stmt>, dst: Option<Reg>) -> Result<()> {
     let (stmt_list, tail) = match list.last().map(|node| node.kind()) {
         Some(ast::StmtKind::StmtExpr(tail)) => (list.slice(0..list.len() - 1).unwrap(), Some(tail)),
         _ => (list, None),
@@ -327,7 +334,7 @@ fn emit_stmt_list_with_tail(
     Ok(())
 }
 
-fn emit_stmt(m: &mut ModuleState, stmt: Node<Stmt>) -> Result<()> {
+fn emit_stmt(m: &mut State, stmt: Node<Stmt>) -> Result<()> {
     match stmt.kind() {
         ast::StmtKind::Var(node) => todo!(),
         ast::StmtKind::Loop(node) => todo!(),
@@ -340,12 +347,7 @@ fn emit_stmt(m: &mut ModuleState, stmt: Node<Stmt>) -> Result<()> {
     Ok(())
 }
 
-fn emit_expr(
-    m: &mut ModuleState,
-    expr: Node<Expr>,
-    span: Span,
-    dst: Option<Reg>,
-) -> Result<Option<Reg>> {
+fn emit_expr(m: &mut State, expr: Node<Expr>, span: Span, dst: Option<Reg>) -> Result<Option<Reg>> {
     match expr.kind() {
         ast::ExprKind::Return(node) => todo!(),
         ast::ExprKind::Break(node) => todo!(),
@@ -376,7 +378,7 @@ fn emit_expr(
     }
 }
 
-fn emit_expr_into(m: &mut ModuleState, expr: Node<Expr>, span: Span, dst: Reg) -> Result<()> {
+fn emit_expr_into(m: &mut State, expr: Node<Expr>, span: Span, dst: Reg) -> Result<()> {
     if let Some(src) = emit_expr(m, expr, span, Some(dst))? {
         if src.get() != dst.get() {
             asm! {
@@ -404,7 +406,7 @@ impl<'a> IntExpr<'a> {
 }
 
 fn emit_expr_int(
-    m: &mut ModuleState,
+    m: &mut State,
     expr: IntExpr,
     span: Span,
     dst: Option<Reg>,
@@ -419,7 +421,7 @@ fn emit_expr_int(
                 lsmi dst, v
             };
         } else {
-            let id = m.literals.i64(v as i64, span)?;
+            let id = f.literals.i64(v as i64, span)?;
             asm! {
                 in f at span;
                 lint dst, id
@@ -429,3 +431,6 @@ fn emit_expr_int(
 
     Ok(None)
 }
+
+#[cfg(test)]
+mod tests;

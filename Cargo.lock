@@ -97,6 +97,7 @@ dependencies = [
 name = "hebi4"
 version = "0.1.0"
 dependencies = [
+ "beef",
  "bumpalo",
  "hashbrown",
  "insta",

@@ -6,3 +6,7 @@ pub struct Value {
 }
 
 pub struct Context {}
+
+pub struct Literal {}
+
+pub enum Control {}
