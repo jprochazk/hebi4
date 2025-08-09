@@ -29,3 +29,8 @@ pub fn eval(code: &str) -> Result<vm::Value> {
 
     todo!()
 }
+
+#[doc(hidden)]
+pub mod __macro {
+    pub use crate::vm::gc::{__MustNotImplTrace, Root, StackRoot, must_impl_trace};
+}

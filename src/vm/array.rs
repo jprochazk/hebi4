@@ -1,12 +1,27 @@
+//! Heap-allocated arrays.
+//!
+//! These are unsafe alternatives to `Vec<T>` and `Box<[T]>`.
+//!
+//! The idea behind using these instead of `Vec` and/or boxed slices is
+//! drastically reduced generated code size, and more aggressive optimization.
+//!
+//! See the doc comment in the `vm` module for more information.
+
 use std::alloc::{Layout, alloc_zeroed as allocate_zeroed, dealloc as deallocate};
 
-pub struct DynList<T: Sized + Default + Copy> {
+/// A dynamically-sized heap-allocated array.
+///
+/// Does NOT initialize its contents, but _does_
+/// keep track of which part of it is initialized.
+///
+/// Only supports `push` and `pop` operations.
+pub struct DynStack<T: Sized + Copy> {
     inner: DynArray<T>,
     length: usize,
 }
 
-impl<T: Sized + Default + Copy> DynList<T> {
-    /// `initial_capacity` must be a power of two.
+impl<T: Sized + Copy> DynStack<T> {
+    /// Panics if `initial_capacity` is not a power of two.
     pub fn new(initial_capacity: usize) -> Self {
         Self {
             inner: DynArray::new(initial_capacity),
@@ -14,6 +29,11 @@ impl<T: Sized + Default + Copy> DynList<T> {
         }
     }
 
+    /// Push a value onto the stack.
+    ///
+    /// This grows the array if necessary.
+    // No pointers are handed out by the stack, so calling
+    // `push` is always safe.
     #[inline]
     pub fn push(&mut self, value: T) {
         unsafe {
@@ -26,6 +46,12 @@ impl<T: Sized + Default + Copy> DynList<T> {
         }
     }
 
+    /// Pop a value from the stack.
+    ///
+    /// Assumes length is non-zero.
+    ///
+    /// # Safety
+    /// - There must be a value at the top of the stack.
     #[inline]
     pub unsafe fn pop_unchecked(&mut self) -> T {
         self.length -= 1;
@@ -33,13 +59,19 @@ impl<T: Sized + Default + Copy> DynList<T> {
     }
 }
 
-pub struct DynArray<T: Sized + Default + Copy> {
+/// A statically-sized heap-allocated array.
+///
+/// Does NOT initialize its contents, and does
+/// not keep track of which part of it is initialized.
+///
+/// The user assumes this responsibility.
+pub struct DynArray<T: Sized + Copy> {
     base: *mut T,
     capacity: usize,
 }
 
-impl<T: Sized + Default + Copy> DynArray<T> {
-    /// `initial_capacity` must be a power of two.
+impl<T: Sized + Copy> DynArray<T> {
+    /// Panics if `initial_capacity` is not a power of two.
     #[inline]
     pub fn new(initial_capacity: usize) -> Self {
         assert!(initial_capacity.is_power_of_two());
@@ -47,24 +79,30 @@ impl<T: Sized + Default + Copy> DynArray<T> {
         unsafe {
             let capacity = initial_capacity;
             let base = allocate_zeroed(Self::layout(capacity)).cast::<T>();
-            for i in 0..capacity {
-                base.add(i).write(T::default());
-            }
             Self { base, capacity }
         }
     }
 
+    /// Returns a pointer to item at `offset`.
+    ///
+    /// The item is not guaranteed to be initialized,
+    /// it must be initialized by the user before being read!
     #[inline]
     pub fn offset(&self, offset: usize) -> *mut T {
         debug_assert!(offset < self.capacity);
         unsafe { self.base.add(offset) }
     }
 
+    /// How many items this array can store.
     #[inline]
     pub fn capacity(&self) -> usize {
         self.capacity
     }
 
+    /// Assuming the array holds items up to `offset`,
+    /// returns how many bytes are remaining.
+    ///
+    /// The array does not guarantee to hold items up to `offset`.
     #[inline]
     pub fn remaining(&self, offset: usize) -> isize {
         (self.capacity as isize) - (offset as isize)
@@ -72,7 +110,8 @@ impl<T: Sized + Default + Copy> DynArray<T> {
 
     /// Grow the stack.
     ///
-    /// This invalidates any pointers to the old array.
+    /// Calling this invalidates any pointers to the array created by
+    /// [`Self::offset`] before the call.
     #[inline(never)]
     #[cold]
     pub unsafe fn grow(&mut self, additional: usize) {
@@ -83,9 +122,6 @@ impl<T: Sized + Default + Copy> DynArray<T> {
         let new_base = allocate_zeroed(Self::layout(new_capacity)).cast::<T>();
 
         core::ptr::copy_nonoverlapping(old_base, new_base, old_capacity);
-        for i in old_capacity..new_capacity {
-            new_base.add(i).write(T::default());
-        }
         deallocate(old_base.cast(), Self::layout(old_capacity));
 
         self.base = new_base;
@@ -98,7 +134,7 @@ impl<T: Sized + Default + Copy> DynArray<T> {
     }
 }
 
-impl<T: Sized + Default + Copy> Drop for DynArray<T> {
+impl<T: Sized + Copy> Drop for DynArray<T> {
     #[inline]
     fn drop(&mut self) {
         unsafe { deallocate(self.base.cast(), Self::layout(self.capacity)) }

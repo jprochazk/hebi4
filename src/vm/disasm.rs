@@ -15,7 +15,7 @@ pub struct Disasm<'a> {
 
 impl<'a> std::fmt::Display for Disasm<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let functions = unsafe { &*self.chunk.functions };
+        let functions = &*self.chunk.functions;
         for func in functions {
             std::fmt::Display::fmt(
                 &DisasmFunc {
@@ -46,15 +46,15 @@ impl<'a> std::fmt::Display for DisasmFunc<'a> {
         } = &self.func;
 
         let src = self.src;
-        let dbg = *dbg;
-        let code = unsafe { &**code };
-        let lit = unsafe { &**literals };
+        let dbg = dbg;
+        let code = &**code;
+        let lit = &**literals;
 
         writeln!(f, ".fn {name}")?;
         writeln!(f, "  params {nparams}")?;
         writeln!(f, "  stack {nstack}")?;
         if let Some(dbg) = dbg {
-            for Local { span, reg } in unsafe { &(*dbg).locals } {
+            for Local { span, reg } in &(*dbg).locals {
                 writeln!(f, "  .locals")?;
                 writeln!(f, "    {} = {}", reg, &src[*span])?;
             }
