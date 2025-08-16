@@ -79,25 +79,15 @@
 //! when there is no user-defined `trace`, and no way to store "direct handles"
 //! to GC objects in user-defined structs. Wow!
 
-use std::{cell::UnsafeCell, marker::PhantomData, pin::Pin};
+use std::{
+    cell::UnsafeCell,
+    marker::{PhantomData, PhantomPinned},
+    pin::Pin,
+};
 
-// TODO:
-// - Start with a `safe-gc` like API
-// - Introduce unchecked getters
-// - Use stack roots instead of RootSet by default
-// - Ability to promote objects to "permanent"
-//   - Similar to `safe_gc::Root`
-// - Ability to traverse external collections of pointers
-//   - Important for VM stack
-//   - NOTE: call frames should probably keep closures alive!
-
-// for tracing from heterogenous list, need some kind of type tag.
-//
-// if we guarantee that user-defined types cannot store objects without
-// persistent handle indirection, then we don't need to trace arbitrary
-// user data, and can have a bounded set of possible types which need to
-// be traced for interior pointers.
+#[repr(C)]
 pub(crate) struct HeapData {
+    roots: UnsafeCell<RootKindArray<RootList>>,
     _marker: PhantomData<()>,
 }
 
@@ -105,7 +95,16 @@ impl HeapData {
     #[inline]
     pub(crate) fn new() -> Self {
         Self {
+            roots: UnsafeCell::new(RootKindArray::default()),
             _marker: PhantomData,
+        }
+    }
+
+    #[inline]
+    fn raw_roots(this: *mut HeapData) -> *mut RootKindArray<RootList> {
+        unsafe {
+            let cell = &raw mut (*this).roots;
+            UnsafeCell::raw_get(cell)
         }
     }
 }
@@ -184,47 +183,6 @@ impl<T: Sized + 'static> Gc<T> {
         let ptr = UnsafeCell::raw_get(ptr);
 
         unsafe { &mut *ptr }
-    }
-}
-
-/// Stores pointers used to traverse stack roots
-struct RootBase {
-    list: *mut *mut RootBase,
-    prev: *mut RootBase,
-}
-
-/// Internal API
-///
-/// Value produced by the [`root`] macro, only transitively
-/// reachable through a [`Root`]. The place itself becomes
-/// pinned, and is appended to the list of stack roots.
-#[doc(hidden)]
-#[repr(C)]
-pub struct StackRoot<T: Sized + 'static> {
-    base: RootBase,
-    ptr: Gc<T>,
-}
-
-impl<T: Sized + 'static> StackRoot<T> {
-    /// Internal API
-    #[doc(hidden)]
-    #[inline]
-    pub unsafe fn new(list: *mut *mut RootBase, ptr: Gc<T>) -> Self {
-        Self { base: todo!(), ptr }
-    }
-}
-
-#[repr(C)]
-pub struct Root<'a, T: Sized + 'static> {
-    place: Pin<&'a mut StackRoot<T>>,
-}
-
-impl<'a, T: Sized + 'static> Root<'a, T> {
-    /// Internal API
-    #[doc(hidden)]
-    #[inline]
-    pub unsafe fn new(place: Pin<&'a mut StackRoot<T>>) -> Self {
-        Self { place }
     }
 }
 
@@ -316,4 +274,317 @@ macro_rules! __must_impl_trace {
     };
 }
 
-struct Test {}
+// ## Roots
+//
+// The rooting API uses a stack-allocated linked list,
+// segregated by type.
+//
+// For all intents and purposes, the root kind is the
+// same as the rooted object's type tag.
+//
+// If we guarantee that user-defined types cannot store objects without
+// persistent handle indirection, then we don't need to trace arbitrary
+// user data, and can have a bounded set of possible types which need to
+// be traced for interior pointers.
+
+/// Declare an enum for each possible kind of root,
+/// and an array type which uses the enum as its index.
+///
+/// The array is always fully initialized, removing the need
+/// for any bounds checking.
+macro_rules! root_kind {
+    (
+        #[array($array:ident)]
+        #[$($attr:meta),*]
+        $vis:vis enum $name:ident {
+            $($variant:ident),*
+            $(,)?
+        }
+    ) => {
+        #[$($attr),*]
+        $vis enum $name {
+            $($variant),*
+        }
+
+        impl $name {
+            pub const LENGTH: usize = root_kind!(@count $($variant)*);
+        }
+
+        #[repr(transparent)]
+        $vis struct $array<T: Sized>([T; $name::LENGTH]);
+
+        impl<T: Sized> $array<T> {
+            #[inline]
+            pub fn new(values: [T; $name::LENGTH]) -> Self {
+                Self(values)
+            }
+
+            #[inline]
+            pub fn get(&self, index: $name) -> &T {
+                unsafe {
+                    self.0.get_unchecked(index as usize)
+                }
+            }
+
+            #[inline]
+            pub fn get_mut(&mut self, index: $name) -> &mut T {
+                unsafe {
+                    self.0.get_unchecked_mut(index as usize)
+                }
+            }
+
+            #[inline]
+            pub fn raw_get(this: *const $array<T>, index: $name) -> *const T {
+                unsafe {
+                    let inner = &raw const (*this).0;
+                    inner.cast::<T>().add(index as usize)
+                }
+            }
+
+            #[inline]
+            pub fn raw_get_mut(this: *mut $array<T>, index: $name) -> *mut T {
+                unsafe {
+                    let inner = &raw mut (*this).0;
+                    inner.cast::<T>().add(index as usize)
+                }
+            }
+        }
+
+        impl<T: Sized + Default> $array<T> {
+            #[inline]
+            fn default() -> Self {
+                Self::new(core::array::from_fn(|_| T::default()))
+            }
+        }
+
+        impl<T: Sized + Default> core::ops::Index<$name> for $array<T> {
+            type Output = T;
+
+            #[inline]
+            fn index(&self, index: $name) -> &T {
+                self.get(index)
+            }
+        }
+
+        impl<T: Sized + Default> core::ops::IndexMut<$name> for $array<T> {
+            #[inline]
+            fn index_mut(&mut self, index: $name) -> &mut T {
+                self.get_mut(index)
+            }
+        }
+    };
+
+    (@count) => {0};
+    (@count $ident:ident $($tail:ident)*) => {
+        1 + root_kind!(@count $($tail)*)
+    };
+}
+
+root_kind! {
+    #[array(RootKindArray)]
+    #[repr(u8)]
+    pub enum RootKind {
+        Array,
+        Table,
+        GCBox,
+        UTable,
+    }
+}
+
+/// Internal API
+///
+/// Represents a rootable thing. Used to map a type
+/// to its root kind.
+#[doc(hidden)]
+pub trait Rootable: private::Sealed {
+    const KIND: RootKind;
+}
+
+/// Stores pointers used to traverse stack roots.
+///
+/// Each node stores a pointer to the head of the list,
+/// and a pointer to the previous node.
+#[repr(C)]
+struct RootBase {
+    list: *mut RootList,
+    prev: *mut RootBase,
+}
+
+/// A linked list of stack roots.
+///
+/// Treated as a stack. Roots are pushed to the front,
+/// and popped from the front, in LIFO order.
+#[repr(C)]
+struct RootList {
+    head: *mut RootBase,
+}
+
+impl RootList {
+    #[inline]
+    fn head(this: *mut RootList) -> *mut *mut RootBase {
+        unsafe { &raw mut (*this).head }
+    }
+
+    #[inline]
+    fn base(this: *mut RootList) -> RootBase {
+        unsafe {
+            RootBase {
+                list: this,
+                prev: (*this).head,
+            }
+        }
+    }
+}
+
+impl Default for RootList {
+    fn default() -> Self {
+        Self {
+            head: core::ptr::null_mut(),
+        }
+    }
+}
+
+/// Internal API
+///
+/// A root list node, holds a direct pointer to a GC-managed object.
+///
+/// Not useful on its own, needs to be pinned and wrapped in a `Root`.
+#[doc(hidden)]
+#[repr(C)]
+pub struct StackRoot<T: Rootable + Sized + 'static> {
+    base: RootBase,
+    ptr: Gc<T>,
+    pinned: PhantomPinned,
+}
+
+impl<T: Rootable + Sized + 'static> StackRoot<T> {
+    /// Internal API
+    ///
+    /// SAFETY:
+    /// - `ptr` must still be live, but not necessarily reachable
+    /// - `ptr` must have been allocated via `heap`
+    #[doc(hidden)]
+    #[inline]
+    pub unsafe fn from_heap_ptr(heap: &Heap, ptr: Gc<T>) -> Self {
+        let roots = HeapData::raw_roots(heap.data);
+        let list = RootKindArray::raw_get_mut(roots, T::KIND);
+        let base = RootList::base(list);
+
+        Self {
+            base,
+            ptr,
+            pinned: PhantomPinned,
+        }
+    }
+
+    /// Cast `self` to a `RootBase`.
+    #[inline]
+    fn root_base(self: Pin<&mut Self>) -> *mut RootBase {
+        unsafe {
+            // SAFETY: we do not move out of `self`
+            &raw mut self.get_unchecked_mut().base
+        }
+    }
+
+    /// Append a pinned stack root to its root list.
+    ///
+    /// SAFETY:
+    /// - `self` must remain pinned.
+    /// - no other stack root can be appended to any root list
+    ///   between the construction of `self` and calling this
+    ///   function.
+    #[inline]
+    unsafe fn _append_to_root_list(self: Pin<&mut Self>) {
+        let head = RootList::head(self.base.list);
+
+        // SAFETY: we are pinned, so it's safe to append ourselves
+        // to the root list.
+        unsafe {
+            *head = self.root_base();
+        }
+    }
+
+    /// Remove a pinned stack root from its root list.
+    ///
+    /// SAFETY: `self` must be head of the root list.
+    #[inline]
+    unsafe fn _remove_from_root_list(self: Pin<&mut Self>) {
+        let head = RootList::head(self.base.list);
+        let prev = self.base.prev;
+        let this = self.root_base();
+
+        unsafe {
+            debug_assert!(*head == this, "roots removed out of order");
+
+            *head = prev;
+        }
+    }
+}
+
+/// Internal API
+#[doc(hidden)]
+#[repr(C)]
+pub struct Root<'a, T: Rootable + Sized + 'static> {
+    place: Pin<&'a mut StackRoot<T>>,
+}
+
+impl<'a, T: Rootable + Sized + 'static> Root<'a, T> {
+    /// Internal API
+    #[doc(hidden)]
+    #[inline]
+    pub fn from_pinned_place(mut place: Pin<&'a mut StackRoot<T>>) -> Self {
+        unsafe {
+            // SAFETY: `place` remains pinned
+            place.as_mut()._append_to_root_list();
+        }
+        Self { place }
+    }
+}
+
+impl<'a, T: Rootable + Sized + 'static> Drop for Root<'a, T> {
+    #[inline]
+    fn drop(&mut self) {
+        unsafe {
+            // SAFETY: roots are dropped in LIFO order.
+            self.place.as_mut()._remove_from_root_list();
+        }
+    }
+}
+
+/// Create a root on the stack.
+///
+/// Rooting a reclaimed object is undefined behavior.
+/// Similarly, _not_ rooting an allocated object is undefined behavior.
+///
+/// To use this correctly, you must only allocate using `alloc_no_gc`,
+/// and _immediately_ root the resulting object.
+///
+/// An object may be rooted multiple times, the GC ignores any objects
+/// which are already marked.
+///
+/// ## Safety
+///
+/// - The assigned `ptr` must still be live at the time of initialization.
+#[macro_export]
+macro_rules! root {
+    [in $heap:ident; $root:ident = $ptr:ident] => {
+        let stack_root = $crate::__macro::StackRoot::from_heap_ptr($heap, $ptr);
+        let stack_root = std::pin::pin!(stack_root);
+        // this variable is not mutable, so it cannot be overwritten,
+        // so `stack_root` remains rooted until end of scope.
+        let $root = $crate::__macro::Root::from_pinned_place(stack_root);
+    };
+}
+
+impl Rootable for () {
+    const KIND: RootKind = RootKind::Array;
+}
+
+impl private::Sealed for () {}
+
+fn test(heap: &mut Heap, ptr: Gc<()>) {
+    unsafe {
+        root!(in heap; v0 = ptr);
+        root!(in heap; v1 = ptr);
+    }
+}
