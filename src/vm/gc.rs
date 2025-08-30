@@ -525,20 +525,11 @@ impl<T: Rootable + Sized + 'static> StackRoot<T> {
 #[doc(hidden)]
 #[repr(C)]
 pub struct Root<'a, T: Rootable + Sized + 'static> {
-    place: Pin<&'a mut StackRoot<T>>,
-}
-
-impl<'a, T: Rootable + Sized + 'static> Root<'a, T> {
-    /// Internal API
+    /// Internal API.
+    ///
+    /// Accessing this field is undefined behavior!
     #[doc(hidden)]
-    #[inline]
-    pub fn from_pinned_place(mut place: Pin<&'a mut StackRoot<T>>) -> Self {
-        unsafe {
-            // SAFETY: `place` remains pinned
-            place.as_mut()._append_to_root_list();
-        }
-        Self { place }
-    }
+    pub __place: Pin<&'a mut StackRoot<T>>,
 }
 
 impl<'a, T: Rootable + Sized + 'static> Drop for Root<'a, T> {
@@ -546,7 +537,7 @@ impl<'a, T: Rootable + Sized + 'static> Drop for Root<'a, T> {
     fn drop(&mut self) {
         unsafe {
             // SAFETY: roots are dropped in LIFO order.
-            self.place.as_mut()._remove_from_root_list();
+            self.__place.as_mut()._remove_from_root_list();
         }
     }
 }
@@ -554,25 +545,22 @@ impl<'a, T: Rootable + Sized + 'static> Drop for Root<'a, T> {
 /// Create a root on the stack.
 ///
 /// Rooting a reclaimed object is undefined behavior.
-/// Similarly, _not_ rooting an allocated object is undefined behavior.
+/// Inversely, _not_ rooting an allocated object is undefined behavior.
 ///
 /// To use this correctly, you must only allocate using `alloc_no_gc`,
 /// and _immediately_ root the resulting object.
 ///
-/// An object may be rooted multiple times, the GC ignores any objects
-/// which are already marked.
-///
 /// ## Safety
 ///
-/// - The assigned `ptr` must still be live at the time of initialization.
+/// - The object pointed to by `$ptr` must still be live at the time of initialization.
 #[macro_export]
-macro_rules! root {
-    [in $heap:ident; $root:ident = $ptr:ident] => {
-        let stack_root = $crate::__macro::StackRoot::from_heap_ptr($heap, $ptr);
-        let stack_root = std::pin::pin!(stack_root);
-        // this variable is not mutable, so it cannot be overwritten,
-        // so `stack_root` remains rooted until end of scope.
-        let $root = $crate::__macro::Root::from_pinned_place(stack_root);
+macro_rules! root_unchecked {
+    [in $heap:ident; $ptr:ident] => {
+        $crate::__macro::Root {
+            __place: std::pin::pin!(
+                $crate::__macro::StackRoot::from_heap_ptr($heap, $ptr)
+            )
+        }
     };
 }
 
@@ -584,7 +572,7 @@ impl private::Sealed for () {}
 
 fn test(heap: &mut Heap, ptr: Gc<()>) {
     unsafe {
-        root!(in heap; v0 = ptr);
-        root!(in heap; v1 = ptr);
+        let v0 = root_unchecked!(in heap; ptr);
+        let v1 = root_unchecked!(in heap; ptr);
     }
 }
