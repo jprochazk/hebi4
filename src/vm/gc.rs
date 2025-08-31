@@ -52,9 +52,9 @@
 //!   - Array, Table
 //!   - Stored on heap, GC header type tag supports a subset of these directly
 //!     - Tracing these is cheap, only a `match obj.tag` + static dispatch
-//! - GCBox
+//! - UTable
 //!   - Rust `struct`, wrapped in GC-managed allocation
-//!     - Cannot be used to expose anything to script code, only passed around
+//!   - May expose getters, setters, methods (?)
 //!   - These cannot be traced, meaning no `Trace` derive
 //!     - Would require `unsafe Trace` to be exposed, don't want that,
 //!       even via derive.
@@ -72,8 +72,6 @@
 //!       dereference them in `drop` impls, so `Drop` types are safe to
 //!       wrap in `UserData`
 //!   - Carve out separate sweep paths for user data which does not need `drop`
-//! - UTable
-//!   - `GCBox` with exposed getters, setters, methods (?)
 //!
 //! NOTE: I didn't realise just how much simpler the GC implementation becomes
 //! when there is no user-defined `trace`, and no way to store "direct handles"
@@ -112,12 +110,44 @@ impl HeapData {
 #[repr(C)]
 pub struct Heap {
     data: *mut HeapData,
+
+    #[cfg(debug_assertions)]
+    heap_id: HeapId,
 }
 
 impl Heap {
     #[inline]
     pub(crate) fn new(data: *mut HeapData) -> Self {
-        Self { data }
+        Self {
+            data,
+
+            #[cfg(debug_assertions)]
+            heap_id: HeapId::new(),
+        }
+    }
+
+    #[cfg(debug_assertions)]
+    #[doc(hidden)]
+    #[inline]
+    pub fn id(&self) -> HeapId {
+        self.heap_id
+    }
+}
+
+#[cfg(debug_assertions)]
+#[doc(hidden)]
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub struct HeapId(usize);
+
+#[cfg(debug_assertions)]
+impl HeapId {
+    #[doc(hidden)]
+    pub fn new() -> Self {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        static NEXT_ID: AtomicUsize = AtomicUsize::new(0);
+
+        Self(NEXT_ID.fetch_add(1, Ordering::Relaxed))
     }
 }
 
@@ -186,11 +216,60 @@ impl<T: Sized + 'static> Gc<T> {
     }
 }
 
-#[repr(C)]
+#[repr(transparent)]
 struct GcHeader {
-    marked: bool,
-    next: *mut GcHeader,
+    tagged: *mut GcHeader,
 }
+
+impl GcHeader {
+    #[inline]
+    fn new(kind: RootKind, next: *mut GcHeader) -> Self {
+        let marked = false as usize;
+        let kind = kind as usize;
+
+        let tag = marked | kind;
+
+        debug_assert!(tag & 0b001 == marked);
+        debug_assert!(tag & 0b110 == kind);
+
+        Self {
+            tagged: next.wrapping_add(tag),
+        }
+    }
+
+    #[inline]
+    fn marked(self) -> bool {
+        self.tagged.addr() & 1 == 1
+    }
+
+    #[inline]
+    fn mark(self, v: bool) -> Self {
+        GcHeader {
+            tagged: self
+                .tagged
+                .map_addr(|addr| (addr & !0b1).wrapping_add(v as usize)),
+        }
+    }
+
+    #[inline]
+    fn kind(self) -> RootKind {
+        let raw = (self.tagged.addr() & 0b110) as u8;
+        unsafe { core::mem::transmute(raw) }
+    }
+
+    #[inline]
+    fn next(self) -> *mut GcHeader {
+        let tag = self.tagged.addr() & 0b111;
+        self.tagged.map_addr(|addr| addr.wrapping_sub(tag))
+    }
+}
+
+const _: () = {
+    assert!(
+        std::mem::size_of::<*mut ()>() == 8 && std::mem::align_of::<*mut ()>() == 8,
+        "only 64-bit platforms are supported"
+    );
+};
 
 #[repr(C)]
 struct Thing<T: Sized + 'static> {
@@ -218,12 +297,14 @@ pub unsafe trait Trace: Sized + 'static {
     /// ## Safety
     ///
     /// All interior pointers must be marked.
-    unsafe fn trace(this: Gc<Self>, tracer: &dyn Tracer);
+    unsafe fn trace(this: Gc<Self>, tracer: &Tracer);
 }
 
 /// A type which knows how to mark GC-managed objects.
-pub trait Tracer: private::Sealed {
-    fn mark(&self, ptr: Gc<Any>);
+pub struct Tracer {}
+
+impl Tracer {
+    fn mark(&self, ptr: Gc<Any>) {}
 }
 
 #[repr(transparent)]
@@ -233,45 +314,6 @@ pub struct Any {
 
 mod private {
     pub trait Sealed {}
-}
-
-#[doc(hidden)]
-pub trait __MustNotImplTrace<T> {
-    fn f() {}
-}
-
-impl<T: Sized> __MustNotImplTrace<()> for T {
-    fn f() {}
-}
-
-#[allow(dead_code)]
-struct __Invalid;
-
-impl<T: Sized + Trace> __MustNotImplTrace<__Invalid> for T {
-    fn f() {}
-}
-
-#[macro_export]
-#[doc(hidden)]
-macro_rules! __must_not_impl_trace {
-    ($T:ty) => {
-        const _: () = {
-            let _ = <$T as $crate::__macro::__MustNotImplTrace<_>>::f;
-        };
-    };
-}
-
-#[doc(hidden)]
-pub const fn must_impl_trace<T: Trace>() {}
-
-#[macro_export]
-#[doc(hidden)]
-macro_rules! __must_impl_trace {
-    ($T:ty) => {
-        const _: () = {
-            let _ = $crate::__macro::must_impl_trace::<$T>;
-        };
-    };
 }
 
 // ## Roots
@@ -297,13 +339,13 @@ macro_rules! root_kind {
         #[array($array:ident)]
         #[$($attr:meta),*]
         $vis:vis enum $name:ident {
-            $($variant:ident),*
+            $($variant:ident = $v:expr),*
             $(,)?
         }
     ) => {
         #[$($attr),*]
         $vis enum $name {
-            $($variant),*
+            $($variant = $v),*
         }
 
         impl $name {
@@ -384,10 +426,9 @@ root_kind! {
     #[array(RootKindArray)]
     #[repr(u8)]
     pub enum RootKind {
-        Array,
-        Table,
-        GCBox,
-        UTable,
+        Array = 0b000,
+        Table = 0b010,
+        UTable = 0b100,
     }
 }
 
@@ -396,7 +437,7 @@ root_kind! {
 /// Represents a rootable thing. Used to map a type
 /// to its root kind.
 #[doc(hidden)]
-pub trait Rootable: private::Sealed {
+pub trait Rootable: private::Sealed + Sized + 'static {
     const KIND: RootKind;
 }
 
@@ -451,13 +492,13 @@ impl Default for RootList {
 /// Not useful on its own, needs to be pinned and wrapped in a `Root`.
 #[doc(hidden)]
 #[repr(C)]
-pub struct StackRoot<T: Rootable + Sized + 'static> {
+pub struct StackRoot<T: Rootable> {
     base: RootBase,
     ptr: Gc<T>,
     pinned: PhantomPinned,
 }
 
-impl<T: Rootable + Sized + 'static> StackRoot<T> {
+impl<T: Rootable> StackRoot<T> {
     /// Internal API
     ///
     /// SAFETY:
@@ -521,24 +562,76 @@ impl<T: Rootable + Sized + 'static> StackRoot<T> {
     }
 }
 
-/// Internal API
-#[doc(hidden)]
-#[repr(C)]
-pub struct Root<'a, T: Rootable + Sized + 'static> {
-    /// Internal API.
-    ///
-    /// Accessing this field is undefined behavior!
-    #[doc(hidden)]
-    pub __place: Pin<&'a mut StackRoot<T>>,
-}
-
-impl<'a, T: Rootable + Sized + 'static> Drop for Root<'a, T> {
+impl<T: Rootable> Drop for StackRoot<T> {
     #[inline]
     fn drop(&mut self) {
         unsafe {
-            // SAFETY: roots are dropped in LIFO order.
-            self.__place.as_mut()._remove_from_root_list();
+            // SAFETY:
+            // - roots are dropped in LIFO order.
+            // - `self` will not be moved after a call to `drop`
+            Pin::new_unchecked(self)._remove_from_root_list();
         }
+    }
+}
+
+#[repr(C)]
+pub struct Root<'a, T: Rootable> {
+    /// Internal API.
+    ///
+    /// Accessing this field is undefined behavior,
+    /// use [`Root::get`] and [`Root::get_mut`] instead.
+    #[doc(hidden)]
+    pub __place: Pin<&'a mut StackRoot<T>>,
+
+    /// Internal API.
+    ///
+    /// Accessing this field is undefined behavior.
+    #[doc(hidden)]
+    #[cfg(debug_assertions)]
+    pub __heap_id: HeapId,
+}
+
+impl<'a, T: Rootable> Root<'a, T> {
+    /// Dereference the rooted pointer. Grants shared access to the object.
+    #[inline]
+    pub fn get<'v>(&self, heap: &'v Heap) -> &'v T {
+        debug_assert!(heap.id() == self.__heap_id);
+
+        // SAFETY:
+        // - The object is guaranteed to live for the duration of this borrow:
+        //   - No collection may happen while the object is borrowed,
+        //     because `heap.collect` requires unique access to the `heap`
+        // - No mutable reference may exist at the same time as a shared reference
+        //   - Shared access is gated by shared access to the `heap`
+        //   - Only other shared references to `T` exist while the borrow is active
+        unsafe { self.__place.ptr.get(heap) }
+    }
+
+    // TODO: instead of returning `&mut T`, return `Write<'a, T>`, which:
+    // - Doesn't allow moving out of `T` (with mem::replace and similar)
+    // - Automatically triggers write barriers on write access
+    //
+    // Object never exist on the stack (other than for the moment when they're constructed),
+    // and rootable objects don't implement `Clone` or `Copy`, so it's impossible to move
+    // out of a mutable reference to a rootable `T`. Or at least that _should_ be the case,
+    // but we'd rather be 100% sure by gating mutable access behind a smart pointer of
+    // some kind. Being able to trigger write barriers that way is a nice side-effect.
+
+    /// Dereference the rooted pointer. Grants unique mutable access to the object.
+    #[inline]
+    pub fn get_mut<'v>(&self, heap: &'v mut Heap) -> &'v mut T {
+        debug_assert!(heap.id() == self.__heap_id);
+
+        // SAFETY:
+        // - The object is guaranteed to live for the duration of this borrow:
+        //   - No collection may happen while the object is borrowed,
+        //     because `heap.collect` requires unique access to the `heap`
+        // - The returned mutable reference is unique for the given object:
+        //   - Unique access is gated by unique access to the `heap`
+        //   - Only one heap may be active on a given thread at once
+        //   - Heaps, roots, and GC'd pointers are not `Send` or `Sync`
+        //   - No other references exist to `T` while the borrow is active
+        unsafe { self.__place.ptr.get_mut(heap) }
     }
 }
 
@@ -557,12 +650,19 @@ impl<'a, T: Rootable + Sized + 'static> Drop for Root<'a, T> {
 macro_rules! root_unchecked {
     [in $heap:ident; $ptr:ident] => {
         $crate::__macro::Root {
+            // the `pin!` macro hoists values into the enclosing scope (via `super let`)
+            // before pinning them, so this stack root is guaranteed to be dropped
             __place: std::pin::pin!(
                 $crate::__macro::StackRoot::from_heap_ptr($heap, $ptr)
-            )
+            ),
+
+            #[cfg(debug_assertions)]
+            __heap_id: ($heap).id(),
         }
     };
 }
+
+// TODO: root projection
 
 impl Rootable for () {
     const KIND: RootKind = RootKind::Array;
@@ -571,8 +671,10 @@ impl Rootable for () {
 impl private::Sealed for () {}
 
 fn test(heap: &mut Heap, ptr: Gc<()>) {
-    unsafe {
-        let v0 = root_unchecked!(in heap; ptr);
-        let v1 = root_unchecked!(in heap; ptr);
-    }
+    let v0 = unsafe { root_unchecked![in heap; ptr] };
+    let v1 = unsafe { root_unchecked![in heap; ptr] };
+
+    let r0_1 = v0.get(heap);
+    let r0_2 = v0.get(heap);
+    println!("{:?}", *r0_1);
 }
