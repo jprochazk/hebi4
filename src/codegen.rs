@@ -4,7 +4,10 @@ pub mod opcodes;
 use crate::{
     ast::{self, Expr, Node, NodeList},
     span::Span,
-    vm::{self, Chunk, Context, Control, FuncInfo, Literal, Value},
+    vm::{
+        self, Chunk, Context, Control, FuncInfo,
+        value::{Literal, Value},
+    },
 };
 use bumpalo::{Bump, collections::Vec, vec};
 use hashbrown::HashMap;

@@ -46,7 +46,11 @@
 
 mod array;
 mod disasm;
+
+#[macro_use]
 pub mod gc;
+
+pub mod value;
 
 use beef::lean::Cow;
 
@@ -58,6 +62,7 @@ use crate::{
     codegen::opcodes::*,
     error::{Error, Result, error},
     span::Span,
+    vm::value::{Literal, Value},
 };
 
 /// Represents the result of code generation: A list of functions with
@@ -134,25 +139,6 @@ pub mod dbg {
 // NOTE: `Value` and `Literal` must be partialy bit-compatible
 // TODO: check this at compile time
 
-#[repr(C, u64)]
-pub enum Literal {
-    Nil = 0,
-    Bool(bool) = 1,
-    Int(i64) = 2,
-    Float(f64) = 3,
-}
-
-#[derive(Default, Clone, Copy)]
-#[repr(C, u64)]
-pub enum Value {
-    #[default]
-    Nil = 0,
-    Bool(bool) = 1,
-    Int(i64) = 2,
-    Float(f64) = 3,
-    Object(Object) = 4,
-}
-
 impl Literal {
     #[inline]
     pub fn int(&self) -> Option<i64> {
@@ -169,14 +155,6 @@ impl Literal {
             _ => None,
         }
     }
-}
-
-type Private = PhantomData<()>;
-
-#[derive(Clone, Copy)]
-#[repr(C)]
-pub struct Object {
-    _private: Private,
 }
 
 #[derive(Clone, Copy)]
@@ -818,16 +796,6 @@ pub struct Runtime<'gc> {
 
     _lifetime: Invariant<'gc>,
 }
-
-// TODO: expose managed values in a safe way.
-// First use-case for that: snapshots of values.
-//   -> This also implies stringification using the runtime, but we'd like to:
-//      1. Execute the module, yielding a value
-//      2. "Stash" that value, returning it from `Vm::with`
-//      3. Using a 2nd call to `Vm::with`, stringify the value
-//         -> This may or may not actually require the VM, but we should
-//            at least pretend that it does.
-pub struct Gc<'gc, T>(*mut T, Invariant<'gc>);
 
 impl<'gc> Runtime<'gc> {
     /// Run the code once.

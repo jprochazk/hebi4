@@ -1,4 +1,7 @@
 #![allow(dead_code, unused_variables)] // TEMP
+#![allow(private_bounds)] // intentional
+
+// NOTE: spaces between `mod` ensure ordering
 
 pub mod span;
 
@@ -19,10 +22,9 @@ mod codegen;
 mod vm;
 
 pub use error::Result;
+pub use vm::{Chunk, Vm, value::Value};
 
-pub use vm::{Chunk, Value, Vm};
-
-pub fn eval(code: &str) -> Result<vm::Value> {
+pub fn eval(code: &str) -> Result<Value> {
     let tokens = token::tokenize(code);
     let ast = parser::parse(&tokens)?;
     let chunk = codegen::emit(&ast)?;
@@ -32,5 +34,5 @@ pub fn eval(code: &str) -> Result<vm::Value> {
 
 #[doc(hidden)]
 pub mod __macro {
-    pub use crate::vm::gc::{__MustNotImplTrace, Root, StackRoot, must_impl_trace};
+    pub use crate::vm::gc::{Root, StackRoot};
 }
