@@ -20,14 +20,6 @@ pub fn collect(heap: &mut Heap) {
     }
 }
 
-#[inline]
-unsafe fn iter_roots<F>(heap: &mut Heap, mut f: F)
-where
-    F: FnMut(*mut StackRoot<()>),
-{
-    RootList::iter(heap.roots(), |root| f(root.cast::<StackRoot<()>>()));
-}
-
 // Mark:
 // - For each root, add it to the worklist.
 // - While the worklist is not empty:
@@ -43,7 +35,7 @@ unsafe fn mark(heap: &mut Heap) {
     };
 
     // TODO: reduce duplication (?)
-    iter_roots(heap, |root| {
+    RootList::iter(heap.roots(), |root| {
         let ptr = (*root).ptr;
         if ptr.is_marked() {
             return;
@@ -72,35 +64,47 @@ unsafe fn mark(heap: &mut Heap) {
 unsafe fn sweep(heap: &mut Heap) {
     let mut iter = heap.head.get();
     let mut last_marked: Option<*mut GcHeader> = None;
+    let mut freed_bytes = 0usize;
 
     while !iter.is_null() {
         let (next, kind, marked) = (*iter).into_parts();
 
         if marked {
+            // unmark
             GcHeader::set_mark(iter, false);
             last_marked = Some(iter);
         } else {
+            // unlink
             match last_marked {
                 Some(prev_live) => GcHeader::set_next(prev_live, next),
                 None => heap.head.set(next),
             }
 
-            match kind {
+            // free
+            let size = match kind {
                 ObjectType::List => {
                     let _ = Box::from_raw(iter.cast::<GcBox<List>>());
+                    core::mem::size_of::<List>()
                 }
                 ObjectType::Table => {
                     let _ = Box::from_raw(iter.cast::<GcBox<Table>>());
+                    core::mem::size_of::<Table>()
                 }
                 ObjectType::Closure => {
                     let _ = Box::from_raw(iter.cast::<GcBox<Closure>>());
+                    core::mem::size_of::<Closure>()
                 }
                 ObjectType::UData => {
                     let _ = Box::from_raw(iter.cast::<GcBox<UData>>());
+                    core::mem::size_of::<UData>()
                 }
-            }
+            };
+
+            freed_bytes += size;
         }
 
         iter = next;
     }
+
+    heap.stats.free(freed_bytes);
 }

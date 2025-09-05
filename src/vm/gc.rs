@@ -49,7 +49,7 @@
 //!   - Stored on stack, no GC involvement
 //!   - Does not need heap for access
 //! - Built in objects
-//!   - List, Table
+//!   - List, Table, Closure
 //!   - Stored on heap, GC header type tag supports a subset of these directly
 //!     - Tracing these is cheap, only a `match obj.tag` + static dispatch
 //! - UData
@@ -86,7 +86,7 @@ use std::{
     ptr::null_mut,
 };
 
-use super::value::Value;
+use super::value::ValueRaw;
 
 // # Heap
 
@@ -99,6 +99,8 @@ pub struct Heap {
     /// allocations, which is used during sweeping
     head: Cell<*mut GcHeader>,
 
+    stats: HeapStats,
+
     #[cfg(debug_assertions)]
     heap_id: HeapId,
 }
@@ -109,6 +111,7 @@ impl Heap {
         Self {
             roots: UnsafeCell::new(Box::new(RootList::default())),
             head: Cell::new(null_mut()),
+            stats: HeapStats::default(),
 
             #[cfg(debug_assertions)]
             heap_id: HeapId::new(),
@@ -125,6 +128,8 @@ impl Heap {
         // CAST: `GcBox` is a `repr(C)` struct with `GcHeader` as its first field
         self.head.set(ptr.cast());
 
+        self.stats.alloc(core::mem::size_of::<T>());
+
         Gc { ptr }
     }
 
@@ -134,8 +139,17 @@ impl Heap {
     }
 
     #[inline]
+    pub fn stats(&self) -> &HeapStats {
+        &self.stats
+    }
+
+    #[inline]
     fn roots(&self) -> *mut RootList {
-        unsafe { &raw mut **self.roots.get() }
+        unsafe {
+            let ptr: *mut Box<RootList> = UnsafeCell::raw_get(&self.roots);
+            let ptr: *mut *mut RootList = core::mem::transmute(ptr);
+            ptr.read()
+        }
     }
 
     #[cfg(debug_assertions)]
@@ -143,6 +157,28 @@ impl Heap {
     #[inline]
     pub fn id(&self) -> HeapId {
         self.heap_id
+    }
+}
+
+#[derive(Default, Clone)]
+pub struct HeapStats {
+    alloc_bytes: Cell<usize>,
+}
+
+impl HeapStats {
+    /// Bytes directly held by managed pointers.
+    ///
+    /// Does not count backing storage of lists, tables, etc.
+    pub fn bytes(&self) -> usize {
+        self.alloc_bytes.get()
+    }
+
+    fn alloc(&self, bytes: usize) {
+        self.alloc_bytes.update(|v| v + bytes)
+    }
+
+    fn free(&self, bytes: usize) {
+        self.alloc_bytes.update(|v| v - bytes)
     }
 }
 
@@ -173,6 +209,14 @@ pub struct Gc<T: Sized + 'static> {
 }
 
 impl<T: Sized + 'static> Gc<T> {
+    pub fn null() -> Self {
+        Self {
+            ptr: core::ptr::null_mut(),
+        }
+    }
+}
+
+impl<T: Sized + 'static> Gc<T> {
     /// Wrap a previously managed pointer.
     ///
     /// ## Safety
@@ -198,15 +242,12 @@ impl<T: Sized + 'static> Gc<T> {
     /// Get a shared reference to the object.
     ///
     /// ## Safety
-    /// - The object must have been allocated by the given `heap`.
     /// - The object must be alive.
     /// - For the resulting reference to be valid, the object must either be:
     ///   - Rooted
     ///   - Exist while the garbage collector is guaranteed not to run
     #[inline]
-    pub(crate) unsafe fn as_ref(self, heap: &Heap) -> &T {
-        _ = heap;
-
+    pub(crate) unsafe fn as_ref<'a>(self) -> &'a T {
         let ptr = unsafe { &raw const (*self.ptr).value };
         let ptr = UnsafeCell::raw_get(ptr);
 
@@ -216,15 +257,12 @@ impl<T: Sized + 'static> Gc<T> {
     /// Get an exclusive reference to the object.
     ///
     /// ## Safety
-    /// - The object must have been allocated by the given `heap`.
     /// - The object must be alive.
     /// - For the resulting reference to be valid, the object must either be:
     ///   - Rooted
     ///   - Exist while the garbage collector is guaranteed not to run
     #[inline]
-    pub(crate) unsafe fn as_ref_mut(self, heap: &mut Heap) -> &mut T {
-        _ = heap;
-
+    pub(crate) unsafe fn as_ref_mut<'a>(self) -> &'a mut T {
         let ptr = unsafe { &raw const (*self.ptr).value };
         let ptr = UnsafeCell::raw_get(ptr);
 
@@ -270,9 +308,51 @@ impl<T: Trace + Sized + 'static> Gc<T> {
     }
 }
 
+// NOTE: Changing `GcHeader` or `ObjectType` must be done carefully with intent!
+//
+// Alignment tells us where in memory an address may start. A 1-byte alignment means
+// the value can reside anywhere in memory, a 4-byte alignment means the address must
+// be cleanly divisible (the remainder is 0) by 4, etc.
+//
+// Here is a pointer to an 8-byte aligned value on x86-64 linux, in binary form:
+//
+// ```text,ignore
+// 00000000_00000000_01010110_00010000_01000101_01101100_01110101_11001000
+//                                                                     ^^^
+// ```
+//
+// Those low bits are free real estate.
+//
+// `GcHeader` is 8-byte aligned, which means a `*mut GcHeader` always contains 3 unused bits.
+// Unused in the sense that if we write something to them, and remember to mask off those bits
+// before dereferencing the pointer, they can be used to store other things!
+//
+// (Yes, it's true that on most platforms the high 16 bits are also unused, but that depends on
+// platform-specific details. Alignment is inherently portable)
+//
+// We use the first bit as the object's mark bit. The other two bits are used to store the `ObjectType`.
+//
+// In `ObjectType`'s numerical repr, we ensure the first bit is unused, so that
+// reading the object type from `GcHeader`'s tagged pointer only requires masking off
+// all other bits. For example, instead of `0b001` for `Table`, we use `0b010`.
+//
+
+#[repr(u8)]
+pub enum ObjectType {
+    List = 0b000,
+    Table = 0b010,
+    Closure = 0b100,
+    UData = 0b110,
+}
+
 #[derive(Clone, Copy)]
 #[repr(C, align(8))]
 struct GcHeader {
+    // Each managed object is linked into a global list of all allocated values.
+    // Objects are linked into it during allocation, and unlinked during the sweep phase of GC
+    // after being freed.
+    //
+    // This field stores a _tagged pointer_ to the next object in the list.
     tagged: *mut GcHeader,
 }
 
@@ -284,11 +364,12 @@ impl GcHeader {
 
         let tag = marked | tt;
 
+        // Ensure that we aren't using more bits than we are supposed to
         debug_assert!(tag & 0b001 == marked);
         debug_assert!(tag & 0b110 == tt);
 
         Self {
-            tagged: next.wrapping_add(tag),
+            tagged: next.map_addr(|addr| addr.wrapping_add(tag)),
         }
     }
 
@@ -299,7 +380,7 @@ impl GcHeader {
 
     #[inline]
     fn marked(self) -> bool {
-        self.tagged.addr() & 1 == 1
+        self.tagged.addr() & 0b1 == 0b1
     }
 
     #[inline]
@@ -375,8 +456,7 @@ impl Tracer {
     pub(crate) fn visit<T: Rootable + Trace>(&self, ptr: Gc<T>) {
         unsafe {
             if ptr.is_marked() {
-                // cycle
-                return;
+                return; // cycle
             }
             ptr.mark();
             (*ptr.get_raw()).trace(self)
@@ -384,12 +464,12 @@ impl Tracer {
     }
 
     #[inline]
-    pub(crate) fn visit_value(&self, value: Value) {
+    pub(crate) fn visit_value(&self, value: ValueRaw) {
         match value {
-            Value::List(ptr) => self.visit(ptr),
-            Value::Table(ptr) => self.visit(ptr),
-            Value::UData(ptr) => self.visit(ptr),
-            Value::Nil | Value::Bool(_) | Value::Int(_) | Value::Float(_) => {}
+            ValueRaw::List(ptr) => self.visit(ptr),
+            ValueRaw::Table(ptr) => self.visit(ptr),
+            ValueRaw::UData(ptr) => self.visit(ptr),
+            ValueRaw::Nil | ValueRaw::Bool(_) | ValueRaw::Int(_) | ValueRaw::Float(_) => {}
         }
     }
 }
@@ -404,14 +484,6 @@ impl Tracer {
 // persistent handle indirection, then we don't need to trace arbitrary
 // user data, and can have a bounded set of possible types which need to
 // be traced for interior pointers.
-
-#[repr(u8)]
-pub enum ObjectType {
-    List = 0b000,
-    Table = 0b010,
-    Closure = 0b100,
-    UData = 0b110,
-}
 
 /// Internal API
 ///
@@ -429,7 +501,7 @@ pub(crate) trait Rootable: Sized + 'static {
 #[repr(C)]
 struct RootBase {
     list: *mut RootList,
-    prev: *mut RootBase,
+    prev: *mut StackRoot<()>,
 }
 
 /// A linked list of stack roots.
@@ -438,12 +510,12 @@ struct RootBase {
 /// and popped from the front, in LIFO order.
 #[repr(C)]
 struct RootList {
-    head: *mut RootBase,
+    head: *mut StackRoot<()>,
 }
 
 impl RootList {
     #[inline]
-    fn head(this: *mut RootList) -> *mut *mut RootBase {
+    fn head(this: *mut RootList) -> *mut *mut StackRoot<()> {
         unsafe { &raw mut (*this).head }
     }
 
@@ -460,12 +532,12 @@ impl RootList {
     #[inline]
     unsafe fn iter<F>(this: *mut RootList, mut tracer: F)
     where
-        F: FnMut(*mut RootBase),
+        F: FnMut(*mut StackRoot<()>),
     {
         let mut curr = (*this).head;
         while !curr.is_null() {
             tracer(curr);
-            curr = (*curr).prev;
+            curr = (*curr).base.prev;
         }
     }
 }
@@ -509,41 +581,43 @@ impl<T: Rootable> StackRoot<T> {
 }
 
 impl<T> StackRoot<T> {
-    /// Cast `self` to a `RootBase`.
-    #[inline]
-    fn root_base(self: Pin<&mut Self>) -> *mut RootBase {
+    pub(crate) fn type_erase(self: Pin<&mut Self>) -> *mut StackRoot<()> {
         unsafe {
-            // SAFETY: we do not move out of `self`
-            &raw mut self.get_unchecked_mut().base
+            let ptr = self.get_unchecked_mut() as *mut StackRoot<T>;
+            ptr.cast::<StackRoot<()>>()
         }
     }
 
-    /// Append a pinned stack root to its root list.
-    ///
-    /// SAFETY:
-    /// - `self` must remain pinned.
-    /// - no other stack root can be appended to any root list
-    ///   between the construction of `self` and calling this
-    ///   function.
+    /// Internal API
+    // Append a pinned stack root to its root list.
+    //
+    // SAFETY:
+    // - `self` must remain pinned.
+    // - no other stack root can be appended to any root list
+    //   between the construction of `self` and calling this
+    //   function.
+    #[doc(hidden)]
     #[inline]
-    unsafe fn _append_to_root_list(self: Pin<&mut Self>) {
+    pub unsafe fn __append_to_root_list(mut self: Pin<&mut Self>) -> Pin<&mut Self> {
         let head = RootList::head(self.base.list);
 
         // SAFETY: we are pinned, so it's safe to append ourselves
         // to the root list.
         unsafe {
-            *head = self.root_base();
+            *head = self.as_mut().type_erase();
         }
+
+        self
     }
 
     /// Remove a pinned stack root from its root list.
     ///
     /// SAFETY: `self` must be head of the root list.
     #[inline]
-    unsafe fn _remove_from_root_list(self: Pin<&mut Self>) {
+    unsafe fn __remove_from_root_list(self: Pin<&mut Self>) {
         let head = RootList::head(self.base.list);
         let prev = self.base.prev;
-        let this = self.root_base();
+        let this = self.type_erase();
 
         unsafe {
             debug_assert!(*head == this, "roots removed out of order");
@@ -560,41 +634,38 @@ impl<T> Drop for StackRoot<T> {
             // SAFETY:
             // - roots are dropped in LIFO order.
             // - `self` will not be moved after a call to `drop`
-            Pin::new_unchecked(self)._remove_from_root_list();
+            Pin::new_unchecked(self).__remove_from_root_list();
         }
     }
 }
 
 #[repr(C)]
-pub struct Root<'a, T: Rootable> {
-    /// Internal API.
-    ///
-    /// Accessing this field is undefined behavior.
-    ///
-    /// Use the [`Root::get`] and [`Root::get_mut`] APIs to access
-    /// the rooted object.
+pub struct Root<'a, T: Sized + 'static> {
+    place: Pin<&'a mut StackRoot<T>>,
 
-    // NOTE: There's not much a user can actually do with this field
-    // without using unsafe code, so accessing it is safe, which is why
-    // it can be exposed.
-    #[doc(hidden)]
-    pub __place: Pin<&'a mut StackRoot<T>>,
-
-    /// Internal API.
-    ///
-    /// Accessing this field is undefined behavior.
-    ///
-    /// Only used for debug assertions.
-    #[doc(hidden)]
     #[cfg(debug_assertions)]
-    pub __heap_id: HeapId,
+    heap_id: HeapId,
 }
 
 impl<'a, T: Rootable> Root<'a, T> {
+    /// Internal API
+    #[doc(hidden)]
+    #[inline]
+    pub unsafe fn __new(heap: &Heap, mut place: Pin<&'a mut StackRoot<T>>) -> Self {
+        place.as_mut().__append_to_root_list();
+
+        Self {
+            place,
+
+            #[cfg(debug_assertions)]
+            heap_id: heap.id(),
+        }
+    }
+
     /// Dereference the rooted pointer. Grants shared access to the object.
     #[inline]
     pub fn as_ref<'v>(&self, heap: &'v Heap) -> Ref<'v, T> {
-        debug_assert!(heap.id() == self.__heap_id);
+        debug_assert!(heap.id() == self.heap_id);
 
         // SAFETY:
         // - The object is guaranteed to live for the duration of this borrow:
@@ -603,7 +674,7 @@ impl<'a, T: Rootable> Root<'a, T> {
         // - No mutable reference may exist at the same time as a shared reference
         //   - Shared access is gated by shared access to the `heap`
         //   - Only other shared references to `T` exist while the borrow is active
-        Ref(unsafe { self.__place.ptr.as_ref(heap) })
+        Ref(unsafe { self.place.ptr.as_ref() })
     }
 
     // TODO: instead of returning `&mut T`, return `Write<'a, T>`, which:
@@ -619,7 +690,7 @@ impl<'a, T: Rootable> Root<'a, T> {
     /// Dereference the rooted pointer. Grants unique mutable access to the object.
     #[inline]
     pub fn as_ref_mut<'v>(&self, heap: &'v mut Heap) -> RefMut<'v, T> {
-        debug_assert!(heap.id() == self.__heap_id);
+        debug_assert!(heap.id() == self.heap_id);
 
         // SAFETY:
         // - The object is guaranteed to live for the duration of this borrow:
@@ -630,7 +701,21 @@ impl<'a, T: Rootable> Root<'a, T> {
         //   - Only one heap may be active on a given thread at once
         //   - Heaps, roots, and GC'd pointers are not `Send` or `Sync`
         //   - No other references exist to `T` while the borrow is active
-        RefMut(unsafe { self.__place.ptr.as_ref_mut(heap) })
+        RefMut(unsafe { self.place.ptr.as_ref_mut() })
+    }
+
+    /// Retrieve the stored pointer.
+    #[inline]
+    pub fn as_ptr(&self) -> Gc<T> {
+        self.place.ptr
+    }
+
+    /// Update the stored pointer.
+    #[inline]
+    pub unsafe fn set_ptr<U: Rootable>(self, ptr: Gc<U>) -> Root<'a, U> {
+        let mut this: Root<'a, U> = core::mem::transmute(self);
+        this.place.as_mut().get_unchecked_mut().ptr = ptr;
+        this
     }
 }
 
@@ -643,9 +728,24 @@ impl<'a, T: Rootable> Root<'a, T> {
 #[derive(Clone, Copy)]
 pub struct Ref<'a, T>(&'a T);
 
-impl<'a, T: Rootable> Deref for Ref<'a, T> {
+impl<'a, T> Ref<'a, T> {
+    #[inline]
+    pub fn map<'v, U>(this: &'v Self, f: impl FnOnce(&'v T) -> &'v U) -> Ref<'v, U> {
+        Ref(f(this.0))
+    }
+}
+
+impl<'a, T: Rootable> Ref<'a, T> {
+    #[inline]
+    pub(crate) unsafe fn new_unchecked(ptr: &'a T) -> Self {
+        Self(ptr)
+    }
+}
+
+impl<'a, T> Deref for Ref<'a, T> {
     type Target = T;
 
+    #[inline]
     fn deref(&self) -> &Self::Target {
         self.0
     }
@@ -659,18 +759,82 @@ impl<'a, T: Rootable> Deref for Ref<'a, T> {
 /// Implements `Deref`/`DerefMut` so can be turned into a plain reference as needed.
 pub struct RefMut<'a, T>(&'a mut T);
 
-impl<'a, T: Rootable> Deref for RefMut<'a, T> {
+impl<'a, T> RefMut<'a, T> {
+    #[inline]
+    pub fn map<'v, U>(this: &'v mut Self, f: impl FnOnce(&'v mut T) -> &'v mut U) -> RefMut<'v, U> {
+        RefMut(f(this.0))
+    }
+}
+
+impl<'a, T: Rootable> RefMut<'a, T> {
+    #[inline]
+    pub(crate) unsafe fn new_unchecked(ptr: &'a mut T) -> Self {
+        Self(ptr)
+    }
+}
+
+impl<'a, T> Deref for RefMut<'a, T> {
     type Target = T;
 
+    #[inline]
     fn deref(&self) -> &Self::Target {
         self.0
     }
 }
 
-impl<'a, T: Rootable> DerefMut for RefMut<'a, T> {
+impl<'a, T> DerefMut for RefMut<'a, T> {
+    #[inline]
     fn deref_mut(&mut self) -> &mut Self::Target {
         self.0
     }
+}
+
+#[repr(C, u64)]
+pub enum ValueRoot<'a> {
+    Nil = 0,
+    Bool(bool) = 1,
+    Int(i64) = 2,
+    Float(f64) = 3,
+    List(Root<'a, super::value::List>),
+    Table(Root<'a, super::value::Table>),
+    UData(Root<'a, super::value::UData>),
+}
+
+impl<'a> ValueRoot<'a> {
+    #[inline]
+    pub fn raw(self) -> ValueRaw {
+        match self {
+            ValueRoot::Nil => ValueRaw::Nil,
+            ValueRoot::Bool(v) => ValueRaw::Bool(v),
+            ValueRoot::Int(v) => ValueRaw::Int(v),
+            ValueRoot::Float(v) => ValueRaw::Float(v),
+            ValueRoot::List(root) => ValueRaw::List(root.as_ptr()),
+            ValueRoot::Table(root) => ValueRaw::Table(root.as_ptr()),
+            ValueRoot::UData(root) => ValueRaw::UData(root.as_ptr()),
+        }
+    }
+}
+
+#[repr(C, u64)]
+pub enum ValueRef<'a> {
+    Nil = 0,
+    Bool(bool) = 1,
+    Int(i64) = 2,
+    Float(f64) = 3,
+    List(Ref<'a, super::value::List>),
+    Table(Ref<'a, super::value::Table>),
+    UData(Ref<'a, super::value::UData>),
+}
+
+#[repr(C, u64)]
+pub enum ValueRefMut<'a> {
+    Nil = 0,
+    Bool(bool) = 1,
+    Int(i64) = 2,
+    Float(f64) = 3,
+    List(RefMut<'a, super::value::List>),
+    Table(RefMut<'a, super::value::Table>),
+    UData(RefMut<'a, super::value::UData>),
 }
 
 /// Create a root on the stack.
@@ -685,20 +849,11 @@ impl<'a, T: Rootable> DerefMut for RefMut<'a, T> {
 ///
 /// - The object pointed to by `$ptr` must still be live at the time of initialization.
 #[macro_export]
-macro_rules! root_unchecked {
-    [in $heap:ident; $ptr:expr] => {
-        $crate::__macro::Root {
-            // the `pin!` macro hoists values into the enclosing scope (via `super let`)
-            // it can't be moved, because:
-            // - the original value is unreachable due to macro hygiene
-            // - getting a mutable reference to the stack root requires unsafe code,
-            //   because `StackRoot: !Unpin`.
-            __place: std::pin::pin!(
-                $crate::__macro::StackRoot::from_heap_ptr($heap, $ptr)
-            ),
-
-            #[cfg(debug_assertions)]
-            __heap_id: ($heap).id(),
-        }
+macro_rules! let_root_unchecked {
+    (unsafe in $heap:ident; $place:ident = $ptr:expr) => {
+        let mut place = unsafe { $crate::__macro::StackRoot::from_heap_ptr($heap, $ptr) };
+        let $place = unsafe {
+            $crate::__macro::Root::__new($heap, ::core::pin::Pin::new_unchecked(&mut place))
+        };
     };
 }

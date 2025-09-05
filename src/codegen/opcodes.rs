@@ -7,13 +7,13 @@ mod private {
     pub trait Sealed {}
 }
 
-use super::{Context, Control, Literal, Value};
+use super::{Context, Control, Literal, ValueRaw};
 
 pub trait OperandPack: private::Sealed + Sized {}
 
 #[derive(Clone, Copy)]
 #[repr(transparent)]
-pub struct Sp(pub(crate) *mut Value);
+pub struct Sp(pub(crate) *mut ValueRaw);
 
 #[derive(Clone, Copy)]
 #[repr(transparent)]

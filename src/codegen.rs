@@ -6,7 +6,7 @@ use crate::{
     span::Span,
     vm::{
         self, Chunk, Context, Control, FuncInfo,
-        value::{Literal, Value},
+        value::{Literal, ValueRaw},
     },
 };
 use bumpalo::{Bump, collections::Vec, vec};

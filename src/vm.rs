@@ -62,7 +62,7 @@ use crate::{
     codegen::opcodes::*,
     error::{Error, Result, error},
     span::Span,
-    vm::value::{Literal, Value},
+    vm::value::{Literal, ValueRaw},
 };
 
 /// Represents the result of code generation: A list of functions with
@@ -187,7 +187,7 @@ impl FuncInfoPtr {
 
 impl Sp {
     #[inline(always)]
-    pub unsafe fn at(self, r: Reg) -> *mut Value {
+    pub unsafe fn at(self, r: Reg) -> *mut ValueRaw {
         self.0.offset(r.sz())
     }
 }
@@ -430,7 +430,7 @@ unsafe fn lnil(args: Lnil, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control 
 
 #[inline(always)]
 unsafe fn lsmi(args: Lsmi, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control {
-    *sp.at(args.dst) = Value::Int(args.v.get() as i64);
+    *sp.at(args.dst) = ValueRaw::Int(args.v.get() as i64);
 
     dispatch_next(jt, sp, lp, ip, ctx)
 }
@@ -755,7 +755,7 @@ pub struct Module<'gc> {
 }
 
 pub struct Vm {
-    stack: DynArray<Value>,
+    stack: DynArray<ValueRaw>,
 
     /// Invariant: Should never be empty.
     ///
@@ -769,7 +769,7 @@ pub struct Vm {
 impl Vm {
     pub fn new() -> Self {
         // 1 MiB
-        const INITIAL_STACK_SIZE: usize = (1024 * 1024) / std::mem::size_of::<Value>();
+        const INITIAL_STACK_SIZE: usize = (1024 * 1024) / std::mem::size_of::<ValueRaw>();
         const STACK_DEPTH: usize = INITIAL_STACK_SIZE / 16;
 
         Vm {
