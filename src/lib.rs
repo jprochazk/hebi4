@@ -1,4 +1,3 @@
-#![feature(super_let)]
 #![allow(dead_code, unused_variables)] // TEMP
 #![allow(private_bounds)] // intentional
 
