@@ -49,7 +49,7 @@
 //!   - Stored on stack, no GC involvement
 //!   - Does not need heap for access
 //! - Built in objects
-//!   - List, Table, Closure
+//!   - String, List, Table, Closure
 //!   - Stored on heap, GC header type tag supports a subset of these directly
 //!     - Tracing these is cheap, only a `match obj.tag` + static dispatch
 //! - UData
@@ -119,9 +119,9 @@ impl Heap {
     }
 
     #[inline]
-    pub(crate) fn alloc_no_gc<T: Rootable + Trace + 'static>(&self, value: T) -> Gc<T> {
+    pub(crate) fn alloc_no_gc<T: Trace + 'static>(&self, value: T) -> Gc<T> {
         let ptr = Box::into_raw(Box::new(GcBox {
-            header: GcHeader::new(T::TYPE, self.head.get()),
+            header: UnsafeCell::new(GcHeader::new(T::KIND, self.head.get())),
             value: UnsafeCell::new(value),
         }));
 
@@ -163,20 +163,35 @@ impl Heap {
 #[derive(Default, Clone)]
 pub struct HeapStats {
     alloc_bytes: Cell<usize>,
+    collections: Cell<usize>,
 }
 
 impl HeapStats {
     /// Bytes directly held by managed pointers.
     ///
     /// Does not count backing storage of lists, tables, etc.
+    #[inline]
     pub fn bytes(&self) -> usize {
         self.alloc_bytes.get()
     }
 
+    /// How many times the GC ran
+    #[inline]
+    pub fn collections(&self) -> usize {
+        self.collections.get()
+    }
+
+    #[inline]
+    fn collect(&self) {
+        self.collections.update(|v| v + 1)
+    }
+
+    #[inline]
     fn alloc(&self, bytes: usize) {
         self.alloc_bytes.update(|v| v + bytes)
     }
 
+    #[inline]
     fn free(&self, bytes: usize) {
         self.alloc_bytes.update(|v| v - bytes)
     }
@@ -239,36 +254,6 @@ impl<T: Sized + 'static> Gc<T> {
         unsafe { UnsafeCell::raw_get(&raw const (*this.ptr).value) }
     }
 
-    /// Get a shared reference to the object.
-    ///
-    /// ## Safety
-    /// - The object must be alive.
-    /// - For the resulting reference to be valid, the object must either be:
-    ///   - Rooted
-    ///   - Exist while the garbage collector is guaranteed not to run
-    #[inline]
-    pub(crate) unsafe fn as_ref<'a>(self) -> &'a T {
-        let ptr = unsafe { &raw const (*self.ptr).value };
-        let ptr = UnsafeCell::raw_get(ptr);
-
-        unsafe { &*ptr }
-    }
-
-    /// Get an exclusive reference to the object.
-    ///
-    /// ## Safety
-    /// - The object must be alive.
-    /// - For the resulting reference to be valid, the object must either be:
-    ///   - Rooted
-    ///   - Exist while the garbage collector is guaranteed not to run
-    #[inline]
-    pub(crate) unsafe fn as_ref_mut<'a>(self) -> &'a mut T {
-        let ptr = unsafe { &raw const (*self.ptr).value };
-        let ptr = UnsafeCell::raw_get(ptr);
-
-        unsafe { &mut *ptr }
-    }
-
     #[inline]
     fn cast<U: Sized + 'static>(self) -> Gc<U> {
         Gc {
@@ -283,128 +268,135 @@ impl<T: Sized + 'static> Gc<T> {
     }
 
     #[inline]
-    unsafe fn type_(self) -> ObjectType {
+    unsafe fn kind(self) -> ObjectKind {
         let header = &raw mut (*self.ptr).header;
-        header.read().type_()
+        let header = UnsafeCell::raw_get(header);
+        header.read().kind()
     }
 
     #[inline]
-    unsafe fn mark(self) {
+    unsafe fn set_mark(self, v: bool) {
         let header = &raw mut (*self.ptr).header;
-        GcHeader::set_mark(header, true);
+        let header = UnsafeCell::raw_get(header);
+        GcHeader::set_mark(header, v);
     }
 
     #[inline]
     unsafe fn is_marked(self) -> bool {
         let header = &raw mut (*self.ptr).header;
+        let header = UnsafeCell::raw_get(header);
         header.read().marked()
     }
 }
 
 impl<T: Trace + Sized + 'static> Gc<T> {
+    /// Get a shared reference to the object.
+    ///
+    /// ## Safety
+    /// - The object must be alive.
+    /// - For the resulting reference to be valid, the object must either be:
+    ///   - Rooted
+    ///   - Exist while the garbage collector is guaranteed not to run
+    /// - No `RefMut` must exist to the object
+    #[inline]
+    pub(crate) unsafe fn as_ref<'a>(self) -> Ref<'a, T> {
+        unsafe { Ref::new_unchecked(self) }
+    }
+
+    /// Get an exclusive reference to the object.
+    ///
+    /// ## Safety
+    /// - The object must be alive.
+    /// - For the resulting reference to be valid, the object must either be:
+    ///   - Rooted
+    ///   - Exist while the garbage collector is guaranteed not to run
+    /// - The resulting reference must be _unique_ for the object
+    #[inline]
+    pub(crate) unsafe fn as_ref_mut<'a>(self) -> RefMut<'a, T> {
+        unsafe { RefMut::new_unchecked(self) }
+    }
+
+    /// ## Safety
+    /// - The object must be alive.
+    /// - No `&mut T` must exist to the object
+    #[inline]
+    pub(crate) unsafe fn as_rust_ref_very_unsafe<'a>(self) -> &'a T {
+        &*UnsafeCell::raw_get(&raw mut (*self.ptr).value)
+    }
+
+    /// ## Safety
+    /// - The object must be alive.
+    /// - The resulting reference must be _unique_ for the object
+    #[inline]
+    pub(crate) unsafe fn as_rust_ref_mut_very_unsafe<'a>(self) -> &'a mut T {
+        &mut *UnsafeCell::raw_get(&raw mut (*self.ptr).value)
+    }
+
     #[inline]
     unsafe fn trace(self, tracer: &Tracer) {
         (*self.get_raw()).trace(tracer)
     }
 }
 
-// NOTE: Changing `GcHeader` or `ObjectType` must be done carefully with intent!
-//
-// Alignment tells us where in memory an address may start. A 1-byte alignment means
-// the value can reside anywhere in memory, a 4-byte alignment means the address must
-// be cleanly divisible (the remainder is 0) by 4, etc.
-//
-// Here is a pointer to an 8-byte aligned value on x86-64 linux, in binary form:
-//
-// ```text,ignore
-// 00000000_00000000_01010110_00010000_01000101_01101100_01110101_11001000
-//                                                                     ^^^
-// ```
-//
-// Those low bits are free real estate.
-//
-// `GcHeader` is 8-byte aligned, which means a `*mut GcHeader` always contains 3 unused bits.
-// Unused in the sense that if we write something to them, and remember to mask off those bits
-// before dereferencing the pointer, they can be used to store other things!
-//
-// (Yes, it's true that on most platforms the high 16 bits are also unused, but that depends on
-// platform-specific details. Alignment is inherently portable)
-//
-// We use the first bit as the object's mark bit. The other two bits are used to store the `ObjectType`.
-//
-// In `ObjectType`'s numerical repr, we ensure the first bit is unused, so that
-// reading the object type from `GcHeader`'s tagged pointer only requires masking off
-// all other bits. For example, instead of `0b001` for `Table`, we use `0b010`.
-//
-
+#[derive(Clone, Copy)]
 #[repr(u8)]
-pub enum ObjectType {
-    List = 0b000,
-    Table = 0b010,
-    Closure = 0b100,
-    UData = 0b110,
+pub enum ObjectKind {
+    String = 0,
+    List = 1,
+    Table = 2,
+    Closure = 3,
+    UData = 4,
 }
 
 #[derive(Clone, Copy)]
-#[repr(C, align(8))]
+#[repr(C, align(16))]
 struct GcHeader {
-    // Each managed object is linked into a global list of all allocated values.
-    // Objects are linked into it during allocation, and unlinked during the sweep phase of GC
-    // after being freed.
-    //
-    // This field stores a _tagged pointer_ to the next object in the list.
-    tagged: *mut GcHeader,
+    /// Each managed object is linked into a global list of all allocated values.
+    /// Objects are linked into it during allocation, and unlinked during the sweep phase of GC
+    /// after being freed.
+    next: *mut GcHeader,
+    kind: ObjectKind,
+    marked: bool,
 }
 
 impl GcHeader {
     #[inline]
-    fn new(tt: ObjectType, next: *mut GcHeader) -> Self {
-        let marked = false as usize;
-        let tt = tt as usize;
-
-        let tag = marked | tt;
-
-        // Ensure that we aren't using more bits than we are supposed to
-        debug_assert!(tag & 0b001 == marked);
-        debug_assert!(tag & 0b110 == tt);
-
+    fn new(kind: ObjectKind, next: *mut GcHeader) -> Self {
         Self {
-            tagged: next.map_addr(|addr| addr.wrapping_add(tag)),
+            next,
+            kind,
+            marked: false,
         }
     }
 
     #[inline]
-    fn into_parts(self) -> (*mut GcHeader, ObjectType, bool) {
-        (self.next(), self.type_(), self.marked())
+    fn into_parts(self) -> (*mut GcHeader, ObjectKind, bool) {
+        (self.next(), self.kind(), self.marked())
     }
 
     #[inline]
     fn marked(self) -> bool {
-        self.tagged.addr() & 0b1 == 0b1
+        self.marked
     }
 
     #[inline]
-    fn type_(self) -> ObjectType {
-        let raw = (self.tagged.addr() & 0b110) as u8;
-        unsafe { core::mem::transmute(raw) }
+    fn kind(self) -> ObjectKind {
+        self.kind
     }
 
     #[inline]
     fn next(self) -> *mut GcHeader {
-        let tag = self.tagged.addr() & 0b111;
-        self.tagged.map_addr(|addr| addr.wrapping_sub(tag))
+        self.next
     }
 
     #[inline]
     unsafe fn set_mark(this: *mut GcHeader, v: bool) {
-        let v = v as usize;
-        (*this).tagged = (*this).tagged.map_addr(|addr| (addr & !0b1) | v);
+        (*this).marked = v;
     }
 
     #[inline]
     unsafe fn set_next(this: *mut GcHeader, next: *mut GcHeader) {
-        let tag = (*this).tagged.addr() & 0b111;
-        (*this).tagged = next.map_addr(|addr| (addr & !0b111) | tag);
+        (*this).next = next;
     }
 }
 
@@ -417,7 +409,7 @@ const _: () = {
 
 #[repr(C, align(8))]
 struct GcBox<T: Sized + 'static> {
-    header: GcHeader,
+    header: UnsafeCell<GcHeader>,
     value: UnsafeCell<T>,
 }
 
@@ -439,7 +431,11 @@ impl<T: 'static> Copy for Gc<T> {}
 /// ## Safety
 ///
 /// All interior pointers must be marked.
+///
+/// `KIND` must refer to the `ObjectKind` variant corresponding to the type of `Self`.
 pub(crate) unsafe trait Trace: Sized + 'static {
+    const KIND: ObjectKind;
+
     /// ## Safety
     ///
     /// All interior pointers must be marked.
@@ -453,12 +449,12 @@ pub(crate) struct Tracer {
 
 impl Tracer {
     #[inline]
-    pub(crate) fn visit<T: Rootable + Trace>(&self, ptr: Gc<T>) {
+    pub(crate) fn visit<T: Trace>(&self, ptr: Gc<T>) {
         unsafe {
             if ptr.is_marked() {
                 return; // cycle
             }
-            ptr.mark();
+            ptr.set_mark(true);
             (*ptr.get_raw()).trace(self)
         }
     }
@@ -484,15 +480,6 @@ impl Tracer {
 // persistent handle indirection, then we don't need to trace arbitrary
 // user data, and can have a bounded set of possible types which need to
 // be traced for interior pointers.
-
-/// Internal API
-///
-/// Represents a rootable thing. Used to map a type
-/// to its root kind.
-#[doc(hidden)]
-pub(crate) trait Rootable: Sized + 'static {
-    const TYPE: ObjectType;
-}
 
 /// Stores pointers used to traverse stack roots.
 ///
@@ -561,7 +548,7 @@ pub struct StackRoot<T: Sized + 'static> {
     pinned: PhantomPinned,
 }
 
-impl<T: Rootable> StackRoot<T> {
+impl<T: Trace> StackRoot<T> {
     /// Internal API
     ///
     /// ## SAFETY:
@@ -647,7 +634,7 @@ pub struct Root<'a, T: Sized + 'static> {
     heap_id: HeapId,
 }
 
-impl<'a, T: Rootable> Root<'a, T> {
+impl<'a, T: Trace> Root<'a, T> {
     /// Internal API
     #[doc(hidden)]
     #[inline]
@@ -674,7 +661,7 @@ impl<'a, T: Rootable> Root<'a, T> {
         // - No mutable reference may exist at the same time as a shared reference
         //   - Shared access is gated by shared access to the `heap`
         //   - Only other shared references to `T` exist while the borrow is active
-        Ref(unsafe { self.place.ptr.as_ref() })
+        unsafe { self.place.ptr.as_ref() }
     }
 
     // TODO: instead of returning `&mut T`, return `Write<'a, T>`, which:
@@ -701,7 +688,7 @@ impl<'a, T: Rootable> Root<'a, T> {
         //   - Only one heap may be active on a given thread at once
         //   - Heaps, roots, and GC'd pointers are not `Send` or `Sync`
         //   - No other references exist to `T` while the borrow is active
-        RefMut(unsafe { self.place.ptr.as_ref_mut() })
+        unsafe { self.place.ptr.as_ref_mut() }
     }
 
     /// Retrieve the stored pointer.
@@ -712,7 +699,7 @@ impl<'a, T: Rootable> Root<'a, T> {
 
     /// Update the stored pointer.
     #[inline]
-    pub unsafe fn set_ptr<U: Rootable>(self, ptr: Gc<U>) -> Root<'a, U> {
+    pub unsafe fn set_ptr<U: Trace>(self, ptr: Gc<U>) -> Root<'a, U> {
         let mut this: Root<'a, U> = core::mem::transmute(self);
         this.place.as_mut().get_unchecked_mut().ptr = ptr;
         this
@@ -725,29 +712,44 @@ impl<'a, T: Rootable> Root<'a, T> {
 /// which makes it safe to move around, re-root, and store as an object member.
 ///
 /// Implements `DerefMut` so can be turned into a plain reference as needed.
-#[derive(Clone, Copy)]
-pub struct Ref<'a, T>(&'a T);
+pub struct Ref<'a, T: 'static>(Gc<T>, PhantomData<fn(&'a T) -> &'a T>);
 
-impl<'a, T> Ref<'a, T> {
+impl<'a, T> Clone for Ref<'a, T> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+impl<'a, T> Copy for Ref<'a, T> {}
+
+impl<'a, T: Trace + Sized + 'static> Ref<'a, T> {
     #[inline]
-    pub fn map<'v, U>(this: &'v Self, f: impl FnOnce(&'v T) -> &'v U) -> Ref<'v, U> {
-        Ref(f(this.0))
+    pub fn map<U: Trace + Sized + 'static>(
+        this: &Self,
+        f: impl for<'v> FnOnce(&'v Ref<'a, T>) -> &'v Gc<U>,
+    ) -> Ref<'a, U> {
+        let ptr = *f(this);
+        unsafe { ptr.as_ref() }
     }
 }
 
-impl<'a, T: Rootable> Ref<'a, T> {
+impl<'a, T: Trace + Sized + 'static> Ref<'a, T> {
     #[inline]
-    pub(crate) unsafe fn new_unchecked(ptr: &'a T) -> Self {
-        Self(ptr)
+    pub(crate) unsafe fn new_unchecked(ptr: Gc<T>) -> Self {
+        Self(ptr, PhantomData)
+    }
+
+    #[inline]
+    pub fn as_ptr(self) -> Gc<T> {
+        self.0
     }
 }
 
-impl<'a, T> Deref for Ref<'a, T> {
+impl<'a, T: Trace + Sized + 'static> Deref for Ref<'a, T> {
     type Target = T;
 
     #[inline]
     fn deref(&self) -> &Self::Target {
-        self.0
+        unsafe { self.0.as_rust_ref_very_unsafe() }
     }
 }
 
@@ -757,35 +759,49 @@ impl<'a, T> Deref for Ref<'a, T> {
 /// which makes it safe to move around, re-root, and store as an object member.
 ///
 /// Implements `Deref`/`DerefMut` so can be turned into a plain reference as needed.
-pub struct RefMut<'a, T>(&'a mut T);
+pub struct RefMut<'a, T: 'static>(Gc<T>, PhantomData<&'a mut T>);
 
-impl<'a, T> RefMut<'a, T> {
+impl<'a, T: Trace + Sized + 'static> RefMut<'a, T> {
     #[inline]
-    pub fn map<'v, U>(this: &'v mut Self, f: impl FnOnce(&'v mut T) -> &'v mut U) -> RefMut<'v, U> {
-        RefMut(f(this.0))
+    pub fn map<U: Trace + Sized + 'static>(
+        this: &mut Self,
+        f: impl for<'v> FnOnce(&'v mut RefMut<'a, T>) -> &'v mut Gc<U>,
+    ) -> RefMut<'a, U> {
+        let ptr = *f(this);
+        unsafe { ptr.as_ref_mut() }
+    }
+
+    #[inline]
+    pub fn as_ref(self) -> Ref<'a, T> {
+        Ref(self.0, PhantomData)
     }
 }
 
-impl<'a, T: Rootable> RefMut<'a, T> {
+impl<'a, T: Trace + Sized + 'static> RefMut<'a, T> {
     #[inline]
-    pub(crate) unsafe fn new_unchecked(ptr: &'a mut T) -> Self {
-        Self(ptr)
+    pub(crate) unsafe fn new_unchecked(ptr: Gc<T>) -> Self {
+        Self(ptr, PhantomData)
+    }
+
+    #[inline]
+    pub fn as_ptr(self) -> Gc<T> {
+        self.0
     }
 }
 
-impl<'a, T> Deref for RefMut<'a, T> {
+impl<'a, T: Trace + Sized + 'static> Deref for RefMut<'a, T> {
     type Target = T;
 
     #[inline]
     fn deref(&self) -> &Self::Target {
-        self.0
+        unsafe { self.0.as_rust_ref_very_unsafe() }
     }
 }
 
-impl<'a, T> DerefMut for RefMut<'a, T> {
+impl<'a, T: Trace + Sized + 'static> DerefMut for RefMut<'a, T> {
     #[inline]
     fn deref_mut(&mut self) -> &mut Self::Target {
-        self.0
+        unsafe { self.0.as_rust_ref_mut_very_unsafe() }
     }
 }
 
@@ -857,3 +873,10 @@ macro_rules! let_root_unchecked {
         };
     };
 }
+
+// #[macro_export]
+// macro_rules! reroot {
+//     (in $heap:ident; $place:ident = $root:expr) => {
+//         let
+//     };
+// }

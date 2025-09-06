@@ -1,19 +1,9 @@
 use super::*;
 use crate::vm::value::*;
 
-// changing the set of possible root kinds also means
-// having to change everything here to support it
-fn _update_reminder(v: ObjectType) {
-    match v {
-        ObjectType::List => {}
-        ObjectType::Table => {}
-        ObjectType::Closure => {}
-        ObjectType::UData => {}
-    }
-}
-
 // Stop-the-world, mark and sweep GC.
 pub fn collect(heap: &mut Heap) {
+    heap.stats.collect();
     unsafe {
         mark(heap);
         sweep(heap);
@@ -40,14 +30,19 @@ unsafe fn mark(heap: &mut Heap) {
         if ptr.is_marked() {
             return;
         }
-        ptr.mark();
+        ptr.set_mark(true);
 
-        match ptr.type_() {
-            ObjectType::List => ptr.cast::<List>().trace(&tracer),
-            ObjectType::Table => ptr.cast::<Table>().trace(&tracer),
-            ObjectType::Closure => ptr.cast::<Closure>().trace(&tracer),
-            ObjectType::UData => ptr.cast::<UData>().trace(&tracer),
+        macro_rules! trace {
+            ($($ty:ident),*) => {
+                match ptr.kind() {
+                    $(ObjectKind::$ty => {
+                        ptr.cast::<$ty>().trace(&tracer)
+                    })*
+                }
+            }
         }
+
+        trace!(String, List, Table, Closure, UData);
     });
 }
 
@@ -80,25 +75,18 @@ unsafe fn sweep(heap: &mut Heap) {
                 None => heap.head.set(next),
             }
 
-            // free
-            let size = match kind {
-                ObjectType::List => {
-                    let _ = Box::from_raw(iter.cast::<GcBox<List>>());
-                    core::mem::size_of::<List>()
+            macro_rules! free {
+                ($($ty:ident),*) => {
+                    match kind {
+                        $(ObjectKind::$ty => {
+                            let _ = Box::from_raw(iter.cast::<GcBox<$ty>>());
+                            core::mem::size_of::<$ty>()
+                        })*
+                    }
                 }
-                ObjectType::Table => {
-                    let _ = Box::from_raw(iter.cast::<GcBox<Table>>());
-                    core::mem::size_of::<Table>()
-                }
-                ObjectType::Closure => {
-                    let _ = Box::from_raw(iter.cast::<GcBox<Closure>>());
-                    core::mem::size_of::<Closure>()
-                }
-                ObjectType::UData => {
-                    let _ = Box::from_raw(iter.cast::<GcBox<UData>>());
-                    core::mem::size_of::<UData>()
-                }
-            };
+            }
+
+            let size = free!(String, List, Table, Closure, UData);
 
             freed_bytes += size;
         }
