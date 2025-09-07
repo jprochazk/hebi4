@@ -36,14 +36,12 @@ impl<T: Sized + Copy> DynStack<T> {
     // `push` is always safe.
     #[inline]
     pub fn push(&mut self, value: T) {
-        unsafe {
-            if self.inner.remaining(self.length) == 0 {
-                self.inner.grow(1);
-            }
-
-            self.inner.offset(self.length).write(value);
-            self.length += 1;
+        if self.inner.remaining(self.length) == 0 {
+            unsafe { self.inner.grow(1) }
         }
+
+        unsafe { self.inner.offset(self.length).write(value) };
+        self.length += 1;
     }
 
     /// Pop a value from the stack.
@@ -76,11 +74,9 @@ impl<T: Sized + Copy> DynArray<T> {
     pub fn new(initial_capacity: usize) -> Self {
         assert!(initial_capacity.is_power_of_two());
 
-        unsafe {
-            let capacity = initial_capacity;
-            let base = allocate_zeroed(Self::layout(capacity)).cast::<T>();
-            Self { base, capacity }
-        }
+        let capacity = initial_capacity;
+        let base = unsafe { allocate_zeroed(Self::layout(capacity)).cast::<T>() };
+        Self { base, capacity }
     }
 
     /// Returns a pointer to item at `offset`.
@@ -88,9 +84,9 @@ impl<T: Sized + Copy> DynArray<T> {
     /// The item is not guaranteed to be initialized,
     /// it must be initialized by the user before being read!
     #[inline]
-    pub fn offset(&self, offset: usize) -> *mut T {
+    pub unsafe fn offset(&self, offset: usize) -> *mut T {
         debug_assert!(offset < self.capacity);
-        unsafe { self.base.add(offset) }
+        self.base.add(offset)
     }
 
     /// How many items this array can store.

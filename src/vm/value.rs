@@ -5,7 +5,7 @@ use rustc_hash::FxBuildHasher;
 
 use crate::vm::gc::Gc;
 
-use super::gc::{ObjectKind, Ref, RefMut, Root, Trace, Tracer, ValueRef, ValueRoot};
+use super::gc::{Heap, ObjectKind, Ref, RefMut, Root, Trace, Tracer, ValueRef, ValueRoot};
 
 // NOTE: `Value` must be bit-compatible with `Literal`,
 // so that `Literal` can be directly treated as a `Value`
@@ -16,6 +16,8 @@ pub enum Literal {
     Bool(bool) = 1,
     Int(i64) = 2,
     Float(f64) = 3,
+
+    String(std::string::String),
 }
 
 #[derive(Default, Clone, Copy)]
@@ -26,9 +28,11 @@ pub enum ValueRaw {
     Bool(bool) = 1,
     Int(i64) = 2,
     Float(f64) = 3,
-    List(Gc<List>) = 4,
-    Table(Gc<Table>) = 5,
-    UData(Gc<UData>) = 6,
+
+    String(Gc<String>),
+    List(Gc<List>),
+    Table(Gc<Table>),
+    UData(Gc<UData>),
 }
 
 #[repr(align(16))]
@@ -38,10 +42,12 @@ pub struct String {
 
 impl String {
     #[inline]
-    pub(crate) fn from_str(s: &str) -> Self {
-        Self {
+    pub(crate) fn alloc(heap: &Heap, s: &str) -> Gc<Self> {
+        let this = Self {
             inner: s.to_owned(),
-        }
+        };
+
+        heap.alloc_no_gc(this)
     }
 
     #[inline]
@@ -71,36 +77,13 @@ pub struct List {
 }
 
 impl List {
-    /// ## Panics
-    ///
-    /// if `capacity` is not a power of two
     #[inline]
-    pub(crate) fn new(capacity: usize) -> Self {
-        Self {
+    pub(crate) fn alloc(heap: &Heap, capacity: usize) -> Gc<Self> {
+        let this = Self {
             items: Vec::with_capacity(capacity),
-        }
-    }
+        };
 
-    #[inline]
-    pub fn len(&self) -> usize {
-        self.items.len()
-    }
-
-    #[inline]
-    pub fn capacity(&self) -> usize {
-        self.items.capacity()
-    }
-
-    #[inline]
-    pub unsafe fn push_unchecked(&mut self, value: ValueRoot<'_>) {
-        std::hint::assert_unchecked(self.items.spare_capacity_mut().len() > 0);
-
-        let len = self.items.len();
-        self.items
-            .spare_capacity_mut()
-            .get_unchecked_mut(0)
-            .write(value.raw());
-        self.items.set_len(len + 1);
+        heap.alloc_no_gc(this)
     }
 }
 
@@ -115,6 +98,16 @@ unsafe impl Trace for List {
 }
 
 impl<'a> Ref<'a, List> {
+    #[inline]
+    pub fn len(&self) -> usize {
+        self.items.len()
+    }
+
+    #[inline]
+    pub fn capacity(&self) -> usize {
+        self.items.capacity()
+    }
+
     fn get<'this>(&'this self, index: usize) -> Option<ValueRef<'this>> {
         let Some(v) = self.items.get(index) else {
             return None;
@@ -125,6 +118,7 @@ impl<'a> Ref<'a, List> {
             ValueRaw::Bool(v) => ValueRef::Bool(*v),
             ValueRaw::Int(v) => ValueRef::Int(*v),
             ValueRaw::Float(v) => ValueRef::Float(*v),
+            ValueRaw::String(gc) => ValueRef::String(unsafe { gc.as_ref() }),
             ValueRaw::List(gc) => ValueRef::List(unsafe { gc.as_ref() }),
             ValueRaw::Table(gc) => ValueRef::Table(unsafe { gc.as_ref() }),
             ValueRaw::UData(gc) => ValueRef::UData(unsafe { gc.as_ref() }),
@@ -148,6 +142,19 @@ impl<'a> RefMut<'a, List> {
     #[inline]
     pub fn push(&mut self, value: ValueRoot<'_>) {
         self.items.push(value.raw());
+    }
+
+    /// Push without checking if we have capacity for another value.
+    #[inline]
+    pub unsafe fn push_unchecked(&mut self, value: ValueRoot<'_>) {
+        std::hint::assert_unchecked(self.items.spare_capacity_mut().len() > 0);
+
+        let len = self.items.len();
+        self.items
+            .spare_capacity_mut()
+            .get_unchecked_mut(0)
+            .write(value.raw());
+        self.items.set_len(len + 1);
     }
 
     #[inline]
@@ -183,12 +190,14 @@ fn hash_str(hasher: &impl BuildHasher, key: &str) -> u64 {
 
 impl Table {
     #[inline]
-    pub fn new(capacity: usize) -> Self {
-        Self {
+    pub fn alloc(heap: &Heap, capacity: usize) -> Gc<Self> {
+        let this = Self {
             map: HashMap::with_capacity_and_hasher(capacity, ()),
             kv: Vec::with_capacity(capacity),
             hasher: FxBuildHasher::default(),
-        }
+        };
+
+        heap.alloc_no_gc(this)
     }
 }
 
@@ -246,6 +255,7 @@ impl<'a> Ref<'a, Table> {
             ValueRaw::Bool(v) => ValueRef::Bool(*v),
             ValueRaw::Int(v) => ValueRef::Int(*v),
             ValueRaw::Float(v) => ValueRef::Float(*v),
+            ValueRaw::String(gc) => ValueRef::String(unsafe { gc.as_ref() }),
             ValueRaw::List(gc) => ValueRef::List(unsafe { gc.as_ref() }),
             ValueRaw::Table(gc) => ValueRef::Table(unsafe { gc.as_ref() }),
             ValueRaw::UData(gc) => ValueRef::UData(unsafe { gc.as_ref() }),
@@ -350,7 +360,7 @@ macro_rules! string {
         // SAFETY: the allocated object is immediately rooted
         let_root_unchecked!(
             unsafe in $heap;
-            $string = $heap.alloc_no_gc($crate::vm::value::String::from_str($str))
+            $string = $crate::vm::value::String::alloc($heap, $str)
         );
     };
 }
@@ -361,7 +371,7 @@ macro_rules! list {
         // SAFETY: the allocated object is immediately rooted
         let_root_unchecked!(
             unsafe in $heap;
-            $list = $heap.alloc_no_gc($crate::vm::value::List::new($capacity))
+            $list = $crate::vm::value::List::alloc($heap, $capacity)
         );
     };
 }
@@ -372,7 +382,7 @@ macro_rules! table {
         // SAFETY: the allocated object is immediately rooted
         let_root_unchecked!(
             unsafe in $heap;
-            $table = $heap.alloc_no_gc($crate::vm::value::Table::new($capacity))
+            $table = $crate::vm::value::Table::alloc($heap, $capacity)
         );
     };
 }

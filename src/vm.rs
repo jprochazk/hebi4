@@ -66,7 +66,7 @@ use crate::{
 };
 
 /// Represents the result of code generation: A list of functions with
-/// one of the marked as the entrypoint.
+/// one of them marked as the entrypoint.
 ///
 /// Can be executed in a [`Vm`].
 pub struct Chunk {
@@ -152,6 +152,14 @@ impl Literal {
     pub fn float(&self) -> Option<f64> {
         match self {
             Self::Float(v) => Some(*v),
+            _ => None,
+        }
+    }
+
+    #[inline]
+    pub fn str(&self) -> Option<&String> {
+        match self {
+            Self::String(v) => Some(v),
             _ => None,
         }
     }

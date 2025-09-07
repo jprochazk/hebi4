@@ -118,6 +118,10 @@ impl Heap {
         }
     }
 
+    // TODO: when to call `collect`?
+
+    // NOTE: `&self` because it does not trigger a collection,
+    // so it does not need to invalidate any shared references.
     #[inline]
     pub(crate) fn alloc_no_gc<T: Trace + 'static>(&self, value: T) -> Gc<T> {
         let ptr = Box::into_raw(Box::new(GcBox {
@@ -462,6 +466,7 @@ impl Tracer {
     #[inline]
     pub(crate) fn visit_value(&self, value: ValueRaw) {
         match value {
+            ValueRaw::String(ptr) => self.visit(ptr),
             ValueRaw::List(ptr) => self.visit(ptr),
             ValueRaw::Table(ptr) => self.visit(ptr),
             ValueRaw::UData(ptr) => self.visit(ptr),
@@ -652,6 +657,7 @@ impl<'a, T: Trace> Root<'a, T> {
     /// Dereference the rooted pointer. Grants shared access to the object.
     #[inline]
     pub fn as_ref<'v>(&self, heap: &'v Heap) -> Ref<'v, T> {
+        #[cfg(debug_assertions)]
         debug_assert!(heap.id() == self.heap_id);
 
         // SAFETY:
@@ -664,19 +670,17 @@ impl<'a, T: Trace> Root<'a, T> {
         unsafe { self.place.ptr.as_ref() }
     }
 
-    // TODO: instead of returning `&mut T`, return `Write<'a, T>`, which:
-    // - Doesn't allow moving out of `T` (with mem::replace and similar)
-    // - Automatically triggers write barriers on write access
-    //
-    // Object never exist on the stack (other than for the moment when they're constructed),
-    // and rootable objects don't implement `Clone` or `Copy`, so it's impossible to move
-    // out of a mutable reference to a rootable `T`. Or at least that _should_ be the case,
-    // but we'd rather be 100% sure by gating mutable access behind a smart pointer of
-    // some kind. Being able to trigger write barriers that way is a nice side-effect.
-
     /// Dereference the rooted pointer. Grants unique mutable access to the object.
+    ///
+    /// NOTE:
+    /// - Mutable access requires borrowing the entire heap
+    /// - No objects implement `Clone` or `Copy`
+    /// - Object constructors return `Gc` pointers, so are never held on the stack
+    ///
+    /// Therefore it is impossible for the object to be moved out of in safe code.
     #[inline]
     pub fn as_ref_mut<'v>(&self, heap: &'v mut Heap) -> RefMut<'v, T> {
+        #[cfg(debug_assertions)]
         debug_assert!(heap.id() == self.heap_id);
 
         // SAFETY:
@@ -811,6 +815,8 @@ pub enum ValueRoot<'a> {
     Bool(bool) = 1,
     Int(i64) = 2,
     Float(f64) = 3,
+
+    String(Root<'a, super::value::String>),
     List(Root<'a, super::value::List>),
     Table(Root<'a, super::value::Table>),
     UData(Root<'a, super::value::UData>),
@@ -824,6 +830,7 @@ impl<'a> ValueRoot<'a> {
             ValueRoot::Bool(v) => ValueRaw::Bool(v),
             ValueRoot::Int(v) => ValueRaw::Int(v),
             ValueRoot::Float(v) => ValueRaw::Float(v),
+            ValueRoot::String(root) => ValueRaw::String(root.as_ptr()),
             ValueRoot::List(root) => ValueRaw::List(root.as_ptr()),
             ValueRoot::Table(root) => ValueRaw::Table(root.as_ptr()),
             ValueRoot::UData(root) => ValueRaw::UData(root.as_ptr()),
@@ -837,6 +844,8 @@ pub enum ValueRef<'a> {
     Bool(bool) = 1,
     Int(i64) = 2,
     Float(f64) = 3,
+
+    String(Ref<'a, super::value::String>),
     List(Ref<'a, super::value::List>),
     Table(Ref<'a, super::value::Table>),
     UData(Ref<'a, super::value::UData>),
@@ -848,6 +857,8 @@ pub enum ValueRefMut<'a> {
     Bool(bool) = 1,
     Int(i64) = 2,
     Float(f64) = 3,
+
+    String(RefMut<'a, super::value::String>),
     List(RefMut<'a, super::value::List>),
     Table(RefMut<'a, super::value::Table>),
     UData(RefMut<'a, super::value::UData>),

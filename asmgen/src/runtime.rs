@@ -14,13 +14,13 @@ mod private {
     pub trait Sealed {}
 }
 
-use super::{Context, Control, Literal, Value};
+use super::{Context, Control, Literal, ValueRaw};
 
 pub trait OperandPack: private::Sealed + Sized {}
 
 #[derive(Clone, Copy)]
 #[repr(transparent)]
-pub struct Sp(pub(crate) *mut Value);
+pub struct Sp(pub(crate) *mut ValueRaw);
 
 #[derive(Clone, Copy)]
 #[repr(transparent)]
@@ -185,6 +185,7 @@ macro_rules! declare_operand_type {
     ($name:ident, $ty:ident, $fmt:literal) => {
         #[derive(Clone, Copy)]
         #[repr(transparent)]
+        #[must_use = "unused operand"]
         pub struct $name($ty);
 
         impl $name {

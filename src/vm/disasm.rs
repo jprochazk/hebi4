@@ -47,16 +47,19 @@ impl<'a> std::fmt::Display for DisasmFunc<'a> {
 
         let src = self.src;
         let dbg = dbg;
-        let code = &**code;
-        let lit = &**literals;
+        let code = &code[..];
+        let lit = &literals[..];
 
         writeln!(f, ".fn {name}")?;
         writeln!(f, "  params {nparams}")?;
         writeln!(f, "  stack {nstack}")?;
         if let Some(dbg) = dbg {
-            for Local { span, reg } in &(*dbg).locals {
+            if dbg.locals.len() > 0 {
                 writeln!(f, "  .locals")?;
-                writeln!(f, "    {} = {}", reg, &src[*span])?;
+                for Local { span, reg } in &dbg.locals {
+                    let name = &src[*span];
+                    writeln!(f, "    {name} = {reg}")?;
+                }
             }
         }
         writeln!(f, "  .code")?;
@@ -88,7 +91,8 @@ impl<'a> std::fmt::Display for DisasmFunc<'a> {
                     writeln!(f, "lnum {dst}, {id}   ; {id}={v}")?
                 }
                 I::Lstr { dst, id } => {
-                    todo!()
+                    let v = lit[id.zx()].str().unwrap();
+                    writeln!(f, "lstr {dst}, {id}   ; {id}={v:?}")?
                 }
                 I::Lcli { dst, id } => todo!(),
                 I::Lfni { dst, id } => todo!(),

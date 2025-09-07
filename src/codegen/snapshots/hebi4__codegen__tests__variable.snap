@@ -1,0 +1,16 @@
+---
+source: src/codegen/tests.rs
+expression: snapshot
+---
+OK
+.fn @main
+  params 0
+  stack 3
+  .locals
+    a = r1
+    b = r2
+  .code
+  0  lsmi r1, 0
+  1  lsmi r2, 1
+  2  lnil r0
+  3  ret

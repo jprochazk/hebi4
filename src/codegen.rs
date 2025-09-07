@@ -2,7 +2,7 @@
 pub mod opcodes;
 
 use crate::{
-    ast::{self, Expr, Node, NodeList},
+    ast::{self, Expr, Node, NodeList, f64n},
     span::Span,
     vm::{
         self, Chunk, Context, Control, FuncInfo,
@@ -20,6 +20,13 @@ use crate::{
 };
 
 macro_rules! f {
+    (&$m:expr) => {
+        unsafe {
+            debug_assert!(!($m).func_stack.is_empty());
+            ($m).func_stack.last().unwrap_unchecked()
+        }
+    };
+
     ($m:expr) => {
         unsafe {
             debug_assert!(!($m).func_stack.is_empty());
@@ -29,11 +36,15 @@ macro_rules! f {
 }
 
 macro_rules! asm {
-    (in $m:ident; $op:ident $($args:expr),*) => {
-        $m.emit(asm::$op($($args),*), Span::empty())
+    (in $m:ident; $(| $op:ident $($args:expr),*)*) => {
+        $(
+            $m.emit(asm::$op($($args),*), Span::empty())
+        )*
     };
-    (in $m:ident at $span:expr; $op:ident $($args:expr),*) => {
-        $m.emit(asm::$op($($args),*), $span)
+    (in $m:ident at $span:expr; $(| $op:ident $($args:expr),*)*) => {
+        $(
+            $m.emit(asm::$op($($args),*), $span)
+        )*
     };
 }
 
@@ -56,24 +67,24 @@ pub fn emit(ast: &Ast) -> Result<Chunk> {
     Ok(Chunk::new(main, m.func_table.into_iter().collect()))
 }
 
-struct State<'ast, 'bump> {
-    buf: &'bump Bump,
-    func_stack: Vec<'bump, FunctionState<'ast, 'bump>>,
-    func_table: Vec<'bump, FuncInfo>,
+struct State<'a> {
+    buf: &'a Bump,
+    func_stack: Vec<'a, FunctionState<'a>>,
+    func_table: Vec<'a, FuncInfo>,
 }
 
-struct FunctionState<'ast, 'bump> {
-    name: Cow<'ast, str>,
-    scopes: Vec<'bump, Vec<'bump, Local<'ast>>>,
+struct FunctionState<'a> {
+    name: Cow<'a, str>,
+    scopes: Vec<'a, Vec<'a, Local<'a>>>,
     ra: RegAlloc,
-    code: Vec<'bump, Instruction>,
-    literals: Literals<'bump>,
-    dbg: FunctionDebug<'bump>,
+    code: Vec<'a, Instruction>,
+    literals: Literals<'a>,
+    dbg: FunctionDebug<'a>,
 }
 
-struct FunctionDebug<'bump> {
-    spans: Vec<'bump, Span>,
-    locals: Vec<'bump, vm::dbg::Local>,
+struct FunctionDebug<'a> {
+    spans: Vec<'a, Span>,
+    locals: Vec<'a, vm::dbg::Local>,
 }
 
 struct RegAlloc {
@@ -81,13 +92,15 @@ struct RegAlloc {
     num: u8,
 }
 
-struct Literals<'bump> {
-    flat: Vec<'bump, Literal>,
-    ints: HashMap<i64, Lit, rustc_hash::FxBuildHasher, &'bump Bump>,
+struct Literals<'a> {
+    flat: Vec<'a, Literal>,
+    ints: HashMap<i64, Lit, rustc_hash::FxBuildHasher, &'a Bump>,
+    floats: HashMap<f64n, Lit, rustc_hash::FxBuildHasher, &'a Bump>,
+    strings: HashMap<&'a str, Lit, rustc_hash::FxBuildHasher, &'a Bump>,
 }
 
-impl<'bump> Literals<'bump> {
-    fn new(buf: &'bump Bump) -> Self {
+impl<'a> Literals<'a> {
+    fn new(buf: &'a Bump) -> Self {
         Self {
             flat: vec![in buf],
             ints: HashMap::with_capacity_and_hasher_in(
@@ -95,10 +108,20 @@ impl<'bump> Literals<'bump> {
                 rustc_hash::FxBuildHasher::default(),
                 buf,
             ),
+            floats: HashMap::with_capacity_and_hasher_in(
+                16,
+                rustc_hash::FxBuildHasher::default(),
+                buf,
+            ),
+            strings: HashMap::with_capacity_and_hasher_in(
+                16,
+                rustc_hash::FxBuildHasher::default(),
+                buf,
+            ),
         }
     }
 
-    fn next_id(flat: &mut Vec<'bump, Literal>, span: Span) -> Result<Lit> {
+    fn next_id(flat: &mut Vec<'a, Literal>, span: Span) -> Result<Lit> {
         let id = flat.len();
         if id > u16::MAX as usize {
             return error("too many literals", span).into();
@@ -118,6 +141,33 @@ impl<'bump> Literals<'bump> {
             }
         }
     }
+
+    fn f64(&mut self, v: f64n, span: Span) -> Result<Lit> {
+        match self.floats.entry(v) {
+            hashbrown::hash_map::Entry::Occupied(entry) => Ok(*entry.get()),
+            hashbrown::hash_map::Entry::Vacant(entry) => {
+                let id = Self::next_id(&mut self.flat, span)?;
+                self.flat.push(Literal::Float(v.get()));
+                entry.insert(id);
+
+                Ok(id)
+            }
+        }
+    }
+
+    fn str(&mut self, v: &str, span: Span) -> Result<Lit> {
+        let s = self.strings.allocator().alloc_str(v);
+        match self.strings.entry(s) {
+            hashbrown::hash_map::Entry::Occupied(entry) => Ok(*entry.get()),
+            hashbrown::hash_map::Entry::Vacant(entry) => {
+                let id = Self::next_id(&mut self.flat, span)?;
+                self.flat.push(Literal::String(v.to_owned()));
+                entry.insert(id);
+
+                Ok(id)
+            }
+        }
+    }
 }
 
 impl RegAlloc {
@@ -125,7 +175,11 @@ impl RegAlloc {
         Self { current: 0, num: 0 }
     }
 
-    fn alloc(&mut self) -> Reg {
+    fn alloc(&mut self, span: Span) -> Result<Reg> {
+        if self.current == u8::MAX {
+            return error("too many registers", span).into();
+        }
+
         let r = unsafe { Reg::new_unchecked(self.current) };
 
         self.current += 1;
@@ -133,7 +187,7 @@ impl RegAlloc {
             self.num = self.current;
         }
 
-        r
+        Ok(r)
     }
 
     fn free(&mut self, r: Reg) {
@@ -148,14 +202,14 @@ impl RegAlloc {
     }
 }
 
-struct Local<'ast> {
-    name: Cow<'ast, str>,
+struct Local<'a> {
+    name: Cow<'a, str>,
     span: Span,
     reg: Reg,
 }
 
-impl<'ast, 'bump> FunctionState<'ast, 'bump> {
-    fn new(name: Cow<'ast, str>, buf: &'bump Bump) -> Self {
+impl<'a> FunctionState<'a> {
+    fn new(name: Cow<'a, str>, buf: &'a Bump) -> Self {
         Self {
             name,
             scopes: vec![in buf],
@@ -170,7 +224,7 @@ impl<'ast, 'bump> FunctionState<'ast, 'bump> {
         }
     }
 
-    fn begin_scope(&mut self, buf: &'bump Bump) {
+    fn begin_scope(&mut self, buf: &'a Bump) {
         self.scopes.push(vec![in buf]);
     }
 
@@ -184,16 +238,15 @@ impl<'ast, 'bump> FunctionState<'ast, 'bump> {
         }
     }
 
-    fn reg(&mut self) -> Reg {
-        self.ra.alloc()
+    fn reg(&mut self, span: Span) -> Result<Reg> {
+        self.ra.alloc(span)
     }
 
     fn rfree(&mut self, reg: Reg) {
         self.ra.free(reg);
     }
 
-    fn decl_local(&mut self, name: &'ast str, span: Span) {
-        let reg = self.reg();
+    fn decl_local(&mut self, name: &'a str, reg: Reg, span: Span) -> Result<()> {
         let scope = self
             .scopes
             .last_mut()
@@ -203,7 +256,30 @@ impl<'ast, 'bump> FunctionState<'ast, 'bump> {
             span,
             reg,
         });
-        self.dbg.locals.push(vm::dbg::Local { span, reg })
+        self.dbg.locals.push(vm::dbg::Local { span, reg });
+        Ok(())
+    }
+
+    fn resolve(&self, name: &str) -> Option<Symbol> {
+        for scope in self.scopes.iter().rev() {
+            for local in scope {
+                if local.name == name {
+                    return Some(Symbol::Local(local.reg));
+                }
+            }
+        }
+
+        None
+    }
+
+    fn resolve_in_scope(&self, name: &str) -> Option<Symbol> {
+        for local in self.scopes.last()? {
+            if local.name == name {
+                return Some(Symbol::Local(local.reg));
+            }
+        }
+
+        None
     }
 
     fn emit(&mut self, inst: Instruction, span: Span) {
@@ -213,26 +289,41 @@ impl<'ast, 'bump> FunctionState<'ast, 'bump> {
     }
 }
 
-impl<'ast, 'bump> State<'ast, 'bump> {
-    fn begin_scope(&mut self, buf: &'bump Bump) {
-        f!(self).begin_scope(buf);
+impl<'a> State<'a> {
+    fn begin_scope(&mut self) {
+        f!(self).begin_scope(self.buf);
     }
 
     fn end_scope(&mut self) {
         f!(self).end_scope()
     }
 
-    // TODO: error when running out of registers
-    fn reg(&mut self) -> Reg {
-        f!(self).reg()
+    fn reg(&mut self, span: Span) -> Result<Reg> {
+        f!(self).reg(span)
     }
 
     fn rfree(&mut self, reg: Reg) {
         f!(self).rfree(reg);
     }
 
-    fn decl_local(&mut self, name: &'ast str, span: Span) {
-        f!(self).decl_local(name, span)
+    fn decl_local(&mut self, name: &'a str, reg: Reg, span: Span) -> Result<()> {
+        f!(self).decl_local(name, reg, span)
+    }
+
+    fn resolve(&self, name: &str, span: Span) -> Result<Symbol> {
+        if let Some(symbol) = f!(&self).resolve(name) {
+            return Ok(symbol);
+        }
+
+        error("could not resolve name", span).into()
+    }
+
+    fn resolve_in_scope(&self, name: &str) -> Option<Symbol> {
+        if let Some(symbol) = f!(&self).resolve(name) {
+            return Some(symbol);
+        }
+
+        None
     }
 
     fn emit(&mut self, inst: Instruction, span: Span) {
@@ -252,13 +343,17 @@ impl<'ast, 'bump> State<'ast, 'bump> {
     }
 }
 
-fn emit_func<'ast, 'bump>(
-    m: &mut State<'ast, 'bump>,
-    name: Cow<'ast, str>,
+enum Symbol {
+    Local(Reg),
+}
+
+fn emit_func<'a>(
+    m: &mut State<'a>,
+    name: Cow<'a, str>,
     span: Span,
-    params: NodeList<'ast, Ident>,
-    param_spans: &'ast [Span],
-    body: NodeList<'ast, Stmt>,
+    params: NodeList<'a, Ident>,
+    param_spans: &'a [Span],
+    body: NodeList<'a, Stmt>,
 ) -> Result<FnId> {
     if params.len() > u8::MAX as usize {
         return error(
@@ -272,19 +367,20 @@ fn emit_func<'ast, 'bump>(
     m.func_stack.push(f);
 
     {
-        m.begin_scope(m.buf);
+        m.begin_scope();
         // NOTE: don't free `ret_reg` as locals are placed above it,
         //       will be freed in `end_scope`.
-        let ret_reg = m.reg();
+        let ret_reg = m.reg(span)?;
         for (param, &span) in params.iter().zip(param_spans.iter()) {
-            m.decl_local(param.get(), span);
+            let dst = m.reg(span)?;
+            m.decl_local(param.get(), dst, span)?;
         }
 
-        emit_stmt_list_with_tail(m, body, Some(ret_reg))?;
+        let _ = emit_stmt_list_with_tail(m, body, Some(ret_reg).into())?;
 
         asm! {
             in m;
-            ret
+            | ret
         };
 
         m.end_scope();
@@ -308,7 +404,35 @@ fn emit_func<'ast, 'bump>(
     Ok(id)
 }
 
-fn emit_stmt_list_with_tail(m: &mut State, list: NodeList<Stmt>, dst: Option<Reg>) -> Result<()> {
+#[derive(Clone, Copy)]
+#[must_use = "unused register"]
+struct MaybeReg(Option<Reg>);
+
+const NO_REG: MaybeReg = MaybeReg(None);
+
+impl MaybeReg {
+    fn inner(self) -> Option<Reg> {
+        self.into()
+    }
+}
+
+impl From<Option<Reg>> for MaybeReg {
+    fn from(value: Option<Reg>) -> Self {
+        Self(value)
+    }
+}
+
+impl From<MaybeReg> for Option<Reg> {
+    fn from(value: MaybeReg) -> Self {
+        value.0
+    }
+}
+
+fn emit_stmt_list_with_tail<'a>(
+    m: &mut State<'a>,
+    list: NodeList<'a, Stmt>,
+    dst: MaybeReg,
+) -> Result<MaybeReg> {
     let (stmt_list, tail) = match list.last().map(|node| node.kind()) {
         Some(ast::StmtKind::StmtExpr(tail)) => (list.slice(0..list.len() - 1).unwrap(), Some(tail)),
         _ => (list, None),
@@ -318,31 +442,33 @@ fn emit_stmt_list_with_tail(m: &mut State, list: NodeList<Stmt>, dst: Option<Reg
         emit_stmt(m, stmt)?;
     }
 
-    match (tail, dst) {
-        (None, None) => {}
+    match (tail, dst.inner()) {
+        (None, None) => Ok(MaybeReg(None)),
         (None, Some(dst)) => {
             asm! {
                 in m;
-                lnil dst
+                | lnil dst
             };
+
+            Ok(MaybeReg(Some(dst)))
         }
         (Some(tail), None) => {
-            let _ = emit_expr(m, tail.inner(), tail.inner_span(), None)?;
+            let dst = emit_expr(m, tail.inner(), tail.inner_span(), NO_REG)?;
+            Ok(dst)
         }
         (Some(tail), Some(dst)) => {
             emit_expr_into(m, tail.inner(), tail.inner_span(), dst)?;
+            Ok(MaybeReg(Some(dst)))
         }
     }
-
-    Ok(())
 }
 
-fn emit_stmt(m: &mut State, stmt: Node<Stmt>) -> Result<()> {
+fn emit_stmt<'a>(m: &mut State<'a>, stmt: Node<'a, Stmt>) -> Result<()> {
     match stmt.kind() {
-        ast::StmtKind::Var(node) => todo!(),
+        ast::StmtKind::Var(node) => emit_stmt_var(m, node)?,
         ast::StmtKind::Loop(node) => todo!(),
         ast::StmtKind::StmtExpr(node) => {
-            let _ = emit_expr(m, node.inner(), node.inner_span(), None)?;
+            let _ = emit_expr(m, node.inner(), node.inner_span(), NO_REG)?;
         }
         ast::StmtKind::FuncDecl(node) => todo!(),
     }
@@ -350,17 +476,35 @@ fn emit_stmt(m: &mut State, stmt: Node<Stmt>) -> Result<()> {
     Ok(())
 }
 
-fn emit_expr(m: &mut State, expr: Node<Expr>, span: Span, dst: Option<Reg>) -> Result<Option<Reg>> {
+fn emit_stmt_var<'a>(m: &mut State<'a>, stmt: Node<'a, ast::Var>) -> Result<()> {
+    let (redeclaration, dst) = match m.resolve_in_scope(stmt.name().get()) {
+        Some(Symbol::Local(reg)) => (true, reg),
+        _ => (false, m.reg(stmt.name_span())?),
+    };
+    emit_expr_into(m, stmt.value(), stmt.value_span(), dst)?;
+    if !redeclaration {
+        m.decl_local(stmt.name().get(), dst, stmt.name_span())?;
+    }
+
+    Ok(())
+}
+
+fn emit_expr<'a>(
+    m: &mut State<'a>,
+    expr: Node<'a, Expr>,
+    span: Span,
+    dst: MaybeReg,
+) -> Result<MaybeReg> {
     match expr.kind() {
         ast::ExprKind::Return(node) => todo!(),
         ast::ExprKind::Break(node) => todo!(),
         ast::ExprKind::Continue(node) => todo!(),
         ast::ExprKind::IfSimple(node) => todo!(),
         ast::ExprKind::IfMulti(node) => todo!(),
-        ast::ExprKind::Block(node) => todo!(),
+        ast::ExprKind::Block(node) => emit_expr_block(m, node, span, dst),
         ast::ExprKind::FuncAnon(node) => todo!(),
-        ast::ExprKind::GetVar(node) => todo!(),
-        ast::ExprKind::SetVar(node) => todo!(),
+        ast::ExprKind::GetVar(node) => emit_expr_get_var(m, node, span, dst),
+        ast::ExprKind::SetVar(node) => emit_expr_set_var(m, node, span, dst),
         ast::ExprKind::GetField(node) => todo!(),
         ast::ExprKind::SetField(node) => todo!(),
         ast::ExprKind::GetIndex(node) => todo!(),
@@ -373,20 +517,20 @@ fn emit_expr(m: &mut State, expr: Node<Expr>, span: Span, dst: Option<Reg>) -> R
         ast::ExprKind::Object(node) => todo!(),
         ast::ExprKind::Int32(node) => emit_expr_int(m, IntExpr::I32(node), span, dst),
         ast::ExprKind::Int64(node) => emit_expr_int(m, IntExpr::I64(node), span, dst),
-        ast::ExprKind::Float32(node) => todo!(),
-        ast::ExprKind::Float64(node) => todo!(),
-        ast::ExprKind::Bool(node) => todo!(),
-        ast::ExprKind::Str(node) => todo!(),
-        ast::ExprKind::Nil(node) => todo!(),
+        ast::ExprKind::Float32(node) => emit_expr_float(m, FloatExpr::F32(node), span, dst),
+        ast::ExprKind::Float64(node) => emit_expr_float(m, FloatExpr::F64(node), span, dst),
+        ast::ExprKind::Bool(node) => emit_expr_bool(m, node, span, dst),
+        ast::ExprKind::Str(node) => emit_expr_str(m, node, span, dst),
+        ast::ExprKind::Nil(node) => emit_expr_nil(m, node, span, dst),
     }
 }
 
-fn emit_expr_into(m: &mut State, expr: Node<Expr>, span: Span, dst: Reg) -> Result<()> {
-    if let Some(src) = emit_expr(m, expr, span, Some(dst))? {
+fn emit_expr_into<'a>(m: &mut State<'a>, expr: Node<'a, Expr>, span: Span, dst: Reg) -> Result<()> {
+    if let Some(src) = emit_expr(m, expr, span, Some(dst).into())?.inner() {
         if src.get() != dst.get() {
             asm! {
                 in m at span;
-                mov dst, src
+                | mov dst, src
             };
         }
     }
@@ -408,31 +552,157 @@ impl<'a> IntExpr<'a> {
     }
 }
 
-fn emit_expr_int(
-    m: &mut State,
-    expr: IntExpr,
+fn emit_expr_block<'a>(
+    m: &mut State<'a>,
+    expr: Node<'a, ast::Block>,
     span: Span,
-    dst: Option<Reg>,
-) -> Result<Option<Reg>> {
+    dst: MaybeReg,
+) -> Result<MaybeReg> {
+    m.begin_scope();
+    let dst = emit_stmt_list_with_tail(m, expr.body(), dst)?;
+    m.end_scope();
+    Ok(dst)
+}
+
+fn emit_expr_get_var<'a>(
+    m: &mut State<'a>,
+    expr: Node<'a, ast::GetVar>,
+    span: Span,
+    dst: MaybeReg,
+) -> Result<MaybeReg> {
+    // variable must exist at this point
+    let reg = match m.resolve(expr.name().get(), expr.name_span())? {
+        Symbol::Local(reg) => reg,
+    };
+
+    Ok(MaybeReg(Some(reg)))
+}
+
+fn emit_expr_set_var<'a>(
+    m: &mut State<'a>,
+    expr: Node<'a, ast::SetVar>,
+    span: Span,
+    dst: MaybeReg,
+) -> Result<MaybeReg> {
+    // variable must exist at this point
+    match m.resolve(expr.base().name().get(), expr.base().name_span())? {
+        // when adding other symbols, remember to error out here,
+        // only local variables may be assigned to
+        Symbol::Local(dst) => {
+            emit_expr_into(m, expr.value(), span, dst)?;
+        }
+    };
+
+    Ok(MaybeReg(None))
+}
+fn emit_expr_int(m: &mut State, expr: IntExpr, span: Span, dst: MaybeReg) -> Result<MaybeReg> {
     let f = f!(m);
     let v: i64 = expr.value();
-    if let Some(dst) = dst {
+    if let Some(dst) = dst.inner() {
         if v <= i16::MAX as i64 {
             let v = unsafe { Imm16::new_unchecked(v as i16) };
             asm! {
                 in f at span;
-                lsmi dst, v
+                | lsmi dst, v
             };
         } else {
             let id = f.literals.i64(v as i64, span)?;
             asm! {
                 in f at span;
-                lint dst, id
+                | lint dst, id
             }
         }
     }
 
-    Ok(None)
+    Ok(NO_REG)
+}
+
+enum FloatExpr<'a> {
+    F32(Node<'a, ast::Float32>),
+    F64(Node<'a, ast::Float64>),
+}
+
+impl<'a> FloatExpr<'a> {
+    fn value(&self) -> f64n {
+        match self {
+            FloatExpr::F32(node) => f64n::new(*node.value() as f64),
+            FloatExpr::F64(node) => *node.get(),
+        }
+    }
+}
+
+fn emit_expr_float(m: &mut State, expr: FloatExpr, span: Span, dst: MaybeReg) -> Result<MaybeReg> {
+    let f = f!(m);
+    let v: f64n = expr.value();
+    if let Some(dst) = dst.inner() {
+        let id = f.literals.f64(v, span)?;
+        asm! {
+            in f at span;
+            | lnum dst, id
+        }
+    }
+
+    Ok(NO_REG)
+}
+
+fn emit_expr_bool(
+    m: &mut State,
+    expr: Node<ast::Bool>,
+    span: Span,
+    dst: MaybeReg,
+) -> Result<MaybeReg> {
+    let f = f!(m);
+    let v: bool = *expr.value();
+    if let Some(dst) = dst.inner() {
+        match v {
+            true => asm! {
+                in f at span;
+                | ltrue dst
+            },
+            false => asm! {
+                in f at span;
+                | lfalse dst
+            },
+        }
+    }
+
+    Ok(NO_REG)
+}
+
+fn emit_expr_str(
+    m: &mut State,
+    expr: Node<ast::Str>,
+    span: Span,
+    dst: MaybeReg,
+) -> Result<MaybeReg> {
+    let f = f!(m);
+    let v: &str = expr.get();
+    if let Some(dst) = dst.inner() {
+        let id = f.literals.str(v, span)?;
+        asm! {
+            in f at span;
+            | lstr dst, id
+        };
+    }
+
+    Ok(NO_REG)
+}
+
+fn emit_expr_nil(
+    m: &mut State,
+    expr: Node<ast::Nil>,
+    span: Span,
+    dst: MaybeReg,
+) -> Result<MaybeReg> {
+    let f = f!(m);
+    if let Some(dst) = dst.inner() {
+        asm! {
+            in f at span;
+            | lnil dst
+        };
+    }
+
+    Ok(NO_REG)
 }
 
 #[cfg(test)]

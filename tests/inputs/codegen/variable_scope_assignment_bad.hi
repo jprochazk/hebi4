@@ -1,0 +1,4 @@
+do
+  var a = 1
+end
+a = 2

@@ -1,0 +1,8 @@
+---
+source: src/codegen/tests.rs
+expression: snapshot
+---
+ERROR
+could not resolve name
+5 |  a
+  |  ^

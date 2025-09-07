@@ -1,6 +1,6 @@
 pub mod runtime;
 
-pub struct Value {
+pub struct ValueRaw {
     pub tag: u64,
     pub data: u64,
 }
