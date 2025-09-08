@@ -79,7 +79,7 @@ lobj dst:reg len:imm8;
 # If a given comparison yields `true`, they skip the `jmp`.
 
 /* Adjust instruction pointer by `rel`. */
-jmp rel:imm24;
+jmp rel:imm24s;
 
 /* Skip `jmp` if `v` coerced to bool is `true` */
 istrue v:reg;

@@ -71,6 +71,7 @@ impl u24 {
 
     #[inline]
     pub const unsafe fn new_unchecked(v: u32) -> Self {
+        debug_assert!(v <= Self::MAX.get());
         let [a, b, c, _] = v.to_le_bytes();
         Self([a, b, c])
     }
@@ -79,6 +80,11 @@ impl u24 {
     pub const fn get(self) -> u32 {
         let [a, b, c] = self.0;
         u32::from_le_bytes([a, b, c, 0])
+    }
+
+    #[inline]
+    pub const fn as_i24(self) -> i24 {
+        i24(self)
     }
 }
 
@@ -114,6 +120,102 @@ impl std::fmt::Debug for u24 {
 impl std::fmt::Display for u24 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         <u32 as std::fmt::Display>::fmt(&self.get(), f)
+    }
+}
+
+impl TryFrom<usize> for u24 {
+    type Error = ();
+
+    fn try_from(value: usize) -> Result<Self, Self::Error> {
+        if value > u24::MAX.zx() as usize {
+            return Err(());
+        }
+
+        Ok(unsafe { u24::new_unchecked(value as u32) })
+    }
+}
+
+#[allow(non_camel_case_types)]
+#[derive(Clone, Copy, Hash)]
+#[repr(transparent)]
+pub struct i24(u24);
+
+impl i24 {
+    pub const MAX: i24 = i24(unsafe { u24::new_unchecked(16_777_215) });
+    pub const MIN: i24 = i24(u24::ZERO);
+    pub const ZERO: i24 = i24(unsafe { u24::new_unchecked(8_388_608) });
+
+    const OFFSET: u32 = 8_388_608; // 2^23, which is i24::MAX + 1
+
+    #[inline]
+    pub const fn new(v: i32) -> Self {
+        if v > Self::MAX.get() || v < Self::MIN.get() {
+            panic!("value is out of bounds for i24");
+        }
+
+        unsafe { Self::new_unchecked(v) }
+    }
+
+    #[inline]
+    pub const unsafe fn new_unchecked(v: i32) -> Self {
+        Self(u24::new_unchecked((v as u32).wrapping_add(Self::OFFSET)))
+    }
+
+    #[inline]
+    pub const fn get(self) -> i32 {
+        self.0.get().wrapping_sub(Self::OFFSET) as i32
+    }
+
+    #[inline]
+    pub const fn as_u24(self) -> u24 {
+        self.0
+    }
+}
+
+impl PartialEq for i24 {
+    #[inline]
+    fn eq(&self, other: &Self) -> bool {
+        self.0.eq(&other.0)
+    }
+}
+
+impl Eq for i24 {}
+
+impl PartialOrd for i24 {
+    #[inline]
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        self.0.partial_cmp(&other.0)
+    }
+}
+
+impl Ord for i24 {
+    #[inline]
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.0.cmp(&other.0)
+    }
+}
+
+impl std::fmt::Debug for i24 {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        <i32 as std::fmt::Debug>::fmt(&self.get(), f)
+    }
+}
+
+impl std::fmt::Display for i24 {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        <i32 as std::fmt::Display>::fmt(&self.get(), f)
+    }
+}
+
+impl TryFrom<isize> for i24 {
+    type Error = ();
+
+    fn try_from(value: isize) -> Result<Self, Self::Error> {
+        if value > i24::MAX.get() as isize || value < i24::MIN.get() as isize {
+            return Err(());
+        }
+
+        Ok(unsafe { i24::new_unchecked(value as i32) })
     }
 }
 
@@ -255,6 +357,16 @@ impl ExtendEx for u24 {
     }
 }
 
+impl ExtendEx for i24 {
+    fn zx(self) -> usize {
+        self.get() as usize
+    }
+
+    fn sz(self) -> isize {
+        self.get() as isize
+    }
+}
+
 macro_rules! declare_operand_types {
     (
         $(
@@ -278,6 +390,7 @@ declare_operand_types! {
     Imm8(u8) = "{}",
     Imm16(i16) = "{}",
     Imm24(u24) = "{}",
+    Imm24s(i24) = "{}",
 }
 
 const fn assert_bit_equal<A, B>(a: &A, b: &B) {

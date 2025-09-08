@@ -11,13 +11,20 @@ use crate::{
 };
 use bumpalo::{Bump, collections::Vec, vec};
 use hashbrown::HashMap;
-use opcodes::{FnId, Imm16, Instruction, Lit, Reg, asm};
+use opcodes::{FnId, Imm16, Imm24s, Instruction, Lit, Reg, asm, i24};
 use std::borrow::Cow;
 
 use crate::{
     ast::{Ast, Ident, Stmt},
     error::{Result, error},
 };
+
+// TODO: basic optimizations
+// - peephole:
+//   - const eval
+// - jump chaining
+// - dead code elimination
+//   - mark basic block after exit, any emitted code is discarded
 
 macro_rules! f {
     (&$m:expr) => {
@@ -79,6 +86,8 @@ struct FunctionState<'a> {
     ra: RegAlloc,
     code: Vec<'a, Instruction>,
     literals: Literals<'a>,
+    loop_: Option<Loop<'a>>,
+
     dbg: FunctionDebug<'a>,
 }
 
@@ -208,6 +217,38 @@ struct Local<'a> {
     reg: Reg,
 }
 
+struct Loop<'a> {
+    /// Points to first instruction in the loop body.
+    entry: BackwardLabel,
+
+    /// Points to after the last instruction in the loop body.
+    exit: ForwardLabel<'a>,
+}
+
+struct ForwardLabel<'a> {
+    /// Position of targets to patch
+    patch_targets: Vec<'a, usize>,
+}
+
+impl<'a> ForwardLabel<'a> {
+    fn add_target(&mut self, pos: usize) {
+        self.patch_targets.push(pos);
+    }
+}
+
+struct BackwardLabel {
+    /// Instruction position
+    pos: usize,
+}
+
+impl BackwardLabel {
+    fn offset(&self, jmp_pos: usize, span: Span) -> Result<Imm24s> {
+        let offset = i24::try_from((self.pos as isize) - (jmp_pos as isize))
+            .map_err(|_| error("jump offset exceeds u24::MAX", span))?;
+        Ok(unsafe { Imm24s::new_unchecked(offset) })
+    }
+}
+
 impl<'a> FunctionState<'a> {
     fn new(name: Cow<'a, str>, buf: &'a Bump) -> Self {
         Self {
@@ -216,6 +257,7 @@ impl<'a> FunctionState<'a> {
             ra: RegAlloc::new(),
             code: vec![in buf],
             literals: Literals::new(buf),
+            loop_: None,
 
             dbg: FunctionDebug {
                 spans: vec![in buf],
@@ -236,6 +278,18 @@ impl<'a> FunctionState<'a> {
         if let Some(var) = scope.first() {
             self.ra.reset_to(var.reg);
         }
+    }
+
+    fn begin_loop(&mut self, buf: &'a Bump) -> Option<Loop<'a>> {
+        let entry = self.backward_label();
+        let exit = self.forward_label(buf);
+        self.loop_.replace(Loop { entry, exit })
+    }
+
+    fn end_loop(&mut self, prev: Option<Loop<'a>>) -> Result<()> {
+        let loop_ = std::mem::replace(&mut self.loop_, prev).expect("some loop");
+
+        self.bind_forward_label(loop_.exit)
     }
 
     fn reg(&mut self, span: Span) -> Result<Reg> {
@@ -287,6 +341,36 @@ impl<'a> FunctionState<'a> {
         self.dbg.spans.push(span);
         // TODO: peep-opt
     }
+
+    fn forward_label(&self, buf: &'a Bump) -> ForwardLabel<'a> {
+        ForwardLabel {
+            patch_targets: vec![in buf],
+        }
+    }
+
+    fn backward_label(&self) -> BackwardLabel {
+        BackwardLabel {
+            pos: self.code.len(),
+        }
+    }
+
+    fn bind_forward_label(&mut self, label: ForwardLabel) -> Result<()> {
+        let pos = self.code.len();
+        let span = *self.dbg.spans.last().unwrap();
+        for target in label.patch_targets {
+            let offset = i24::try_from((pos - target) as isize)
+                .map_err(|_| error("jump offset out of bounds for i24", span))?;
+
+            let span = self.dbg.spans[target];
+            let ins = &mut self.code[target];
+            let Instruction::Jmp { rel } = ins else {
+                return error("invalid label referree", span).into();
+            };
+            *rel = unsafe { Imm24s::new_unchecked(offset) }
+        }
+
+        Ok(())
+    }
 }
 
 impl<'a> State<'a> {
@@ -296,6 +380,14 @@ impl<'a> State<'a> {
 
     fn end_scope(&mut self) {
         f!(self).end_scope()
+    }
+
+    fn begin_loop(&mut self) -> Option<Loop<'a>> {
+        f!(self).begin_loop(self.buf)
+    }
+
+    fn end_loop(&mut self, prev: Option<Loop<'a>>) -> Result<()> {
+        f!(self).end_loop(prev)
     }
 
     fn reg(&mut self, span: Span) -> Result<Reg> {
@@ -319,7 +411,7 @@ impl<'a> State<'a> {
     }
 
     fn resolve_in_scope(&self, name: &str) -> Option<Symbol> {
-        if let Some(symbol) = f!(&self).resolve(name) {
+        if let Some(symbol) = f!(&self).resolve_in_scope(name) {
             return Some(symbol);
         }
 
@@ -443,7 +535,7 @@ fn emit_stmt_list_with_tail<'a>(
     }
 
     match (tail, dst.inner()) {
-        (None, None) => Ok(MaybeReg(None)),
+        (None, None) => Ok(NO_REG),
         (None, Some(dst)) => {
             asm! {
                 in m;
@@ -466,7 +558,7 @@ fn emit_stmt_list_with_tail<'a>(
 fn emit_stmt<'a>(m: &mut State<'a>, stmt: Node<'a, Stmt>) -> Result<()> {
     match stmt.kind() {
         ast::StmtKind::Var(node) => emit_stmt_var(m, node)?,
-        ast::StmtKind::Loop(node) => todo!(),
+        ast::StmtKind::Loop(node) => emit_stmt_loop(m, node)?,
         ast::StmtKind::StmtExpr(node) => {
             let _ = emit_expr(m, node.inner(), node.inner_span(), NO_REG)?;
         }
@@ -476,15 +568,44 @@ fn emit_stmt<'a>(m: &mut State<'a>, stmt: Node<'a, Stmt>) -> Result<()> {
     Ok(())
 }
 
-fn emit_stmt_var<'a>(m: &mut State<'a>, stmt: Node<'a, ast::Var>) -> Result<()> {
-    let (redeclaration, dst) = match m.resolve_in_scope(stmt.name().get()) {
+fn emit_stmt_var<'a>(m: &mut State<'a>, var: Node<'a, ast::Var>) -> Result<()> {
+    let (redeclaration, dst) = match m.resolve_in_scope(var.name().get()) {
         Some(Symbol::Local(reg)) => (true, reg),
-        _ => (false, m.reg(stmt.name_span())?),
+        _ => (false, m.reg(var.name_span())?),
     };
-    emit_expr_into(m, stmt.value(), stmt.value_span(), dst)?;
+    emit_expr_into(m, var.value(), var.value_span(), dst)?;
     if !redeclaration {
-        m.decl_local(stmt.name().get(), dst, stmt.name_span())?;
+        m.decl_local(var.name().get(), dst, var.name_span())?;
     }
+
+    Ok(())
+}
+
+fn emit_stmt_loop<'a>(m: &mut State<'a>, loop_: Node<'a, ast::Loop>) -> Result<()> {
+    let prev_loop = m.begin_loop();
+    m.begin_scope();
+
+    for stmt in loop_.body() {
+        emit_stmt(m, stmt)?;
+    }
+
+    m.end_scope();
+
+    // unconditional jump back to start
+    let span = loop_.body_spans().last().copied().unwrap_or_default();
+    let pos = f!(&m).code.len();
+    let rel = f!(&m)
+        .loop_
+        .as_ref()
+        .expect("some loop")
+        .entry
+        .offset(pos, span)?;
+    asm! {
+        in m at span;
+        | jmp rel
+    }
+
+    m.end_loop(prev_loop)?;
 
     Ok(())
 }
@@ -497,8 +618,8 @@ fn emit_expr<'a>(
 ) -> Result<MaybeReg> {
     match expr.kind() {
         ast::ExprKind::Return(node) => todo!(),
-        ast::ExprKind::Break(node) => todo!(),
-        ast::ExprKind::Continue(node) => todo!(),
+        ast::ExprKind::Break(node) => emit_expr_break(m, node, span, dst),
+        ast::ExprKind::Continue(node) => emit_expr_continue(m, node, span, dst),
         ast::ExprKind::IfSimple(node) => todo!(),
         ast::ExprKind::IfMulti(node) => todo!(),
         ast::ExprKind::Block(node) => emit_expr_block(m, node, span, dst),
@@ -538,6 +659,98 @@ fn emit_expr_into<'a>(m: &mut State<'a>, expr: Node<'a, Expr>, span: Span, dst: 
     Ok(())
 }
 
+fn emit_expr_break<'a>(
+    m: &mut State<'a>,
+    brk: Node<'a, ast::Break>,
+    span: Span,
+    dst: MaybeReg,
+) -> Result<MaybeReg> {
+    let f = f!(m);
+    let Some(mut loop_) = f.loop_.take() else {
+        return error("cannot use `break` outside of loop", span).into();
+    };
+
+    // break = unconditional jump to loop exit
+    let pos = f.code.len();
+    let rel = unsafe { Imm24s::new_unchecked(i24::ZERO) };
+    asm! {
+        in f at span;
+        | jmp rel
+    }
+    loop_.exit.add_target(pos);
+
+    f.loop_ = Some(loop_);
+
+    Ok(NO_REG)
+}
+
+fn emit_expr_continue<'a>(
+    m: &mut State<'a>,
+    brk: Node<'a, ast::Continue>,
+    span: Span,
+    dst: MaybeReg,
+) -> Result<MaybeReg> {
+    let Some(loop_) = f!(m).loop_.take() else {
+        return error("cannot use `continue` outside of loop", span).into();
+    };
+
+    // continue = unconditional jump back to loop entry
+    let pos = f!(m).code.len();
+    let rel = loop_.entry.offset(pos, span)?;
+    asm! {
+        in m at span;
+        | jmp rel
+    }
+
+    f!(m).loop_ = Some(loop_);
+
+    Ok(NO_REG)
+}
+
+fn emit_expr_block<'a>(
+    m: &mut State<'a>,
+    block: Node<'a, ast::Block>,
+    span: Span,
+    dst: MaybeReg,
+) -> Result<MaybeReg> {
+    m.begin_scope();
+    let dst = emit_stmt_list_with_tail(m, block.body(), dst)?;
+    m.end_scope();
+    Ok(dst)
+}
+
+fn emit_expr_get_var<'a>(
+    m: &mut State<'a>,
+    get: Node<'a, ast::GetVar>,
+    span: Span,
+    dst: MaybeReg,
+) -> Result<MaybeReg> {
+    // variable must exist at this point
+    let reg = match m.resolve(get.name().get(), get.name_span())? {
+        Symbol::Local(reg) => reg,
+    };
+
+    Ok(MaybeReg(Some(reg)))
+}
+
+fn emit_expr_set_var<'a>(
+    m: &mut State<'a>,
+    set: Node<'a, ast::SetVar>,
+    span: Span,
+    dst: MaybeReg,
+) -> Result<MaybeReg> {
+    // variable must exist at this point
+    match m.resolve(set.base().name().get(), set.base().name_span())? {
+        // when adding other symbols, remember to error out here,
+        // only local variables may be assigned to
+        Symbol::Local(dst) => {
+            emit_expr_into(m, set.value(), span, dst)?;
+        }
+    };
+
+    Ok(NO_REG)
+}
+
 enum IntExpr<'a> {
     I32(Node<'a, ast::Int32>),
     I64(Node<'a, ast::Int64>),
@@ -552,52 +765,9 @@ impl<'a> IntExpr<'a> {
     }
 }
 
-fn emit_expr_block<'a>(
-    m: &mut State<'a>,
-    expr: Node<'a, ast::Block>,
-    span: Span,
-    dst: MaybeReg,
-) -> Result<MaybeReg> {
-    m.begin_scope();
-    let dst = emit_stmt_list_with_tail(m, expr.body(), dst)?;
-    m.end_scope();
-    Ok(dst)
-}
-
-fn emit_expr_get_var<'a>(
-    m: &mut State<'a>,
-    expr: Node<'a, ast::GetVar>,
-    span: Span,
-    dst: MaybeReg,
-) -> Result<MaybeReg> {
-    // variable must exist at this point
-    let reg = match m.resolve(expr.name().get(), expr.name_span())? {
-        Symbol::Local(reg) => reg,
-    };
-
-    Ok(MaybeReg(Some(reg)))
-}
-
-fn emit_expr_set_var<'a>(
-    m: &mut State<'a>,
-    expr: Node<'a, ast::SetVar>,
-    span: Span,
-    dst: MaybeReg,
-) -> Result<MaybeReg> {
-    // variable must exist at this point
-    match m.resolve(expr.base().name().get(), expr.base().name_span())? {
-        // when adding other symbols, remember to error out here,
-        // only local variables may be assigned to
-        Symbol::Local(dst) => {
-            emit_expr_into(m, expr.value(), span, dst)?;
-        }
-    };
-
-    Ok(MaybeReg(None))
-}
-fn emit_expr_int(m: &mut State, expr: IntExpr, span: Span, dst: MaybeReg) -> Result<MaybeReg> {
+fn emit_expr_int(m: &mut State, int: IntExpr, span: Span, dst: MaybeReg) -> Result<MaybeReg> {
     let f = f!(m);
-    let v: i64 = expr.value();
+    let v: i64 = int.value();
     if let Some(dst) = dst.inner() {
         if v <= i16::MAX as i64 {
             let v = unsafe { Imm16::new_unchecked(v as i16) };
@@ -631,9 +801,9 @@ impl<'a> FloatExpr<'a> {
     }
 }
 
-fn emit_expr_float(m: &mut State, expr: FloatExpr, span: Span, dst: MaybeReg) -> Result<MaybeReg> {
+fn emit_expr_float(m: &mut State, float: FloatExpr, span: Span, dst: MaybeReg) -> Result<MaybeReg> {
     let f = f!(m);
-    let v: f64n = expr.value();
+    let v: f64n = float.value();
     if let Some(dst) = dst.inner() {
         let id = f.literals.f64(v, span)?;
         asm! {
@@ -647,12 +817,12 @@ fn emit_expr_float(m: &mut State, expr: FloatExpr, span: Span, dst: MaybeReg) ->
 
 fn emit_expr_bool(
     m: &mut State,
-    expr: Node<ast::Bool>,
+    bool: Node<ast::Bool>,
     span: Span,
     dst: MaybeReg,
 ) -> Result<MaybeReg> {
     let f = f!(m);
-    let v: bool = *expr.value();
+    let v: bool = *bool.value();
     if let Some(dst) = dst.inner() {
         match v {
             true => asm! {
@@ -671,12 +841,12 @@ fn emit_expr_bool(
 
 fn emit_expr_str(
     m: &mut State,
-    expr: Node<ast::Str>,
+    str: Node<ast::Str>,
     span: Span,
     dst: MaybeReg,
 ) -> Result<MaybeReg> {
     let f = f!(m);
-    let v: &str = expr.get();
+    let v: &str = str.get();
     if let Some(dst) = dst.inner() {
         let id = f.literals.str(v, span)?;
         asm! {
@@ -690,7 +860,7 @@ fn emit_expr_str(
 
 fn emit_expr_nil(
     m: &mut State,
-    expr: Node<ast::Nil>,
+    nil: Node<ast::Nil>,
     span: Span,
     dst: MaybeReg,
 ) -> Result<MaybeReg> {

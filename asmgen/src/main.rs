@@ -207,6 +207,9 @@ enum OperandType {
 
     /// 24-bit value
     Imm24,
+
+    /// 24-bit value, signed
+    Imm24s,
 }
 
 impl OperandType {
@@ -219,6 +222,7 @@ impl OperandType {
             OperandType::Imm8 => 8,
             OperandType::Imm16 => 16,
             OperandType::Imm24 => 24,
+            OperandType::Imm24s => 24,
         }
     }
 
@@ -231,6 +235,20 @@ impl OperandType {
             OperandType::Imm8 => "Imm8",
             OperandType::Imm16 => "Imm16",
             OperandType::Imm24 => "Imm24",
+            OperandType::Imm24s => "Imm24s",
+        }
+    }
+
+    fn base(&self) -> &'static str {
+        match self {
+            OperandType::Reg => "u8",
+            OperandType::Lit => "u16",
+            OperandType::Lit8 => "u8",
+            OperandType::FnId => "u16",
+            OperandType::Imm8 => "u8",
+            OperandType::Imm16 => "u16",
+            OperandType::Imm24 => "u24",
+            OperandType::Imm24s => "i24",
         }
     }
 }
@@ -319,6 +337,7 @@ fn parse_instruction(s: &str, opcode: u8, docs: String) -> Instruction {
             "imm8" => OperandType::Imm8,
             "imm16" => OperandType::Imm16,
             "imm24" => OperandType::Imm24,
+            "imm24s" => OperandType::Imm24s,
             other => panic!("invalid operand type {other:?} in instruction:\n{s}"),
         };
 
@@ -487,7 +506,7 @@ fn emit_operand_structs(o: &mut String, is: &Instructions) {
             fields = match i.operands {
                 Operands::None => format!("_a: 0x7A, _b: 0x7B, _c: 0x7C"),
                 Operands::A8 { a } => format!("{}: {}(0x7A), _b: 0x7B, _c: 0x7C", a.name, a.ty),
-                Operands::A24 { a } => format!("{}: {}(u24::new(0x7A7B7C))", a.name, a.ty),
+                Operands::A24 { a } => format!("{}: {}({}::new(0x7A7B7C))", a.name, a.ty, a.ty.base()),
                 Operands::A8B8 { a, b } => format!(
                     "{}: {}(0x7A), {}: {}(0x7B), _c: 0x7C",
                     a.name, a.ty, b.name, b.ty

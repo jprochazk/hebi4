@@ -1,0 +1,3 @@
+loop
+  var v = 1
+end

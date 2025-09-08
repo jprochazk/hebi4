@@ -98,7 +98,7 @@ impl<'a> std::fmt::Display for DisasmFunc<'a> {
                 I::Lfni { dst, id } => todo!(),
                 I::Larr { dst, len, _c } => todo!(),
                 I::Lobj { dst, len, _c } => todo!(),
-                I::Jmp { rel } => todo!(),
+                I::Jmp { rel } => writeln!(f, "jmp {rel}")?,
                 I::Istrue { v, _b, _c } => todo!(),
                 I::Istruec { dst, v, _c } => todo!(),
                 I::Isfalse { v, _b, _c } => todo!(),

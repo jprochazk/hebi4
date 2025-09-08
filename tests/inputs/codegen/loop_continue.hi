@@ -1,0 +1,5 @@
+loop
+  var v = 0
+  continue
+  var v = 1
+end

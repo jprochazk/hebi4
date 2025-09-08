@@ -1,0 +1,11 @@
+loop
+  var v = 0
+  loop
+    var v = 1
+    break
+    var v = 2
+  end
+  break
+  var v = 3
+end
+
