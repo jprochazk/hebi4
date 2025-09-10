@@ -101,7 +101,7 @@ optimizer behavior.
 The VM is pretty much entirely unsafe code. It relies on invariants from the compiler and semantics
 of the language to maintain a high standard of quality for the generated assembly. We aim to avoid:
 
-- outlined panic branches
+- panic branches, even if they never run
 - calls to drop glue
 - bounds checks
 - stack spills of VM state
