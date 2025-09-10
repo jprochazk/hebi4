@@ -316,7 +316,7 @@ impl<T: Trace + Sized + 'static> Gc<T> {
     ///   - Exist while the garbage collector is guaranteed not to run
     /// - The resulting reference must be _unique_ for the object
     #[inline]
-    pub(crate) unsafe fn as_ref_mut<'a>(self) -> RefMut<'a, T> {
+    pub(crate) unsafe fn as_mut<'a>(self) -> RefMut<'a, T> {
         unsafe { RefMut::new_unchecked(self) }
     }
 
@@ -679,7 +679,7 @@ impl<'a, T: Trace> Root<'a, T> {
     ///
     /// Therefore it is impossible for the object to be moved out of in safe code.
     #[inline]
-    pub fn as_ref_mut<'v>(&self, heap: &'v mut Heap) -> RefMut<'v, T> {
+    pub fn as_mut<'v>(&self, heap: &'v mut Heap) -> RefMut<'v, T> {
         #[cfg(debug_assertions)]
         debug_assert!(heap.id() == self.heap_id);
 
@@ -692,7 +692,7 @@ impl<'a, T: Trace> Root<'a, T> {
         //   - Only one heap may be active on a given thread at once
         //   - Heaps, roots, and GC'd pointers are not `Send` or `Sync`
         //   - No other references exist to `T` while the borrow is active
-        unsafe { self.place.ptr.as_ref_mut() }
+        unsafe { self.place.ptr.as_mut() }
     }
 
     /// Retrieve the stored pointer.
@@ -709,6 +709,8 @@ impl<'a, T: Trace> Root<'a, T> {
         this
     }
 }
+
+// TODO: don't at all implement `deref` for `Ref` and `RefMut`, it shouldn't be necessary.
 
 /// A shared reference to a GC-managed `T`.
 ///
@@ -772,7 +774,7 @@ impl<'a, T: Trace + Sized + 'static> RefMut<'a, T> {
         f: impl for<'v> FnOnce(&'v mut RefMut<'a, T>) -> &'v mut Gc<U>,
     ) -> RefMut<'a, U> {
         let ptr = *f(this);
-        unsafe { ptr.as_ref_mut() }
+        unsafe { ptr.as_mut() }
     }
 
     #[inline]
