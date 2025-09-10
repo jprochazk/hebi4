@@ -183,8 +183,8 @@ survive the next collection cycle, which makes it safe to dereference. To actual
 - `as_ref`, which requires a `&Heap` reference
 - `as_mut`, which requires a `&mut Heap` reference
 
-This is where the "gatekeeper" `Heap` comes in. It acts as a kind of token, of which there is only a single one in any given program.
-This token is passed around by reference, and must be used in order to _dereference_ roots.
+This is where the "gatekeeper" `Heap` comes in. It acts as a kind of token, of which there is only a single one active
+at a time in any given program. This token is passed around by reference, and must be used in order to _dereference_ roots.
 
 - If you have a shared reference to the heap, you can dereference as many `Root`s as you want to obtain shared access to them.
 - If you have a _unique_ reference to the heap, you can dereference exactly one `Root` to obtain a unique mutable reference to it.
