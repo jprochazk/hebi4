@@ -19,12 +19,13 @@ use crate::{
     error::{Result, error},
 };
 
-// TODO: basic optimizations
+// TODO: basic optimizations (configurable)
 // - peephole:
 //   - const eval
 // - jump chaining
 // - dead code elimination
-//   - mark basic block after exit, any emitted code is discarded
+//   - mark bb exit (break, return, continue, if),
+//     any emitted code is discarded until the exit label is bound
 
 macro_rules! f {
     (&$m:expr) => {
@@ -42,18 +43,7 @@ macro_rules! f {
     };
 }
 
-macro_rules! asm {
-    (in $m:ident; $(| $op:ident $($args:expr),*)*) => {
-        $(
-            $m.emit(asm::$op($($args),*), Span::empty())
-        )*
-    };
-    (in $m:ident at $span:expr; $(| $op:ident $($args:expr),*)*) => {
-        $(
-            $m.emit(asm::$op($($args),*), $span)
-        )*
-    };
-}
+const NO_SPAN: Span = Span::empty();
 
 pub fn emit(ast: &Ast) -> Result<Chunk> {
     let buf = &Bump::new();
@@ -470,11 +460,7 @@ fn emit_func<'a>(
 
         let _ = emit_stmt_list_with_tail(m, body, Some(ret_reg).into())?;
 
-        asm! {
-            in m;
-            | ret
-        };
-
+        m.emit(asm::ret(), NO_SPAN);
         m.end_scope();
     }
     let f = m.func_stack.pop().expect("function stack is empty");
@@ -537,10 +523,7 @@ fn emit_stmt_list_with_tail<'a>(
     match (tail, dst.inner()) {
         (None, None) => Ok(NO_REG),
         (None, Some(dst)) => {
-            asm! {
-                in m;
-                | lnil dst
-            };
+            m.emit(asm::lnil(dst), NO_SPAN);
 
             Ok(MaybeReg(Some(dst)))
         }
@@ -600,10 +583,7 @@ fn emit_stmt_loop<'a>(m: &mut State<'a>, loop_: Node<'a, ast::Loop>) -> Result<(
         .expect("some loop")
         .entry
         .offset(pos, span)?;
-    asm! {
-        in m at span;
-        | jmp rel
-    }
+    m.emit(asm::jmp(rel), span);
 
     m.end_loop(prev_loop)?;
 
@@ -649,10 +629,7 @@ fn emit_expr<'a>(
 fn emit_expr_into<'a>(m: &mut State<'a>, expr: Node<'a, Expr>, span: Span, dst: Reg) -> Result<()> {
     if let Some(src) = emit_expr(m, expr, span, Some(dst).into())?.inner() {
         if src.get() != dst.get() {
-            asm! {
-                in m at span;
-                | mov dst, src
-            };
+            m.emit(asm::mov(dst, src), span);
         }
     }
 
@@ -673,10 +650,8 @@ fn emit_expr_break<'a>(
     // break = unconditional jump to loop exit
     let pos = f.code.len();
     let rel = unsafe { Imm24s::new_unchecked(i24::ZERO) };
-    asm! {
-        in f at span;
-        | jmp rel
-    }
+
+    f.emit(asm::jmp(rel), span);
     loop_.exit.add_target(pos);
 
     f.loop_ = Some(loop_);
@@ -697,10 +672,8 @@ fn emit_expr_continue<'a>(
     // continue = unconditional jump back to loop entry
     let pos = f!(m).code.len();
     let rel = loop_.entry.offset(pos, span)?;
-    asm! {
-        in m at span;
-        | jmp rel
-    }
+
+    m.emit(asm::jmp(rel), span);
 
     f!(m).loop_ = Some(loop_);
 
@@ -771,16 +744,10 @@ fn emit_expr_int(m: &mut State, int: IntExpr, span: Span, dst: MaybeReg) -> Resu
     if let Some(dst) = dst.inner() {
         if v <= i16::MAX as i64 {
             let v = unsafe { Imm16::new_unchecked(v as i16) };
-            asm! {
-                in f at span;
-                | lsmi dst, v
-            };
+            f.emit(asm::lsmi(dst, v), span);
         } else {
             let id = f.literals.i64(v as i64, span)?;
-            asm! {
-                in f at span;
-                | lint dst, id
-            }
+            f.emit(asm::lint(dst, id), span);
         }
     }
 
@@ -806,10 +773,7 @@ fn emit_expr_float(m: &mut State, float: FloatExpr, span: Span, dst: MaybeReg) -
     let v: f64n = float.value();
     if let Some(dst) = dst.inner() {
         let id = f.literals.f64(v, span)?;
-        asm! {
-            in f at span;
-            | lnum dst, id
-        }
+        f.emit(asm::lnum(dst, id), span);
     }
 
     Ok(NO_REG)
@@ -825,14 +789,8 @@ fn emit_expr_bool(
     let v: bool = *bool.value();
     if let Some(dst) = dst.inner() {
         match v {
-            true => asm! {
-                in f at span;
-                | ltrue dst
-            },
-            false => asm! {
-                in f at span;
-                | lfalse dst
-            },
+            true => f.emit(asm::ltrue(dst), span),
+            false => f.emit(asm::lfalse(dst), span),
         }
     }
 
@@ -849,10 +807,7 @@ fn emit_expr_str(
     let v: &str = str.get();
     if let Some(dst) = dst.inner() {
         let id = f.literals.str(v, span)?;
-        asm! {
-            in f at span;
-            | lstr dst, id
-        };
+        f.emit(asm::lstr(dst, id), span);
     }
 
     Ok(NO_REG)
@@ -866,10 +821,7 @@ fn emit_expr_nil(
 ) -> Result<MaybeReg> {
     let f = f!(m);
     if let Some(dst) = dst.inner() {
-        asm! {
-            in f at span;
-            | lnil dst
-        };
+        f.emit(asm::lnil(dst), span);
     }
 
     Ok(NO_REG)
