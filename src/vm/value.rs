@@ -400,7 +400,7 @@ mod tests {
         {
             list!(in heap; list = 128);
 
-            list.as_ref_mut(heap).push(ValueRoot::Int(10));
+            list.as_mut(heap).push(ValueRoot::Int(10));
 
             // `list` is safe from collection
             assert_eq!(heap.stats().bytes(), core::mem::size_of::<List>());
@@ -429,7 +429,7 @@ mod tests {
             table!(in heap; table = 128);
 
             string!(in heap; string_a = "a");
-            table.as_ref_mut(heap).insert(&string_a, ValueRoot::Int(10));
+            table.as_mut(heap).insert(&string_a, ValueRoot::Int(10));
 
             // `table` is safe from collection
             assert_eq!(
@@ -457,7 +457,7 @@ mod tests {
 
             // insert another entry
             string!(in heap; string_b = "b");
-            table.as_ref_mut(heap).insert(&string_b, ValueRoot::Int(20));
+            table.as_mut(heap).insert(&string_b, ValueRoot::Int(20));
 
             // `table` is safe from collection
             assert_eq!(
