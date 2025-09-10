@@ -9,27 +9,27 @@ pub struct Span {
 
 impl Span {
     #[inline]
-    pub fn start(self) -> usize {
+    pub const fn start(self) -> usize {
         self.start as usize
     }
 
     #[inline]
-    pub fn end(self) -> usize {
+    pub const fn end(self) -> usize {
         self.end as usize
     }
 
     #[inline]
-    pub fn empty() -> Span {
+    pub const fn empty() -> Span {
         Span { start: 0, end: 0 }
     }
 
     #[inline]
-    pub fn is_empty(self) -> bool {
+    pub const fn is_empty(self) -> bool {
         self.start == self.end
     }
 
     #[inline]
-    pub fn to(self, other: Span) -> Span {
+    pub const fn to(self, other: Span) -> Span {
         Span {
             start: self.start,
             end: other.end,
