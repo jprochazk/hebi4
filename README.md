@@ -86,7 +86,7 @@ only obscures the reality of what the code is doing.
 
 Certain kinds of unsafe operations _are_ wrapped in unsafe functions when it can help prevent mistakes.
 For example, creating intermediate references while working with raw pointers is a surefire way to
-undefined behavior. In the VM, raw pointers are wrapepd in newtyped structs, which have methods
+undefined behavior. In the VM, raw pointers are wrapped in newtyped structs, which have methods
 operating on `self`. These methods do the Right Thing on the inner pointers without creating
 intermediate references, or only creating them in the smallest region of code possible.
 
