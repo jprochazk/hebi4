@@ -1,0 +1,6 @@
+var v = 0
+loop
+  v = 1
+  break
+end
+v
