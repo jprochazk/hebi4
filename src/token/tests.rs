@@ -1,7 +1,23 @@
-use crate::token::tokenize;
-use std::fs::read_to_string;
+use std::{fs::read_to_string, path::Path};
 
-uitest::uitest!("tests/inputs/*.hi", "tokenize", |path| {
+use crate::token::tokenize;
+
+#[glob_test::glob("../../tests/inputs/*.hi")]
+fn tokenizer(path: &Path) {
     let input = read_to_string(path).unwrap();
-    insta::assert_debug_snapshot!(tokenize(&input));
-});
+    let emit_snapshot =
+        input.starts_with("##") && input.lines().next().unwrap().contains("tokenize");
+
+    let snapshot = format!("{:#?}", tokenize(&input));
+
+    #[cfg(not(miri))]
+    if emit_snapshot {
+        insta::assert_snapshot!(snapshot);
+    }
+
+    #[cfg(miri)]
+    {
+        let _ = emit_snapshot;
+        eprintln!("{snapshot}");
+    }
+}

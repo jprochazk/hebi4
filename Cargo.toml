@@ -11,8 +11,8 @@ bumpalo = { version = "3.18.1", features = ["collections", "std", "allocator-api
 beef = "0.5.2"
 
 [dev-dependencies]
-uitest = { path = "./uitest" }
 insta = { version = "1.43.1" }
+glob_test = { version = "0.1" }
 
 [workspace]
-members = ["asmgen", "astgen", "uitest", "xtask"]
+members = ["asmgen", "astgen", "xtask"]

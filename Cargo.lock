@@ -78,9 +78,19 @@ checksum = "d9c4f5dac5e15c24eb999c26181a6ca40b39fe946cbe4c263c7209467bc83af2"
 
 [[package]]
 name = "glob"
-version = "0.3.2"
+version = "0.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a8d1add55171497b4705a648c6b583acafb01d58050a51727785f0b2c8e0a2b2"
+checksum = "0cc23270f6e1808e30a928bdc84dea0b9b4136a8bc82338574f23baf47bbd280"
+
+[[package]]
+name = "glob_test"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "707daa7175d1020bc297b566b9cf52235c5ab9ec59cf12be65ae885dd541a5de"
+dependencies = [
+ "glob",
+ "proc-macro2",
+]
 
 [[package]]
 name = "hashbrown"
@@ -99,11 +109,11 @@ version = "0.1.0"
 dependencies = [
  "beef",
  "bumpalo",
+ "glob_test",
  "hashbrown",
  "insta",
  "logos",
  "rustc-hash",
- "uitest",
 ]
 
 [[package]]
@@ -323,14 +333,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "unicode-ident",
-]
-
-[[package]]
-name = "uitest"
-version = "0.1.0"
-dependencies = [
- "glob",
- "proc-macro2",
 ]
 
 [[package]]

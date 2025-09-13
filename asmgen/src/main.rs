@@ -477,6 +477,7 @@ fn emit_operand_structs(o: &mut String, is: &Instructions) {
         ml!(
             o,
             "
+            #[doc = \"{doc}\"]
             #[derive(Clone, Copy)]
             #[repr(C, align(4))]
             pub struct {name} {{
@@ -485,6 +486,7 @@ fn emit_operand_structs(o: &mut String, is: &Instructions) {
             }}
 
             ",
+            doc = i.docs,
             name = i.type_name(),
             fields = i.operands.fields(true),
         );

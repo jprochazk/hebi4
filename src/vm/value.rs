@@ -35,6 +35,29 @@ pub enum ValueRaw {
     UData(Gc<UData>),
 }
 
+impl ValueRaw {
+    /// Coerce `self` to a boolean:
+    ///
+    /// - `nil` is always `false`
+    /// - bools are returned as-is
+    /// - `int` is false if `== 0`
+    /// - `float` is false if `== 0.0`
+    /// - objects are always `true`
+    #[inline]
+    pub(crate) fn coerce_bool(self) -> bool {
+        match self {
+            ValueRaw::Nil => false,
+            ValueRaw::Bool(v) => v,
+            ValueRaw::Int(v) => v != 0,
+            ValueRaw::Float(v) => v != 0.0,
+            ValueRaw::String(gc) => true,
+            ValueRaw::List(gc) => true,
+            ValueRaw::Table(gc) => true,
+            ValueRaw::UData(gc) => true,
+        }
+    }
+}
+
 #[repr(align(16))]
 pub struct String {
     inner: std::string::String,

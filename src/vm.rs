@@ -75,10 +75,11 @@ pub struct Chunk {
 }
 
 impl Chunk {
-    pub(crate) fn new(main: FnId, functions: Vec<FuncInfo>) -> Self {
+    #[inline]
+    pub(crate) fn new(main: FnId, functions: impl IntoIterator<Item = FuncInfo>) -> Self {
         Self {
             main,
-            functions: functions.into_boxed_slice(),
+            functions: Vec::from_iter(functions).into_boxed_slice(),
         }
     }
 }
@@ -103,6 +104,7 @@ pub struct FuncInfo {
 }
 
 impl FuncInfo {
+    #[inline]
     pub(crate) fn new(
         name: impl Into<Cow<'static, str>>,
         nparams: u8,
@@ -119,6 +121,11 @@ impl FuncInfo {
             literals: literals.into_boxed_slice(),
             dbg: Some(Box::new(dbg)),
         }
+    }
+
+    #[inline]
+    pub fn name(&self) -> &str {
+        self.name.as_ref()
     }
 }
 
@@ -200,6 +207,31 @@ impl Sp {
     }
 }
 
+impl Lp {
+    #[inline(always)]
+    pub unsafe fn at(self, r: Lit) -> *const Literal {
+        self.0.offset(r.sz())
+    }
+
+    #[inline(always)]
+    pub unsafe fn int(self, r: Lit) -> i64 {
+        let Literal::Int(v) = self.at(r).read() else {
+            core::hint::unreachable_unchecked();
+        };
+
+        v
+    }
+
+    #[inline(always)]
+    pub unsafe fn float(self, r: Lit) -> f64 {
+        let Literal::Float(v) = self.at(r).read() else {
+            core::hint::unreachable_unchecked();
+        };
+
+        v
+    }
+}
+
 impl Jt {
     #[inline(always)]
     pub unsafe fn at(self, inst: RawInstruction) -> OpaqueOp {
@@ -214,7 +246,7 @@ impl Ip {
     }
 
     #[inline]
-    unsafe fn offset(self, n: usize) -> Self {
+    unsafe fn offset(self, n: isize) -> Self {
         Ip((self.0).offset(n as isize))
     }
 
@@ -396,10 +428,13 @@ pub enum Control {
     Yield = 0,
     Error = 1,
 
+    /// Used only in debug mode to convert a tail-call
+    /// interpreter to a loop-match interpreter.
     #[cfg(debug_assertions)]
     Continue(Sp, Lp, Ip),
 }
 
+/// Dispatch instruction at `ip`
 #[inline(always)]
 unsafe fn dispatch_current(jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control {
     #[cfg(debug_assertions)]
@@ -415,6 +450,7 @@ unsafe fn dispatch_current(jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control 
     }
 }
 
+/// Dispatch instruction at `ip+1`
 #[inline(always)]
 unsafe fn dispatch_next(jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control {
     let ip = ip.next();
@@ -428,12 +464,16 @@ unsafe fn nop(args: Nop, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control {
 
 #[inline(always)]
 unsafe fn mov(args: Mov, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control {
-    todo!()
+    *sp.at(args.dst) = *sp.at(args.src);
+
+    dispatch_next(jt, sp, lp, ip, ctx)
 }
 
 #[inline(always)]
 unsafe fn lnil(args: Lnil, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control {
-    todo!()
+    *sp.at(args.dst) = ValueRaw::Nil;
+
+    dispatch_next(jt, sp, lp, ip, ctx)
 }
 
 #[inline(always)]
@@ -445,12 +485,16 @@ unsafe fn lsmi(args: Lsmi, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control 
 
 #[inline(always)]
 unsafe fn lint(args: Lint, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control {
-    todo!()
+    *sp.at(args.dst) = ValueRaw::Int(lp.int(args.id));
+
+    dispatch_next(jt, sp, lp, ip, ctx)
 }
 
 #[inline(always)]
 unsafe fn lnum(args: Lnum, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control {
-    todo!()
+    *sp.at(args.dst) = ValueRaw::Float(lp.float(args.id));
+
+    dispatch_next(jt, sp, lp, ip, ctx)
 }
 
 #[inline(always)]
@@ -460,12 +504,16 @@ unsafe fn lstr(args: Lstr, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control 
 
 #[inline(always)]
 unsafe fn ltrue(args: Ltrue, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control {
-    todo!()
+    *sp.at(args.dst) = ValueRaw::Bool(true);
+
+    dispatch_next(jt, sp, lp, ip, ctx)
 }
 
 #[inline(always)]
 unsafe fn lfalse(args: Lfalse, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control {
-    todo!()
+    *sp.at(args.dst) = ValueRaw::Bool(false);
+
+    dispatch_next(jt, sp, lp, ip, ctx)
 }
 
 #[inline(always)]
@@ -480,6 +528,7 @@ unsafe fn lfni(args: Lfni, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control 
 
 #[inline(always)]
 unsafe fn larr(args: Larr, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control {
+    // TODO: allocation
     todo!()
 }
 
@@ -490,27 +539,83 @@ unsafe fn lobj(args: Lobj, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control 
 
 #[inline(always)]
 unsafe fn jmp(args: Jmp, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control {
-    todo!()
+    let ip = ip.offset(args.rel.sz());
+
+    dispatch_current(jt, sp, lp, ip, ctx)
 }
 
 #[inline(always)]
 unsafe fn istrue(args: Istrue, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control {
-    todo!()
+    // istrue v
+    // jmp offset
+
+    let v = *sp.at(args.v);
+    if v.coerce_bool() {
+        // skip `jmp`
+        let ip = ip.offset(2);
+        dispatch_current(jt, sp, lp, ip, ctx)
+    } else {
+        // execute `jmp`
+        let ip = ip.offset(1);
+        dispatch_current(jt, sp, lp, ip, ctx)
+    }
 }
 
 #[inline(always)]
 unsafe fn istruec(args: Istruec, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control {
-    todo!()
+    // isfalsec dst, v
+    // jmp offset
+
+    let v = *sp.at(args.v);
+    if v.coerce_bool() {
+        // set `dst` to `v`
+        *sp.at(args.dst) = v;
+
+        // skip `jmp`
+        let ip = ip.offset(2);
+        dispatch_current(jt, sp, lp, ip, ctx)
+    } else {
+        // execute `jmp`
+        let ip = ip.offset(1);
+        dispatch_current(jt, sp, lp, ip, ctx)
+    }
 }
 
 #[inline(always)]
 unsafe fn isfalse(args: Isfalse, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control {
-    todo!()
+    // isfalse v
+    // jmp offset
+
+    let v = *sp.at(args.v);
+    if !v.coerce_bool() {
+        // skip `jmp`
+        let ip = ip.offset(2);
+        dispatch_current(jt, sp, lp, ip, ctx)
+    } else {
+        // execute `jmp`
+        let ip = ip.offset(1);
+        dispatch_current(jt, sp, lp, ip, ctx)
+    }
 }
 
 #[inline(always)]
 unsafe fn isfalsec(args: Isfalsec, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control {
-    todo!()
+    // isfalsec dst, v
+    // jmp offset
+
+    let v = *sp.at(args.v);
+    if !v.coerce_bool() {
+        // set `dst` to `v`
+        *sp.at(args.dst) = v;
+
+        // skip `jmp`
+        let ip = ip.offset(2);
+        dispatch_current(jt, sp, lp, ip, ctx)
+    } else {
+        // execute `jmp`
+        let ip = ip.offset(1);
+        dispatch_current(jt, sp, lp, ip, ctx)
+    }
 }
 
 #[inline(always)]
@@ -751,7 +856,7 @@ unsafe fn return_from_call(ctx: Ctx) -> (Sp, Lp, Ip) {
 
     let sp: Sp = ctx.stack_at(stack_base);
     let lp: Lp = returning_to.callee().literals();
-    let ip: Ip = returning_to.callee().code().offset(return_addr);
+    let ip: Ip = returning_to.callee().code().offset(return_addr as isize);
 
     (sp, lp, ip)
 }
@@ -763,6 +868,8 @@ pub struct Module<'gc> {
 }
 
 pub struct Vm {
+    heap: gc::Heap,
+
     stack: DynArray<ValueRaw>,
 
     /// Invariant: Should never be empty.
@@ -781,16 +888,16 @@ impl Vm {
         const STACK_DEPTH: usize = INITIAL_STACK_SIZE / 16;
 
         Vm {
+            heap: gc::Heap::new(),
             stack: DynArray::new(INITIAL_STACK_SIZE),
             frames: DynStack::new(STACK_DEPTH),
         }
     }
 
     #[inline(always)]
-    pub fn with<F, R>(&mut self, f: F) -> R
+    pub fn with<F>(&mut self, f: F)
     where
-        F: for<'gc> FnOnce(Runtime<'gc>) -> R,
-        R: 'static,
+        F: for<'gc> FnOnce(Runtime<'gc>),
     {
         f(Runtime {
             vm: self,
@@ -806,8 +913,26 @@ pub struct Runtime<'gc> {
 }
 
 impl<'gc> Runtime<'gc> {
-    /// Run the code once.
-    pub fn run_once(&mut self, chunk: Chunk) -> Result<()> {
+    // TODO: return persistent value here instead
+    /// Execute the main entrypoint of the chunk to completion.
+    pub fn run(&mut self, chunk: Chunk) -> Result<ValueRaw> {
+        self.run_inner(chunk)?;
+
+        // SAFETY: Functions always store their return values in slot 0,
+        // and are guaranteed to always allocate at least that slot.
+        //
+        // TODO: The resulting value is alive only because of implementation
+        // details - we need to guarantee this _somehow_. Currently no GC happens
+        // between the last `ret` and this point, and all stack values used
+        // by the main entrypoint are guaranteed to not have been collected yet
+        // until after its `ret`, at which point the stack frame is considered
+        // dead.
+        let vm = unsafe { &mut *self.vm };
+        let value = unsafe { *vm.stack.offset(0) };
+        Ok(value)
+    }
+
+    fn run_inner(&mut self, chunk: Chunk) -> Result<()> {
         unsafe {
             let mut error = None;
 
@@ -850,6 +975,9 @@ impl<'gc> Runtime<'gc> {
             let ip: Ip = ctx.current_frame().callee().code();
 
             // In debug mode, fall back to loop+match.
+            //
+            // Each instruction will return `Control::Continue`
+            // instead of tail-calling the next handler.
             #[cfg(debug_assertions)]
             {
                 let mut sp: Sp = sp;
@@ -874,7 +1002,6 @@ impl<'gc> Runtime<'gc> {
                 }
             }
 
-            // Release mode uses tail calls.
             #[cfg(not(debug_assertions))]
             {
                 match dispatch_current(jt, sp, lp, ip, ctx) {

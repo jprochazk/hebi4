@@ -1,7 +1,0 @@
----
-source: src/token/tests.rs
-expression: tokenize(&input)
----
-[
-    Break("break", 0..5),
-]

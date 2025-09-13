@@ -1,8 +1,0 @@
----
-source: src/parser/tests.rs
-expression: snapshot
----
-ERROR
-`continue` outside of a loop
-1 |  continue
-  |  ^^^^^^^^

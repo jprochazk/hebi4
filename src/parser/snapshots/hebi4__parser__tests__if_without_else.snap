@@ -1,8 +1,0 @@
----
-source: src/parser/tests.rs
-expression: snapshot
----
-ERROR
-expected `else`
-1 |  var x = if true do 0 end
-  |                       ^^^

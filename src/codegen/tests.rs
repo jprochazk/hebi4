@@ -1,9 +1,11 @@
-use std::fs::read_to_string;
+use std::{fs::read_to_string, path::Path};
 
-use super::emit;
 use crate::{parser::parse, token::tokenize};
 
-uitest::uitest!("tests/inputs/codegen/*.hi", "codegen", |path| {
+use super::emit;
+
+#[glob_test::glob("../../tests/inputs/codegen/*.hi")]
+fn emitter(path: &Path) {
     let input = read_to_string(path).unwrap();
     let tokens = tokenize(&input);
     let ast = match parse(&tokens) {
@@ -31,4 +33,4 @@ uitest::uitest!("tests/inputs/codegen/*.hi", "codegen", |path| {
             eprintln!("{snapshot}");
         }
     }
-});
+}

@@ -1,7 +1,0 @@
----
-source: src/token/tests.rs
-expression: tokenize(&input)
----
-[
-    Continue("continue", 0..8),
-]

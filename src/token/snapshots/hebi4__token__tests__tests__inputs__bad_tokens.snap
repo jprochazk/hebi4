@@ -1,6 +1,6 @@
 ---
 source: src/token/tests.rs
-expression: tokenize(&input)
+expression: snapshot
 ---
 [
     Error("$", 42..43),

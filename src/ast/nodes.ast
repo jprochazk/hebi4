@@ -8,6 +8,12 @@ stmt loop {
     body: [stmt],
 };
 
+stmt func_decl {
+    name: ident,
+    body: block,
+    params: [ident],
+};
+
 stmt stmt_expr {
     inner: expr,
 };
@@ -37,12 +43,6 @@ data branch {
 
 expr block {
     body: [stmt],
-};
-
-stmt func_decl {
-    name: ident,
-    body: block,
-    params: [ident],
 };
 
 expr func_anon {

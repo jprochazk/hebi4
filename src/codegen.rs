@@ -45,6 +45,44 @@ macro_rules! f {
 
 const NO_SPAN: Span = Span::empty();
 
+// TODO: for any stmt list, iterate over it twice, and pre-declare all functions
+// in a special table. that table is then used to patch `fastcall` instructions
+// with real function IDs once those IDs are resolved.
+// in order to resolve the ID, the function must be emitted. the patching can
+// be done at the end of every scope, it does not need to wait until all functions
+// have been resolved, because it is impossible to call a function by function id
+// unless it is declared within the current scope stack
+
+/*
+
+# emit_func(main) -> immediately declares `outer`, _then_ emits the body of `main`
+
+# emit_func(outer) -> declares `inner`, emits `outer`
+                   -> does NOT declare `inner_block`! it's not a direct child.
+fn outer() do
+    # emit_func(inner) -> emits `inner`
+    fn inner() do
+        does_not_exist()  # error
+    end
+    do
+        # emit_func(inner_block) -> emits `inner_block`
+        fn inner_block() do end
+
+        # `inner_block` goes out of scope
+    end
+
+    outer()  # ok, recursion
+    inner()  # ok
+    inner_block()  # error
+
+    # `inner` goes out of scope
+end
+
+outer()  # ok
+inner()  # error
+
+*/
+
 pub fn emit(ast: &Ast) -> Result<Chunk> {
     let buf = &Bump::new();
     let mut m = State {
@@ -52,6 +90,7 @@ pub fn emit(ast: &Ast) -> Result<Chunk> {
         func_stack: vec![in buf],
         func_table: vec![in buf],
     };
+
     let main = emit_func(
         &mut m,
         "@main".into(),
@@ -61,7 +100,7 @@ pub fn emit(ast: &Ast) -> Result<Chunk> {
         ast.root().body(),
     )?;
 
-    Ok(Chunk::new(main, m.func_table.into_iter().collect()))
+    Ok(Chunk::new(main, m.func_table))
 }
 
 struct State<'a> {
@@ -542,10 +581,10 @@ fn emit_stmt<'a>(m: &mut State<'a>, stmt: Node<'a, Stmt>) -> Result<()> {
     match stmt.kind() {
         ast::StmtKind::Var(node) => emit_stmt_var(m, node)?,
         ast::StmtKind::Loop(node) => emit_stmt_loop(m, node)?,
+        ast::StmtKind::FuncDecl(node) => emit_stmt_func(m, node)?,
         ast::StmtKind::StmtExpr(node) => {
             let _ = emit_expr(m, node.inner(), node.inner_span(), NO_REG)?;
         }
-        ast::StmtKind::FuncDecl(node) => todo!(),
     }
 
     Ok(())
@@ -588,6 +627,10 @@ fn emit_stmt_loop<'a>(m: &mut State<'a>, loop_: Node<'a, ast::Loop>) -> Result<(
     m.end_loop(prev_loop)?;
 
     Ok(())
+}
+
+fn emit_stmt_func<'a>(m: &mut State<'a>, func: Node<'a, ast::FuncDecl>) -> Result<()> {
+    todo!()
 }
 
 fn emit_expr<'a>(
