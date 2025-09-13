@@ -19,7 +19,7 @@ fn run(path: &Path) {
     let mut vm = crate::vm::Vm::new();
     vm.with(|mut r| {
         let (snapshot, failure) = match r.run(chunk) {
-            Ok(_) => (format!("OK\n"), false),
+            Ok(value) => (format!("OK\n{}", r.fmt(value)), false),
             Err(err) => (
                 format!("ERROR\n{}\n\nDISASM:\n\n{disasm}", err.render(&input)),
                 true,

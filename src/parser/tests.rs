@@ -4,7 +4,7 @@ use crate::token::tokenize;
 
 use super::parse;
 
-#[glob_test::glob("../../tests/inputs/*.hi")]
+#[glob_test::glob("../../tests/inputs/syntax/*.hi")]
 fn parser(path: &Path) {
     let input = read_to_string(path).unwrap();
     let emit_snapshot = input.starts_with("##") && input.lines().next().unwrap().contains("parse");

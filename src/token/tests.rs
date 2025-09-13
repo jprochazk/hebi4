@@ -2,7 +2,7 @@ use std::{fs::read_to_string, path::Path};
 
 use crate::token::tokenize;
 
-#[glob_test::glob("../../tests/inputs/*.hi")]
+#[glob_test::glob("../../tests/inputs/syntax/*.hi")]
 fn tokenizer(path: &Path) {
     let input = read_to_string(path).unwrap();
     let emit_snapshot =

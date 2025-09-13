@@ -832,10 +832,10 @@ impl<'a> ValueRoot<'a> {
             ValueRoot::Bool(v) => ValueRaw::Bool(v),
             ValueRoot::Int(v) => ValueRaw::Int(v),
             ValueRoot::Float(v) => ValueRaw::Float(v),
-            ValueRoot::String(root) => ValueRaw::String(root.as_ptr()),
-            ValueRoot::List(root) => ValueRaw::List(root.as_ptr()),
-            ValueRoot::Table(root) => ValueRaw::Table(root.as_ptr()),
-            ValueRoot::UData(root) => ValueRaw::UData(root.as_ptr()),
+            ValueRoot::String(v) => ValueRaw::String(v.as_ptr()),
+            ValueRoot::List(v) => ValueRaw::List(v.as_ptr()),
+            ValueRoot::Table(v) => ValueRaw::Table(v.as_ptr()),
+            ValueRoot::UData(v) => ValueRaw::UData(v.as_ptr()),
         }
     }
 }
@@ -853,18 +853,34 @@ pub enum ValueRef<'a> {
     UData(Ref<'a, super::value::UData>),
 }
 
-#[repr(C, u64)]
-pub enum ValueRefMut<'a> {
-    Nil = 0,
-    Bool(bool) = 1,
-    Int(i64) = 2,
-    Float(f64) = 3,
-
-    String(RefMut<'a, super::value::String>),
-    List(RefMut<'a, super::value::List>),
-    Table(RefMut<'a, super::value::Table>),
-    UData(RefMut<'a, super::value::UData>),
+impl<'a> ValueRef<'a> {
+    #[inline]
+    pub fn raw(self) -> ValueRaw {
+        match self {
+            ValueRef::Nil => ValueRaw::Nil,
+            ValueRef::Bool(v) => ValueRaw::Bool(v),
+            ValueRef::Int(v) => ValueRaw::Int(v),
+            ValueRef::Float(v) => ValueRaw::Float(v),
+            ValueRef::String(v) => ValueRaw::String(v.as_ptr()),
+            ValueRef::List(v) => ValueRaw::List(v.as_ptr()),
+            ValueRef::Table(v) => ValueRaw::Table(v.as_ptr()),
+            ValueRef::UData(v) => ValueRaw::UData(v.as_ptr()),
+        }
+    }
 }
+
+// #[repr(C, u64)]
+// pub enum ValueRefMut<'a> {
+//     Nil = 0,
+//     Bool(bool) = 1,
+//     Int(i64) = 2,
+//     Float(f64) = 3,
+
+//     String(RefMut<'a, super::value::String>),
+//     List(RefMut<'a, super::value::List>),
+//     Table(RefMut<'a, super::value::Table>),
+//     UData(RefMut<'a, super::value::UData>),
+// }
 
 /// Create a root on the stack.
 ///

@@ -476,9 +476,9 @@ fn emit_func<'a>(
     param_spans: &'a [Span],
     body: NodeList<'a, Stmt>,
 ) -> Result<FnId> {
-    if params.len() > u8::MAX as usize {
+    if params.len() > 100 {
         return error(
-            "too many parameters, maximum is 256",
+            "too many parameters, maximum is 100",
             *param_spans.last().unwrap(),
         )
         .into();

@@ -131,7 +131,8 @@ impl<'a> Ref<'a, List> {
         self.items.capacity()
     }
 
-    fn get<'this>(&'this self, index: usize) -> Option<ValueRef<'this>> {
+    #[inline]
+    fn get(&self, index: usize) -> Option<ValueRef<'a>> {
         let Some(v) = self.items.get(index) else {
             return None;
         };
@@ -148,6 +149,51 @@ impl<'a> Ref<'a, List> {
         };
 
         Some(v)
+    }
+
+    #[inline]
+    fn iter(&self) -> ListIter<'a> {
+        ListIter {
+            list: *self,
+            index: 0,
+        }
+    }
+}
+
+impl<'a> IntoIterator for Ref<'a, List> {
+    type Item = ValueRef<'a>;
+
+    type IntoIter = ListIter<'a>;
+
+    #[inline]
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
+    }
+}
+
+pub struct ListIter<'a> {
+    list: Ref<'a, List>,
+    index: usize,
+}
+
+impl<'a> Iterator for ListIter<'a> {
+    type Item = ValueRef<'a>;
+
+    #[inline]
+    fn next(&mut self) -> Option<Self::Item> {
+        match self.list.get(self.index) {
+            Some(v) => {
+                self.index += 1;
+
+                Some(v)
+            }
+
+            None => {
+                // fused iterator
+                self.index = usize::MAX;
+                None
+            }
+        }
     }
 }
 

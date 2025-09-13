@@ -1012,6 +1012,59 @@ impl<'gc> Runtime<'gc> {
         }
     }
 
+    pub fn fmt(&self, value: ValueRaw) -> impl std::fmt::Display + '_ {
+        struct ValueFormatter<'a, 'gc> {
+            this: &'a Runtime<'gc>,
+            value: ValueRaw,
+        }
+
+        impl<'gc> std::fmt::Display for ValueFormatter<'_, 'gc> {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                match self.value {
+                    ValueRaw::Nil => write!(f, "nil"),
+                    ValueRaw::Bool(v) => write!(f, "{v}"),
+                    ValueRaw::Int(v) => write!(f, "{v}"),
+                    ValueRaw::Float(v) => write!(f, "{v}"),
+                    ValueRaw::String(v) => {
+                        let str = unsafe { v.as_ref() };
+                        write!(f, "{}", str.as_str())
+                    }
+                    ValueRaw::List(v) => {
+                        let list = unsafe { v.as_ref() };
+
+                        write!(f, "[")?;
+                        let mut comma = false;
+                        for item in list {
+                            if comma {
+                                write!(f, ", ")?;
+                            }
+                            write!(
+                                f,
+                                "{}",
+                                ValueFormatter {
+                                    this: self.this,
+                                    value: item.raw(),
+                                }
+                            )?;
+                            comma = true;
+                        }
+                        write!(f, "]")?;
+
+                        Ok(())
+                    }
+                    ValueRaw::Table(v) => {
+                        todo!()
+                    }
+                    ValueRaw::UData(v) => {
+                        todo!()
+                    }
+                }
+            }
+        }
+
+        ValueFormatter { this: self, value }
+    }
+
     // /// Compile a module, which gives you access to functions
     // /// declared within it.
     // ///
