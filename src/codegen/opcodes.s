@@ -246,9 +246,9 @@ not dst:reg rhs:reg;
 
 # TODO: specialize for differing number of arguments?
 /*
- * `dst = func(dst+1..dst+1+args)`
+ * `dst = dst(dst+1..dst+1+args)`
  */
-call dst:reg func:reg args:imm8;
+call dst:reg args:imm8;
 
 /*
  * `dst = funcs[id](dst..dst+funcs[id].args)`

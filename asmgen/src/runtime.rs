@@ -297,7 +297,7 @@ macro_rules! declare_operand_type {
             }
 
             #[inline(always)]
-            pub unsafe fn new_unchecked(v: $ty) -> Self {
+            pub const unsafe fn new_unchecked(v: $ty) -> Self {
                 Self(v)
             }
 

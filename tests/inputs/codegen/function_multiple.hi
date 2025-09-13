@@ -1,0 +1,3 @@
+# being able to declare multiple functions is kinda important
+fn a() do end
+fn b() do end

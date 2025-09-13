@@ -1,0 +1,25 @@
+---
+source: src/codegen/tests.rs
+expression: snapshot
+---
+OK
+.fn @main
+  params 0
+  stack 1
+  .code
+  0  lnil r0
+  1  ret
+
+.fn a
+  params 0
+  stack 1
+  .code
+  0  lnil r0
+  1  ret
+
+.fn b
+  params 0
+  stack 1
+  .code
+  0  lnil r0
+  1  ret

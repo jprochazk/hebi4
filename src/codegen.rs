@@ -11,7 +11,7 @@ use crate::{
 };
 use bumpalo::{Bump, collections::Vec, vec};
 use hashbrown::HashMap;
-use opcodes::{FnId, Imm16, Imm24s, Instruction, Lit, Reg, asm, i24};
+use opcodes::{FnId, Imm8, Imm16, Imm24s, Instruction, Lit, Reg, asm, i24};
 use std::borrow::Cow;
 
 use crate::{
@@ -88,11 +88,18 @@ pub fn emit(ast: &Ast) -> Result<Chunk> {
     let mut m = State {
         buf,
         func_stack: vec![in buf],
-        func_table: vec![in buf],
+        func_table: FunctionTable::new(buf),
     };
 
-    let main = emit_func(
+    // note: `main` cannot be called, so does not need a symbol
+    let main = m
+        .func_table
+        .reserve("@main", Span::empty())
+        .expect("should not fail to reserve main");
+
+    let f = emit_func(
         &mut m,
+        main,
         "@main".into(),
         Span::empty(),
         NodeList::empty(ast),
@@ -100,24 +107,102 @@ pub fn emit(ast: &Ast) -> Result<Chunk> {
         ast.root().body(),
     )?;
 
-    Ok(Chunk::new(main, m.func_table))
+    m.func_table.define(main, f);
+
+    Ok(Chunk::new(main, m.func_table.finish()))
 }
 
 struct State<'a> {
     buf: &'a Bump,
     func_stack: Vec<'a, FunctionState<'a>>,
-    func_table: Vec<'a, FuncInfo>,
+    func_table: FunctionTable<'a>,
+}
+
+struct FunctionTable<'a> {
+    entries: Vec<'a, FunctionTableEntry<'a>>,
+}
+
+enum FunctionTableEntry<'a> {
+    Occupied(FuncInfo),
+    Reserved(Cow<'a, str>, Span),
+}
+
+impl<'a> FunctionTable<'a> {
+    fn new(buf: &'a Bump) -> Self {
+        Self {
+            entries: vec![in buf],
+        }
+    }
+
+    fn reserve(&mut self, name: impl Into<Cow<'a, str>>, span: Span) -> Result<FnId> {
+        let id = self.entries.len();
+        if id >= u16::MAX as usize {
+            return error(format!("too many functions, maximum is {}", u16::MAX), span).into();
+        }
+        let id = id as u16;
+
+        self.entries
+            .push(FunctionTableEntry::Reserved(name.into(), span));
+        Ok(unsafe { FnId::new_unchecked(id) })
+    }
+
+    fn define(&mut self, id: FnId, info: FuncInfo) {
+        use FunctionTableEntry as E;
+
+        match self.entries.get_mut(id.zx()) {
+            Some(E::Occupied(..)) => panic!("ICE: function defined twice"),
+            Some(E::Reserved(name, span)) => {
+                assert!(
+                    info.name() == name,
+                    "ICE: function definition mismatch: expected {name:?} for fn id {id}, got {:?}\n\
+                    NOTE: function was declared at {span}",
+                    info.name()
+                );
+            }
+            None => {
+                panic!("ICE: function finished before declaration");
+            }
+        }
+
+        self.entries[id.zx()] = E::Occupied(info);
+    }
+
+    fn finish(self) -> Vec<'a, FuncInfo> {
+        let mut out = Vec::with_capacity_in(self.entries.len(), self.entries.bump());
+        for entry in self.entries {
+            use FunctionTableEntry as E;
+            match entry {
+                E::Occupied(func_info) => out.push(func_info),
+                E::Reserved(name, span) => {
+                    panic!("ICE: function declared but not defined: {name:?} at {span}");
+                }
+            }
+        }
+        out
+    }
 }
 
 struct FunctionState<'a> {
     name: Cow<'a, str>,
-    scopes: Vec<'a, Vec<'a, Local<'a>>>,
+    scopes: Vec<'a, Scope<'a>>,
     ra: RegAlloc,
     code: Vec<'a, Instruction>,
     literals: Literals<'a>,
     loop_: Option<Loop<'a>>,
 
     dbg: FunctionDebug<'a>,
+}
+
+struct Scope<'a> {
+    last_reg_in_prev_scope: u8,
+    symbols: Vec<'a, Symbol<'a>>,
+    undefined_functions: Vec<'a, FnId>,
+}
+
+impl<'a> Scope<'a> {
+    fn push(&mut self, symbol: Symbol<'a>) {
+        self.symbols.push(symbol)
+    }
 }
 
 struct FunctionDebug<'a> {
@@ -128,6 +213,110 @@ struct FunctionDebug<'a> {
 struct RegAlloc {
     current: u8,
     num: u8,
+}
+
+impl RegAlloc {
+    fn new() -> Self {
+        Self { current: 0, num: 0 }
+    }
+
+    fn alloc(&mut self, span: Span) -> Result<Reg> {
+        if self.current == u8::MAX {
+            return error("too many registers", span).into();
+        }
+
+        let r = unsafe { Reg::new_unchecked(self.current) };
+
+        self.current += 1;
+        if self.current > self.num {
+            self.num = self.current;
+        }
+
+        Ok(r)
+    }
+
+    fn alloc_n(&mut self, n: u8, span: Span) -> Result<RegRange> {
+        if n == 0 {
+            return error("cannot allocate zero registers", span).into();
+        }
+        if self.current as usize + n as usize >= u8::MAX as usize {
+            return error("too many registers", span).into();
+        }
+
+        let start = unsafe { Reg::new_unchecked(self.current) };
+
+        self.current += n;
+        if self.current > self.num {
+            self.num = self.current;
+        }
+
+        Ok(RegRange { start, n })
+    }
+
+    fn is_at_top(&self, r: Reg) -> bool {
+        self.current == r.get() + 1
+    }
+
+    fn free(&mut self, r: Reg) {
+        if self.current != r.get() + 1 {
+            panic!("registers freed out of order");
+        }
+        self.current = r.get();
+    }
+
+    fn reset_to(&mut self, r: u8) {
+        self.current = r;
+    }
+}
+
+#[derive(Clone, Copy)]
+struct RegRange {
+    start: Reg,
+    n: u8,
+}
+
+impl RegRange {
+    fn empty() -> Self {
+        Self {
+            start: ZERO_REG,
+            n: 0,
+        }
+    }
+}
+
+struct RegRangeIter {
+    start: u8,
+    end: u8,
+    n: u8,
+}
+
+impl IntoIterator for RegRange {
+    type Item = Reg;
+
+    type IntoIter = RegRangeIter;
+
+    fn into_iter(self) -> Self::IntoIter {
+        RegRangeIter {
+            start: self.start.get(),
+            end: self.start.get() + self.n,
+            n: self.n,
+        }
+    }
+}
+
+impl Iterator for RegRangeIter {
+    type Item = Reg;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.n == 0 {
+            return None;
+        }
+
+        let n = self.n;
+        self.n -= 1;
+
+        Some(unsafe { Reg::new_unchecked(self.end - n) })
+    }
 }
 
 struct Literals<'a> {
@@ -208,44 +397,6 @@ impl<'a> Literals<'a> {
     }
 }
 
-impl RegAlloc {
-    fn new() -> Self {
-        Self { current: 0, num: 0 }
-    }
-
-    fn alloc(&mut self, span: Span) -> Result<Reg> {
-        if self.current == u8::MAX {
-            return error("too many registers", span).into();
-        }
-
-        let r = unsafe { Reg::new_unchecked(self.current) };
-
-        self.current += 1;
-        if self.current > self.num {
-            self.num = self.current;
-        }
-
-        Ok(r)
-    }
-
-    fn free(&mut self, r: Reg) {
-        if self.current != r.get() + 1 {
-            panic!("registers freed out of order");
-        }
-        self.current = r.get();
-    }
-
-    fn reset_to(&mut self, r: Reg) {
-        self.current = r.get();
-    }
-}
-
-struct Local<'a> {
-    name: Cow<'a, str>,
-    span: Span,
-    reg: Reg,
-}
-
 struct Loop<'a> {
     /// Points to first instruction in the loop body.
     entry: BackwardLabel,
@@ -296,7 +447,11 @@ impl<'a> FunctionState<'a> {
     }
 
     fn begin_scope(&mut self, buf: &'a Bump) {
-        self.scopes.push(vec![in buf]);
+        self.scopes.push(Scope {
+            last_reg_in_prev_scope: self.ra.current,
+            symbols: vec![in buf],
+            undefined_functions: vec![in buf],
+        });
     }
 
     fn end_scope(&mut self) {
@@ -304,9 +459,7 @@ impl<'a> FunctionState<'a> {
             .scopes
             .pop()
             .expect("`end_scope` called without any scopes");
-        if let Some(var) = scope.first() {
-            self.ra.reset_to(var.reg);
-        }
+        self.ra.reset_to(scope.last_reg_in_prev_scope);
     }
 
     fn begin_loop(&mut self, buf: &'a Bump) -> Option<Loop<'a>> {
@@ -325,29 +478,45 @@ impl<'a> FunctionState<'a> {
         self.ra.alloc(span)
     }
 
+    fn reg_n(&mut self, n: u8, span: Span) -> Result<RegRange> {
+        self.ra.alloc_n(n, span)
+    }
+
     fn rfree(&mut self, reg: Reg) {
         self.ra.free(reg);
     }
 
-    fn decl_local(&mut self, name: &'a str, reg: Reg, span: Span) -> Result<()> {
+    fn declare_local(&mut self, name: &'a str, reg: Reg, span: Span) {
         let scope = self
             .scopes
             .last_mut()
             .expect("must always have at least one scope");
-        scope.push(Local {
+        scope.push(Symbol::Local {
             name: name.into(),
             span,
             reg,
         });
         self.dbg.locals.push(vm::dbg::Local { span, reg });
-        Ok(())
     }
 
-    fn resolve(&self, name: &str) -> Option<Symbol> {
+    fn declare_function(&mut self, name: impl Into<Cow<'a, str>>, arity: u8, span: Span, id: FnId) {
+        let scope = self
+            .scopes
+            .last_mut()
+            .expect("must always have at least one scope");
+        scope.push(Symbol::Function {
+            name: name.into(),
+            arity,
+            span,
+            id,
+        });
+    }
+
+    fn resolve(&self, name: &str) -> Option<&Symbol<'a>> {
         for scope in self.scopes.iter().rev() {
-            for local in scope {
-                if local.name == name {
-                    return Some(Symbol::Local(local.reg));
+            for symbol in scope.symbols.iter().rev() {
+                if symbol.name() == name {
+                    return Some(symbol);
                 }
             }
         }
@@ -355,10 +524,10 @@ impl<'a> FunctionState<'a> {
         None
     }
 
-    fn resolve_in_scope(&self, name: &str) -> Option<Symbol> {
-        for local in self.scopes.last()? {
-            if local.name == name {
-                return Some(Symbol::Local(local.reg));
+    fn resolve_in_scope(&self, name: &str) -> Option<&Symbol<'a>> {
+        for symbol in self.scopes.last()?.symbols.iter().rev() {
+            if symbol.name() == name {
+                return Some(symbol);
             }
         }
 
@@ -423,23 +592,29 @@ impl<'a> State<'a> {
         f!(self).reg(span)
     }
 
+    fn reg_n(&mut self, n: u8, span: Span) -> Result<RegRange> {
+        f!(self).reg_n(n, span)
+    }
+
     fn rfree(&mut self, reg: Reg) {
         f!(self).rfree(reg);
     }
 
-    fn decl_local(&mut self, name: &'a str, reg: Reg, span: Span) -> Result<()> {
-        f!(self).decl_local(name, reg, span)
+    fn declare_local(&mut self, name: &'a str, reg: Reg, span: Span) {
+        f!(self).declare_local(name, reg, span)
     }
 
-    fn resolve(&self, name: &str, span: Span) -> Result<Symbol> {
-        if let Some(symbol) = f!(&self).resolve(name) {
-            return Ok(symbol);
+    fn resolve(&self, name: &str) -> Option<&Symbol<'a>> {
+        for f in self.func_stack.iter().rev() {
+            if let Some(symbol) = f.resolve(name) {
+                return Some(symbol);
+            }
         }
 
-        error("could not resolve name", span).into()
+        None
     }
 
-    fn resolve_in_scope(&self, name: &str) -> Option<Symbol> {
+    fn resolve_in_scope(&self, name: &str) -> Option<&Symbol<'a>> {
         if let Some(symbol) = f!(&self).resolve_in_scope(name) {
             return Some(symbol);
         }
@@ -451,31 +626,65 @@ impl<'a> State<'a> {
         f!(self).emit(inst, span)
     }
 
-    fn finish_function(&mut self, f: FuncInfo, span: Span) -> Result<FnId> {
-        let id = self.func_table.len();
-        if id > u16::MAX as usize {
-            return error("too many functions", span).into();
-        }
-        let id = unsafe { FnId::new_unchecked(id as u16) };
-
-        self.func_table.push(f);
-
+    /// Declare a function which has not yet been emitted
+    ///
+    /// This assign it an ID and declares a symbol with its name
+    fn declare_function(
+        &mut self,
+        name: impl Into<Cow<'a, str>>,
+        arity: u8,
+        span: Span,
+    ) -> Result<FnId> {
+        let name = name.into();
+        let id = self.func_table.reserve(name.clone(), span)?;
+        f!(self).declare_function(name, arity, span, id);
         Ok(id)
+    }
+
+    /// Define an function once that it's been emitted
+    fn define_function(&mut self, id: FnId, f: FuncInfo) {
+        self.func_table.define(id, f);
     }
 }
 
-enum Symbol {
-    Local(Reg),
+#[repr(align(16))]
+enum Symbol<'a> {
+    Local {
+        name: Cow<'a, str>,
+        span: Span,
+        reg: Reg,
+    },
+    Function {
+        name: Cow<'a, str>,
+        arity: u8,
+        span: Span,
+        id: FnId,
+    },
+}
+
+impl<'a> Symbol<'a> {
+    fn name(&self) -> &str {
+        match self {
+            Symbol::Local { name, span, reg } => name.as_ref(),
+            Symbol::Function {
+                name,
+                arity,
+                span,
+                id,
+            } => name.as_ref(),
+        }
+    }
 }
 
 fn emit_func<'a>(
     m: &mut State<'a>,
+    id: FnId,
     name: Cow<'a, str>,
     span: Span,
     params: NodeList<'a, Ident>,
     param_spans: &'a [Span],
     body: NodeList<'a, Stmt>,
-) -> Result<FnId> {
+) -> Result<FuncInfo> {
     if params.len() > 100 {
         return error(
             "too many parameters, maximum is 100",
@@ -494,7 +703,7 @@ fn emit_func<'a>(
         let ret_reg = m.reg(span)?;
         for (param, &span) in params.iter().zip(param_spans.iter()) {
             let dst = m.reg(span)?;
-            m.decl_local(param.get(), dst, span)?;
+            m.declare_local(param.get(), dst, span);
         }
 
         let _ = emit_stmt_list_with_tail(m, body, Some(ret_reg).into())?;
@@ -504,7 +713,7 @@ fn emit_func<'a>(
     }
     let f = m.func_stack.pop().expect("function stack is empty");
 
-    let f = FuncInfo::new(
+    Ok(FuncInfo::new(
         f.name.into_owned(),
         params.len() as u8,
         f.ra.num,
@@ -514,11 +723,7 @@ fn emit_func<'a>(
             spans: f.dbg.spans.into_iter().collect(),
             locals: f.dbg.locals.into_iter().collect(),
         },
-    );
-
-    let id = m.finish_function(f, span)?;
-
-    Ok(id)
+    ))
 }
 
 #[derive(Clone, Copy)]
@@ -545,6 +750,8 @@ impl From<MaybeReg> for Option<Reg> {
     }
 }
 
+const ZERO_REG: Reg = unsafe { Reg::new_unchecked(0) };
+
 fn emit_stmt_list_with_tail<'a>(
     m: &mut State<'a>,
     list: NodeList<'a, Stmt>,
@@ -555,9 +762,7 @@ fn emit_stmt_list_with_tail<'a>(
         _ => (list, None),
     };
 
-    for stmt in stmt_list {
-        emit_stmt(m, stmt)?;
-    }
+    emit_stmt_list(m, stmt_list)?;
 
     match (tail, dst.inner()) {
         (None, None) => Ok(NO_REG),
@@ -577,6 +782,41 @@ fn emit_stmt_list_with_tail<'a>(
     }
 }
 
+fn emit_stmt_list<'a>(m: &mut State<'a>, list: NodeList<'a, Stmt>) -> Result<()> {
+    // 1. declare all functions in the stmt list
+    let mut undefined_functions = vec![in m.buf];
+    for stmt in list {
+        if let ast::StmtKind::FuncDecl(node) = stmt.kind() {
+            let id = m.declare_function(
+                node.name().get(),
+                node.params().len() as u8,
+                node.name_span(),
+            )?;
+            undefined_functions.push(id);
+        }
+    }
+
+    // undefined functions needs to be in reverse order of declaration
+    undefined_functions.reverse();
+
+    f!(m)
+        .scopes
+        .last_mut()
+        .expect("some scope")
+        .undefined_functions = undefined_functions;
+
+    // 2. then process the stmt list
+    // as the stmt list is traversed, we come across `FuncDecl` again,
+    // at which point we _define_ the given function.
+    // to get its id, we `pop` from the `undefined_functions` list,
+    // because we are guaranteed to process them in the same order.
+    for stmt in list {
+        emit_stmt(m, stmt)?;
+    }
+
+    Ok(())
+}
+
 fn emit_stmt<'a>(m: &mut State<'a>, stmt: Node<'a, Stmt>) -> Result<()> {
     match stmt.kind() {
         ast::StmtKind::Var(node) => emit_stmt_var(m, node)?,
@@ -592,12 +832,12 @@ fn emit_stmt<'a>(m: &mut State<'a>, stmt: Node<'a, Stmt>) -> Result<()> {
 
 fn emit_stmt_var<'a>(m: &mut State<'a>, var: Node<'a, ast::Var>) -> Result<()> {
     let (redeclaration, dst) = match m.resolve_in_scope(var.name().get()) {
-        Some(Symbol::Local(reg)) => (true, reg),
+        Some(Symbol::Local { reg, .. }) => (true, *reg),
         _ => (false, m.reg(var.name_span())?),
     };
     emit_expr_into(m, var.value(), var.value_span(), dst)?;
     if !redeclaration {
-        m.decl_local(var.name().get(), dst, var.name_span())?;
+        m.declare_local(var.name().get(), dst, var.name_span());
     }
 
     Ok(())
@@ -606,11 +846,7 @@ fn emit_stmt_var<'a>(m: &mut State<'a>, var: Node<'a, ast::Var>) -> Result<()> {
 fn emit_stmt_loop<'a>(m: &mut State<'a>, loop_: Node<'a, ast::Loop>) -> Result<()> {
     let prev_loop = m.begin_loop();
     m.begin_scope();
-
-    for stmt in loop_.body() {
-        emit_stmt(m, stmt)?;
-    }
-
+    emit_stmt_list(m, loop_.body())?;
     m.end_scope();
 
     // unconditional jump back to start
@@ -630,7 +866,27 @@ fn emit_stmt_loop<'a>(m: &mut State<'a>, loop_: Node<'a, ast::Loop>) -> Result<(
 }
 
 fn emit_stmt_func<'a>(m: &mut State<'a>, func: Node<'a, ast::FuncDecl>) -> Result<()> {
-    todo!()
+    let id = f!(m)
+        .scopes
+        .last_mut()
+        .expect("some scope")
+        .undefined_functions
+        .pop()
+        .expect("some function");
+
+    let f = emit_func(
+        m,
+        id,
+        func.name().get().into(),
+        func.name_span(),
+        func.params(),
+        func.params_spans(),
+        func.body().body(),
+    )?;
+
+    m.define_function(id, f);
+
+    Ok(())
 }
 
 fn emit_expr<'a>(
@@ -653,7 +909,7 @@ fn emit_expr<'a>(
         ast::ExprKind::SetField(node) => todo!(),
         ast::ExprKind::GetIndex(node) => todo!(),
         ast::ExprKind::SetIndex(node) => todo!(),
-        ast::ExprKind::Call(node) => todo!(),
+        ast::ExprKind::Call(node) => emit_expr_call(m, node, span, dst),
         ast::ExprKind::CallObject(node) => todo!(),
         ast::ExprKind::Infix(node) => todo!(),
         ast::ExprKind::Prefix(node) => todo!(),
@@ -742,11 +998,15 @@ fn emit_expr_get_var<'a>(
     dst: MaybeReg,
 ) -> Result<MaybeReg> {
     // variable must exist at this point
-    let reg = match m.resolve(get.name().get(), get.name_span())? {
-        Symbol::Local(reg) => reg,
-    };
-
-    Ok(MaybeReg(Some(reg)))
+    match m
+        .resolve(get.name().get())
+        .ok_or_else(|| error("could not resolve name", get.name_span()))?
+    {
+        Symbol::Local { reg, .. } => Ok(MaybeReg(Some(*reg))),
+        Symbol::Function { id, .. } => {
+            todo!("function to variable")
+        }
+    }
 }
 
 fn emit_expr_set_var<'a>(
@@ -756,15 +1016,155 @@ fn emit_expr_set_var<'a>(
     dst: MaybeReg,
 ) -> Result<MaybeReg> {
     // variable must exist at this point
-    match m.resolve(set.base().name().get(), set.base().name_span())? {
+    match m
+        .resolve(set.base().name().get())
+        .ok_or_else(|| error("could not resolve name", set.base().name_span()))?
+    {
         // when adding other symbols, remember to error out here,
         // only local variables may be assigned to
-        Symbol::Local(dst) => {
-            emit_expr_into(m, set.value(), span, dst)?;
+        Symbol::Local { reg: dst, .. } => {
+            emit_expr_into(m, set.value(), span, *dst)?;
         }
+        Symbol::Function { .. } => return error("cannot assign to function", span).into(),
     };
 
     Ok(NO_REG)
+}
+
+fn emit_expr_call<'a>(
+    m: &mut State<'a>,
+    call: Node<'a, ast::Call>,
+    span: Span,
+    dst: MaybeReg,
+) -> Result<MaybeReg> {
+    enum Base {
+        NeedsMov { base: Reg, to: Reg },
+        InPlace(Reg),
+        Unused(Reg),
+    }
+
+    impl Base {
+        /// register to write to
+        fn dst(&self) -> Reg {
+            match self {
+                Self::NeedsMov { base, to } => *base,
+                Self::InPlace(reg) => *reg,
+                Self::Unused(reg) => *reg,
+            }
+        }
+
+        /// register where return value is placed
+        fn out(&self) -> Reg {
+            match self {
+                Base::NeedsMov { base, to } => *to,
+                Base::InPlace(reg) => *reg,
+                Base::Unused(reg) => *reg,
+            }
+        }
+    }
+
+    // prepare registers
+    let (base, args, reset) = if call.args().is_empty() {
+        match dst.inner() {
+            // argument-less call; can be used directly no matter where it is
+            Some(reg) => (Base::InPlace(reg), RegRange::empty(), None),
+
+            // argument-less call with unused value, so we didn't receive
+            // a register. allocate for callee/ret
+            None => {
+                let reset = f!(m).ra.current;
+                (
+                    Base::Unused(m.reg(call.callee_span())?),
+                    RegRange::empty(),
+                    Some(reset),
+                )
+            }
+        }
+    } else {
+        match dst.inner() {
+            // NOTE: num of args is `1..=100`.
+            Some(base) => {
+                if f!(m).ra.is_at_top(base) {
+                    // can be used directly; allocate args above it.
+                    let reset = f!(m).ra.current;
+                    let args = m.reg_n(call.args().len() as u8, span)?;
+                    (Base::InPlace(base), args, Some(reset))
+                } else {
+                    // cannot be used directly. we have to allocate including dst,
+                    // and then emit a mov after the call.
+                    let reset = f!(m).ra.current;
+                    (
+                        Base::NeedsMov {
+                            base: m.reg(span)?,
+                            to: base,
+                        },
+                        m.reg_n(call.args().len() as u8, span)?,
+                        Some(reset),
+                    )
+                }
+            }
+
+            None => {
+                // unused value. allocate for callee/ret and args
+                let reset = f!(m).ra.current;
+                (
+                    Base::Unused(m.reg(span)?),
+                    m.reg_n(call.args().len() as u8, span)?,
+                    Some(reset),
+                )
+            }
+        }
+    };
+
+    // TODO: specialize "method" calls (get prop -> call in a single instruction)
+    // ast::ExprKind::GetField(node) => todo!(),
+    if let ast::ExprKind::GetVar(node) = call.callee().kind()
+        && let Some(Symbol::Function { id, arity, .. }) = m.resolve(node.name().get())
+    {
+        // calling a function declaration directly - this is definitely a function
+        // we can check arity right here and then the VM doesn't have to type check
+        // OR arity check anymore
+
+        let id = *id;
+        let arity = *arity;
+        let nargs = call.args().len() as u8;
+        if nargs != arity {
+            return error(
+                format!("invalid number of arguments, expected {arity} but got {nargs}"),
+                span,
+            )
+            .into();
+        }
+
+        for ((reg, value), span) in args.into_iter().zip(call.args()).zip(call.args_spans()) {
+            emit_expr_into(m, value, *span, reg)?;
+        }
+
+        m.emit(asm::fastcall(base.dst(), id), span);
+    } else {
+        // maybe callable? only VM can know for sure
+
+        let nargs = call.args().len() as u8;
+        emit_expr_into(m, call.callee(), call.callee_span(), base.dst())?;
+        for ((reg, value), span) in args.into_iter().zip(call.args()).zip(call.args_spans()) {
+            emit_expr_into(m, value, *span, reg)?;
+        }
+
+        m.emit(
+            asm::call(base.dst(), unsafe { Imm8::new_unchecked(nargs) }),
+            span,
+        );
+    }
+
+    if let Base::NeedsMov { base, to } = &base {
+        m.emit(asm::mov(*to, *base), span);
+    }
+
+    if let Some(reset) = reset {
+        f!(m).ra.reset_to(reset);
+    }
+
+    Ok(MaybeReg(Some(base.out())))
 }
 
 enum IntExpr<'a> {

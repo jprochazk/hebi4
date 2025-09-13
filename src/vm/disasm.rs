@@ -19,6 +19,7 @@ impl<'a> std::fmt::Display for Disasm<'a> {
         for func in functions {
             std::fmt::Display::fmt(
                 &DisasmFunc {
+                    chunk: self.chunk,
                     func,
                     src: self.src,
                 },
@@ -30,6 +31,7 @@ impl<'a> std::fmt::Display for Disasm<'a> {
 }
 
 pub struct DisasmFunc<'a> {
+    chunk: &'a Chunk,
     func: &'a FuncInfo,
     src: &'a str,
 }
@@ -45,6 +47,7 @@ impl<'a> std::fmt::Display for DisasmFunc<'a> {
             dbg,
         } = &self.func;
 
+        let chunk = self.chunk;
         let src = self.src;
         let dbg = dbg;
         let code = &code[..];
@@ -129,8 +132,11 @@ impl<'a> std::fmt::Display for DisasmFunc<'a> {
                 I::Divnv { dst, lhs, rhs } => todo!(),
                 I::Unm { dst, rhs, _c } => todo!(),
                 I::Not { dst, rhs, _c } => todo!(),
-                I::Call { dst, func, args } => todo!(),
-                I::Fastcall { dst, id } => todo!(),
+                I::Call { dst, args, _c } => writeln!(f, "call {dst}, {args}   ; dyn")?,
+                I::Fastcall { dst, id } => {
+                    let name = chunk.functions.get(id.zx()).unwrap().name();
+                    writeln!(f, "call {dst}, {id}   ; {id}={name}")?
+                }
                 I::Ret { _a, _b, _c } => writeln!(f, "ret")?,
                 I::Stop { _a, _b, _c } => writeln!(f, "stop")?,
                 I::Trap { _a, _b, _c } => writeln!(f, "trap")?,

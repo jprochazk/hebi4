@@ -1,0 +1,8 @@
+---
+source: src/codegen/tests.rs
+expression: snapshot
+---
+ERROR
+invalid number of arguments, expected 3 but got 1
+12 |  f(0)
+   |   ^^^

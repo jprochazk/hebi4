@@ -187,6 +187,10 @@ fn parse_stmt_func_decl(p: &mut State, buf: &Bump) -> Result<Spanned<Stmt>> {
     let body = bare.body;
     let params = bare.params.as_slice();
 
+    if params.len() > 100 {
+        return error("too many parameters, maximum is 100", name.span).into();
+    }
+
     Ok(Spanned::new(FuncDecl { name, body, params }.pack(&mut p.ast), bare.span).map_into())
 }
 
@@ -621,6 +625,14 @@ fn parse_expr_call(p: &mut State, buf: &Bump, callee: Spanned<Expr>) -> Result<S
 
     let args = bracketed_list(p, buf, Brackets::Paren, parse_expr)?;
     let args = args.as_slice();
+
+    if args.len() > 100 {
+        return error(
+            "too many arguments, maximum is 100",
+            node.start..p.span().end,
+        )
+        .into();
+    }
 
     Ok(p.close(node, Call { callee, args }).map_into())
 }

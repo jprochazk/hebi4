@@ -90,6 +90,7 @@ impl Chunk {
 /// Stores the actual code and associated constants generated
 /// by the compiler.
 ///
+#[must_use]
 pub struct FuncInfo {
     name: Cow<'static, str>,
     nparams: u8,
@@ -126,6 +127,11 @@ impl FuncInfo {
     #[inline]
     pub fn name(&self) -> &str {
         self.name.as_ref()
+    }
+
+    #[inline]
+    pub fn arity(&self) -> u8 {
+        self.nparams
     }
 }
 

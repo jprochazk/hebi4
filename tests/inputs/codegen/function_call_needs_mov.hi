@@ -1,0 +1,10 @@
+fn f(v) do end
+
+var a = 0
+var b = 1
+
+# dst is `r1`, and arg must go into `r2`,
+# but `r2` is already taken, so we have
+# to allocate including `dst` and then `mov`.
+a = f(1)
+

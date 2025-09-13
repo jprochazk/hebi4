@@ -1,0 +1,4 @@
+# compiler can't know what function `c` is, it may not even
+# be a function at all. so it emits a "dyn" call which performs
+# type/arity checking at runtime.
+fn f(c) do c() end

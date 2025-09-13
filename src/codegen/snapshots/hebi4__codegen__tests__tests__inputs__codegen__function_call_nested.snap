@@ -1,0 +1,23 @@
+---
+source: src/codegen/tests.rs
+expression: snapshot
+---
+OK
+.fn @main
+  params 0
+  stack 4
+  .code
+  0  lsmi r3, 0
+  1  call r2, fn1   ; fn1=f
+  2  call r1, fn1   ; fn1=f
+  3  call r0, fn1   ; fn1=f
+  4  ret
+
+.fn f
+  params 1
+  stack 2
+  .locals
+    v = r1
+  .code
+  0  lnil r0
+  1  ret
