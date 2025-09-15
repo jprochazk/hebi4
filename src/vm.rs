@@ -204,6 +204,14 @@ impl FuncInfoPtr {
     unsafe fn nstack(self) -> u8 {
         (*self.0).nstack
     }
+
+    #[inline]
+    unsafe fn dbg(self) -> Option<*const dbg::FuncDebugInfo> {
+        match &(*self.0).dbg {
+            Some(dbg) => Some(&raw const **dbg),
+            None => None,
+        }
+    }
 }
 
 impl Sp {
@@ -213,15 +221,33 @@ impl Sp {
     }
 }
 
+trait LpIdx {
+    fn idx(self) -> isize;
+}
+
+impl LpIdx for Lit {
+    #[inline(always)]
+    fn idx(self) -> isize {
+        self.sz()
+    }
+}
+
+impl LpIdx for Lit8 {
+    #[inline(always)]
+    fn idx(self) -> isize {
+        self.sz()
+    }
+}
+
 impl Lp {
     #[inline(always)]
-    pub unsafe fn at(self, r: Lit) -> *const Literal {
-        self.0.offset(r.sz())
+    unsafe fn _at(self, r: isize) -> *const Literal {
+        self.0.offset(r)
     }
 
     #[inline(always)]
-    pub unsafe fn int(self, r: Lit) -> i64 {
-        let Literal::Int(v) = self.at(r).read() else {
+    pub unsafe fn int(self, r: impl LpIdx) -> i64 {
+        let Literal::Int(v) = self._at(r.idx()).read() else {
             core::hint::unreachable_unchecked();
         };
 
@@ -229,8 +255,8 @@ impl Lp {
     }
 
     #[inline(always)]
-    pub unsafe fn float(self, r: Lit) -> f64 {
-        let Literal::Float(v) = self.at(r).read() else {
+    pub unsafe fn float(self, r: impl LpIdx) -> f64 {
+        let Literal::Float(v) = self._at(r.idx()).read() else {
             core::hint::unreachable_unchecked();
         };
 
@@ -353,6 +379,20 @@ impl Ctx {
         let functions = (*chunk).functions.as_ptr().cast::<FuncInfo>();
         FuncInfoPtr(functions.offset(id.sz()))
     }
+
+    #[inline]
+    unsafe fn write_error(self, error: Error) {
+        *(*self.0).error = Some(error);
+    }
+
+    #[inline]
+    unsafe fn get_span(self, ip: Ip) -> Option<Span> {
+        let pc = ip.offset_from_unsigned(self.current_frame().callee().code());
+        match self.current_frame().callee().dbg() {
+            Some(dbg) => Some((*dbg).spans[pc]),
+            None => None,
+        }
+    }
 }
 
 enum VmError {
@@ -425,7 +465,6 @@ static JT: JumpTable = jump_table! {
     fastcall,
     ret,
     stop,
-    trap,
 };
 
 #[derive(Clone, Copy)]
@@ -684,78 +723,329 @@ unsafe fn isnep(args: Isnep, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Contro
     todo!()
 }
 
+trait ArithOp {
+    const NAME: &'static str;
+
+    fn i64(lhs: i64, rhs: i64) -> i64;
+    fn f64(lhs: f64, rhs: f64) -> f64;
+}
+
+macro_rules! arith_op {
+    ($name:ident, $description:literal, $op:tt) => {
+        #[allow(non_camel_case_types)]
+        struct $name;
+        impl ArithOp for $name {
+            const NAME: &'static str = $description;
+
+            #[inline(always)]
+            fn i64(lhs: i64, rhs: i64) -> i64 {
+                lhs $op rhs
+            }
+
+            #[inline(always)]
+            fn f64(lhs: f64, rhs: f64) -> f64 {
+                lhs $op rhs
+            }
+        }
+    };
+}
+
+type ArithResult = Result<(), ()>;
+
+#[inline(always)]
+unsafe fn arith_eval<Op: ArithOp>(
+    dst: *mut ValueRaw,
+    lhs: ValueRaw,
+    rhs: ValueRaw,
+
+    ip: Ip,
+    ctx: Ctx,
+) -> ArithResult {
+    use ValueRaw::*;
+    match (lhs, rhs) {
+        (Int(lhs), Int(rhs)) => {
+            *dst = Int(Op::i64(lhs, rhs));
+            Ok(())
+        }
+        (Float(lhs), Float(rhs)) => {
+            *dst = Float(Op::f64(lhs, rhs));
+            Ok(())
+        }
+        (lhs, rhs) => arith_type_error(lhs, rhs, Op::NAME, ip, ctx),
+    }
+}
+
+#[cold]
+unsafe fn arith_type_error(
+    lhs: ValueRaw,
+    rhs: ValueRaw,
+    op_name: &str,
+    ip: Ip,
+    ctx: Ctx,
+) -> ArithResult {
+    let lhs_ty = lhs.type_name();
+    let rhs_ty = rhs.type_name();
+    let err = format!("failed to {op_name} {lhs_ty} and {rhs_ty}");
+    let span = ctx.get_span(ip).unwrap_or_default();
+    ctx.write_error(error(err, span));
+
+    Err(())
+}
+
+arith_op!(add, "add", +);
+
 #[inline(always)]
 unsafe fn addvv(args: Addvv, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control {
-    todo!()
+    let dst = sp.at(args.dst);
+    let lhs = *sp.at(args.lhs);
+    let rhs = *sp.at(args.rhs);
+
+    if let Err(()) = arith_eval::<add>(dst, lhs, rhs, ip, ctx) {
+        return Control::Error;
+    }
+
+    dispatch_next(jt, sp, lp, ip, ctx)
 }
 
 #[inline(always)]
 unsafe fn addvn(args: Addvn, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control {
-    todo!()
+    let dst = sp.at(args.dst);
+    let lhs = *sp.at(args.lhs);
+    let rhs = ValueRaw::Int(lp.int(args.rhs));
+
+    if let Err(()) = arith_eval::<add>(dst, lhs, rhs, ip, ctx) {
+        return Control::Error;
+    }
+
+    dispatch_next(jt, sp, lp, ip, ctx)
 }
 
 #[inline(always)]
 unsafe fn addnv(args: Addnv, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control {
-    todo!()
+    let dst = sp.at(args.dst);
+    let lhs = ValueRaw::Int(lp.int(args.lhs));
+    let rhs = *sp.at(args.rhs);
+
+    if let Err(()) = arith_eval::<add>(dst, lhs, rhs, ip, ctx) {
+        return Control::Error;
+    }
+
+    dispatch_next(jt, sp, lp, ip, ctx)
 }
+
+arith_op!(sub, "subtract", -);
 
 #[inline(always)]
 unsafe fn subvv(args: Subvv, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control {
-    todo!()
+    let dst = sp.at(args.dst);
+    let lhs = *sp.at(args.lhs);
+    let rhs = *sp.at(args.rhs);
+
+    if let Err(()) = arith_eval::<sub>(dst, lhs, rhs, ip, ctx) {
+        return Control::Error;
+    }
+
+    dispatch_next(jt, sp, lp, ip, ctx)
 }
 
 #[inline(always)]
 unsafe fn subvn(args: Subvn, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control {
-    todo!()
+    let dst = sp.at(args.dst);
+    let lhs = *sp.at(args.lhs);
+    let rhs = ValueRaw::Int(lp.int(args.rhs));
+
+    if let Err(()) = arith_eval::<sub>(dst, lhs, rhs, ip, ctx) {
+        return Control::Error;
+    }
+
+    dispatch_next(jt, sp, lp, ip, ctx)
 }
 
 #[inline(always)]
 unsafe fn subnv(args: Subnv, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control {
-    todo!()
+    let dst = sp.at(args.dst);
+    let lhs = ValueRaw::Int(lp.int(args.lhs));
+    let rhs = *sp.at(args.rhs);
+
+    if let Err(()) = arith_eval::<sub>(dst, lhs, rhs, ip, ctx) {
+        return Control::Error;
+    }
+
+    dispatch_next(jt, sp, lp, ip, ctx)
 }
+
+arith_op!(mul, "multiply", *);
 
 #[inline(always)]
 unsafe fn mulvv(args: Mulvv, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control {
-    todo!()
+    let dst = sp.at(args.dst);
+    let lhs = *sp.at(args.lhs);
+    let rhs = *sp.at(args.rhs);
+
+    if let Err(()) = arith_eval::<mul>(dst, lhs, rhs, ip, ctx) {
+        return Control::Error;
+    }
+
+    dispatch_next(jt, sp, lp, ip, ctx)
 }
 
 #[inline(always)]
 unsafe fn mulvn(args: Mulvn, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control {
-    todo!()
+    let dst = sp.at(args.dst);
+    let lhs = *sp.at(args.lhs);
+    let rhs = ValueRaw::Int(lp.int(args.rhs));
+
+    if let Err(()) = arith_eval::<mul>(dst, lhs, rhs, ip, ctx) {
+        return Control::Error;
+    }
+
+    dispatch_next(jt, sp, lp, ip, ctx)
 }
 
 #[inline(always)]
 unsafe fn mulnv(args: Mulnv, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control {
-    todo!()
+    let dst = sp.at(args.dst);
+    let lhs = ValueRaw::Int(lp.int(args.lhs));
+    let rhs = *sp.at(args.rhs);
+
+    if let Err(()) = arith_eval::<mul>(dst, lhs, rhs, ip, ctx) {
+        return Control::Error;
+    }
+
+    dispatch_next(jt, sp, lp, ip, ctx)
+}
+
+#[inline(always)]
+unsafe fn div_checked(
+    dst: *mut ValueRaw,
+    lhs: ValueRaw,
+    rhs: ValueRaw,
+
+    ip: Ip,
+    ctx: Ctx,
+) -> ArithResult {
+    use ValueRaw::*;
+    match (lhs, rhs) {
+        (Int(lhs), Int(rhs)) => {
+            if rhs == 0 {
+                return int_div_by_zero_error(ip, ctx);
+            }
+
+            *dst = Int(lhs / rhs);
+            Ok(())
+        }
+        (Float(lhs), Float(rhs)) => {
+            // float div by zero = inf
+
+            *dst = Float(lhs / rhs);
+            Ok(())
+        }
+        (lhs, rhs) => div_type_error(lhs, rhs, ip, ctx),
+    }
+}
+
+#[cold]
+unsafe fn int_div_by_zero_error(ip: Ip, ctx: Ctx) -> ArithResult {
+    let err = "integer division by zero";
+    let span = ctx.get_span(ip).unwrap_or_default();
+    ctx.write_error(error(err, span));
+
+    Err(())
+}
+
+#[cold]
+unsafe fn div_type_error(lhs: ValueRaw, rhs: ValueRaw, ip: Ip, ctx: Ctx) -> ArithResult {
+    let lhs_ty = lhs.type_name();
+    let rhs_ty = rhs.type_name();
+    let err = format!("cannot divide {lhs_ty} and {rhs_ty}");
+    let span = ctx.get_span(ip).unwrap_or_default();
+    ctx.write_error(error(err, span));
+
+    Err(())
 }
 
 #[inline(always)]
 unsafe fn divvv(args: Divvv, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control {
-    todo!()
+    let dst = sp.at(args.dst);
+    let lhs = *sp.at(args.lhs);
+    let rhs = *sp.at(args.rhs);
+
+    if let Err(()) = div_checked(dst, lhs, rhs, ip, ctx) {
+        return Control::Error;
+    }
+
+    dispatch_next(jt, sp, lp, ip, ctx)
 }
 
 #[inline(always)]
 unsafe fn divvn(args: Divvn, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control {
-    todo!()
+    let dst = sp.at(args.dst);
+    let lhs = *sp.at(args.lhs);
+    let rhs = ValueRaw::Int(lp.int(args.rhs));
+
+    if let Err(()) = div_checked(dst, lhs, rhs, ip, ctx) {
+        return Control::Error;
+    }
+
+    dispatch_next(jt, sp, lp, ip, ctx)
 }
 
 #[inline(always)]
 unsafe fn divnv(args: Divnv, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control {
-    todo!()
+    let dst = sp.at(args.dst);
+    let lhs = ValueRaw::Int(lp.int(args.lhs));
+    let rhs = *sp.at(args.rhs);
+
+    if let Err(()) = div_checked(dst, lhs, rhs, ip, ctx) {
+        return Control::Error;
+    }
+
+    dispatch_next(jt, sp, lp, ip, ctx)
 }
 
 #[inline(always)]
 unsafe fn unm(args: Unm, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control {
-    todo!()
+    let dst = sp.at(args.dst);
+    let rhs = *sp.at(args.rhs);
+
+    use ValueRaw::*;
+    match rhs {
+        Int(rhs) => {
+            *dst = Int(-rhs);
+        }
+        ValueRaw::Float(rhs) => {
+            *dst = Float(-rhs);
+        }
+
+        _ => {
+            unm_type_error(ip, ctx);
+            return Control::Error;
+        }
+    }
+
+    dispatch_next(jt, sp, lp, ip, ctx)
+}
+
+#[cold]
+unsafe fn unm_type_error(ip: Ip, ctx: Ctx) {
+    let err = "integer division by zero";
+    let span = ctx.get_span(ip).unwrap_or_default();
+    ctx.write_error(error(err, span));
 }
 
 #[inline(always)]
 unsafe fn not(args: Not, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control {
-    todo!()
+    let dst = sp.at(args.dst);
+    let rhs = *sp.at(args.rhs);
+
+    *dst = ValueRaw::Bool(!rhs.coerce_bool());
+
+    dispatch_next(jt, sp, lp, ip, ctx)
 }
 
 #[inline(always)]
 unsafe fn call(args: Call, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control {
+    // need closures before this can be implemented
     todo!()
 }
 
@@ -779,11 +1069,6 @@ unsafe fn ret(args: Ret, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control {
 #[inline(always)]
 unsafe fn stop(args: Stop, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control {
     Control::Yield
-}
-
-#[inline(always)]
-unsafe fn trap(args: Trap, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control {
-    unreachable!();
 }
 
 /// call procedure:

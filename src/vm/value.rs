@@ -56,6 +56,20 @@ impl ValueRaw {
             ValueRaw::UData(gc) => true,
         }
     }
+
+    #[inline]
+    pub(crate) fn type_name(self) -> &'static str {
+        match self {
+            ValueRaw::Nil => "nil",
+            ValueRaw::Bool(_) => "bool",
+            ValueRaw::Int(_) => "int",
+            ValueRaw::Float(_) => "float",
+            ValueRaw::String(gc) => "str",
+            ValueRaw::List(gc) => "list",
+            ValueRaw::Table(gc) => "table",
+            ValueRaw::UData(gc) => "udata",
+        }
+    }
 }
 
 #[repr(align(16))]

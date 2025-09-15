@@ -1,3 +1,5 @@
+use beef::lean::Cow;
+
 use crate::span::Span;
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;
@@ -8,10 +10,10 @@ pub struct Error(Box<ErrorRepr>);
 #[derive(Clone, Debug)]
 struct ErrorRepr {
     span: Span,
-    message: String,
+    message: Cow<'static, str>,
 }
 
-pub fn error(message: impl Into<String>, span: impl Into<Span>) -> Error {
+pub fn error(message: impl Into<Cow<'static, str>>, span: impl Into<Span>) -> Error {
     Error(Box::new(ErrorRepr {
         span: span.into(),
         message: message.into(),

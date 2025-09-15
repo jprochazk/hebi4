@@ -139,7 +139,6 @@ impl<'a> std::fmt::Display for DisasmFunc<'a> {
                 }
                 I::Ret { _a, _b, _c } => writeln!(f, "ret")?,
                 I::Stop { _a, _b, _c } => writeln!(f, "stop")?,
-                I::Trap { _a, _b, _c } => writeln!(f, "trap")?,
             }
         }
         writeln!(f)?;
