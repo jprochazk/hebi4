@@ -1,0 +1,4 @@
+fn a() do 100 end
+fn b() do a() end
+
+b()
