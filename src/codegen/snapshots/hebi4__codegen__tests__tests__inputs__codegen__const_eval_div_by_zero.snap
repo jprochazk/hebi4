@@ -1,0 +1,8 @@
+---
+source: src/codegen/tests.rs
+expression: snapshot
+---
+ERROR
+evaluation would fail: cannot divide by zero
+1 |  1 / 0
+  |  ^^^^^
