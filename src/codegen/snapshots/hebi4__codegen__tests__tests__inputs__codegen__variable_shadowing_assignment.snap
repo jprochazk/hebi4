@@ -12,4 +12,5 @@ OK
   0  lsmi r1, 1
   1  lsmi r1, 2
   2  lsmi r1, 3
-  3  ret
+  3  lnil r0
+  4  ret

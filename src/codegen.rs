@@ -11,7 +11,7 @@ use crate::{
 };
 use bumpalo::{Bump, collections::Vec, vec};
 use hashbrown::HashMap;
-use opcodes::{FnId, Imm8, Imm16, Imm24s, Instruction, Lit, Reg, asm, i24};
+use opcodes::{FnId, Imm8, Imm16, Imm24s, Instruction, Lit, Lit8, Reg, asm, i24};
 use std::borrow::Cow;
 
 use crate::{
@@ -26,6 +26,39 @@ use crate::{
 // - dead code elimination
 //   - mark bb exit (break, return, continue, if),
 //     any emitted code is discarded until the exit label is bound
+
+/*
+
+const eval:
+- `emit_expr` yields `Value` instead of `MaybeReg`
+  - `Value` is either a literal (nil, int, float, etc.),
+    or a "Dyn", meaning a register.
+  - To represent `MaybeReg::None`, use `nil`.
+  - To represent `MaybeReg::Some`, use `Dyn`.
+  - To represent a literal, use the corresponding variant.
+- `emit_expr` dispatches to a sub expression, e.g. `add`:
+  - `emit_expr_add` will `emit_expr` the lhs and rhs
+  - if both lhs and rhs are literals, then return a `Value`
+    with the result of evaluating them
+  - otherwise, materialize the result into `dst` at runtime
+    - one side may still be a literal, in which case it is
+      emitted into the literal pool, and one of the `addvn`/`addnv`
+      instructions are used instead of `addvv`.
+
+ALL expressions are evaluated this way.
+
+combined with dead code elimination, even a somewhat complex expression
+may be totally reduced to nothing, e.g.:
+
+    if 1 + 1 > 2 do "yes" else "no" end
+
+will evaluate to just the constant "no".
+
+TODO?: additionally, track if a variable is written to.
+       if not, then its value may be used as a constant.
+       alternatively, add constants to the language
+
+*/
 
 macro_rules! f {
     (&$m:expr) => {
@@ -44,44 +77,6 @@ macro_rules! f {
 }
 
 const NO_SPAN: Span = Span::empty();
-
-// TODO: for any stmt list, iterate over it twice, and pre-declare all functions
-// in a special table. that table is then used to patch `fastcall` instructions
-// with real function IDs once those IDs are resolved.
-// in order to resolve the ID, the function must be emitted. the patching can
-// be done at the end of every scope, it does not need to wait until all functions
-// have been resolved, because it is impossible to call a function by function id
-// unless it is declared within the current scope stack
-
-/*
-
-# emit_func(main) -> immediately declares `outer`, _then_ emits the body of `main`
-
-# emit_func(outer) -> declares `inner`, emits `outer`
-                   -> does NOT declare `inner_block`! it's not a direct child.
-fn outer() do
-    # emit_func(inner) -> emits `inner`
-    fn inner() do
-        does_not_exist()  # error
-    end
-    do
-        # emit_func(inner_block) -> emits `inner_block`
-        fn inner_block() do end
-
-        # `inner_block` goes out of scope
-    end
-
-    outer()  # ok, recursion
-    inner()  # ok
-    inner_block()  # error
-
-    # `inner` goes out of scope
-end
-
-outer()  # ok
-inner()  # error
-
-*/
 
 pub fn emit(ast: &Ast) -> Result<Chunk> {
     let buf = &Bump::new();
@@ -346,6 +341,11 @@ impl<'a> Literals<'a> {
                 buf,
             ),
         }
+    }
+
+    fn is_next_id_8bit(&self) -> bool {
+        let id = self.flat.len();
+        id <= u8::MAX as usize
     }
 
     fn next_id(flat: &mut Vec<'a, Literal>, span: Span) -> Result<Lit> {
@@ -706,7 +706,8 @@ fn emit_func<'a>(
             m.declare_local(param.get(), dst, span);
         }
 
-        let _ = emit_stmt_list_with_tail(m, body, Some(ret_reg).into())?;
+        let ret_val = emit_stmt_list_with_tail_eval(m, body, Some(ret_reg).into())?;
+        emit_value_into(m, ret_val, ret_reg)?;
 
         m.emit(asm::ret(), NO_SPAN);
         m.end_scope();
@@ -725,6 +726,128 @@ fn emit_func<'a>(
         },
     ))
 }
+
+/// A compile-time value.
+///
+/// The code generator uses these to perform limited constant evaluation.
+///
+/// These values are either directly embedded into various instructions,
+/// (e.g. `addvn` embeds a literal number in `n`), or materialized by
+/// emitting a load instruction.
+///
+/// If the value is a constant, then no code to produce it at runtime
+/// has been emitted yet.
+#[derive(Clone, Copy)]
+struct Value<'a> {
+    kind: ValueKind<'a>,
+    span: Span,
+}
+
+#[derive(Clone, Copy)]
+enum ValueKind<'a> {
+    /// `nil`
+    Nil,
+
+    /// `true` or `false`
+    Bool(bool),
+
+    /// Signed 64-bit integer
+    Int(i64),
+
+    /// 64-bit floating-point number
+    ///
+    /// Cannot be `NaN`.
+    Float(f64n),
+
+    /// Constant string
+    Str(&'a str),
+
+    /// Value which can only be known at runtime,
+    /// which will be stored in the given register.
+    Dynamic(Reg),
+}
+
+impl<'a> Value<'a> {
+    fn type_name(self) -> &'static str {
+        match self.kind {
+            ValueKind::Nil => "nil",
+            ValueKind::Bool(_) => "bool",
+            ValueKind::Int(_) => "int",
+            ValueKind::Float(_) => "float",
+            ValueKind::Str(_) => "str",
+            ValueKind::Dynamic(_) => "unknown",
+        }
+    }
+
+    fn is_const(self) -> bool {
+        match self.kind {
+            ValueKind::Nil
+            | ValueKind::Bool(_)
+            | ValueKind::Int(_)
+            | ValueKind::Float(_)
+            | ValueKind::Str(_) => true,
+            ValueKind::Dynamic(_) => false,
+        }
+    }
+
+    #[inline]
+    fn nil(span: Span) -> Self {
+        Self {
+            kind: ValueKind::Nil,
+            span,
+        }
+    }
+
+    #[inline]
+    fn bool(v: bool, span: Span) -> Self {
+        Self {
+            kind: ValueKind::Bool(v),
+            span,
+        }
+    }
+
+    #[inline]
+    fn int(v: i64, span: Span) -> Self {
+        Self {
+            kind: ValueKind::Int(v),
+            span,
+        }
+    }
+
+    #[inline]
+    fn float(v: f64n, span: Span) -> Self {
+        Self {
+            kind: ValueKind::Float(v),
+            span,
+        }
+    }
+
+    #[inline]
+    fn str(v: &'a str, span: Span) -> Self {
+        Self {
+            kind: ValueKind::Str(v),
+            span,
+        }
+    }
+
+    #[inline]
+    fn dynamic(reg: Reg, span: Span) -> Self {
+        Self {
+            kind: ValueKind::Dynamic(reg),
+            span,
+        }
+    }
+}
+
+enum Place {
+    Register(Reg),
+    Literals(Lit8),
+}
+
+const NOTHING: Value<'static> = Value {
+    kind: ValueKind::Nil,
+    span: Span::empty(),
+};
 
 #[derive(Clone, Copy)]
 #[must_use = "unused register"]
@@ -752,11 +875,11 @@ impl From<MaybeReg> for Option<Reg> {
 
 const ZERO_REG: Reg = unsafe { Reg::new_unchecked(0) };
 
-fn emit_stmt_list_with_tail<'a>(
+fn emit_stmt_list_with_tail_eval<'a>(
     m: &mut State<'a>,
     list: NodeList<'a, Stmt>,
     dst: MaybeReg,
-) -> Result<MaybeReg> {
+) -> Result<Value<'a>> {
     let (stmt_list, tail) = match list.last().map(|node| node.kind()) {
         Some(ast::StmtKind::StmtExpr(tail)) => (list.slice(0..list.len() - 1).unwrap(), Some(tail)),
         _ => (list, None),
@@ -764,21 +887,9 @@ fn emit_stmt_list_with_tail<'a>(
 
     emit_stmt_list(m, stmt_list)?;
 
-    match (tail, dst.inner()) {
-        (None, None) => Ok(NO_REG),
-        (None, Some(dst)) => {
-            m.emit(asm::lnil(dst), NO_SPAN);
-
-            Ok(MaybeReg(Some(dst)))
-        }
-        (Some(tail), None) => {
-            let dst = emit_expr(m, tail.inner(), tail.inner_span(), NO_REG)?;
-            Ok(dst)
-        }
-        (Some(tail), Some(dst)) => {
-            emit_expr_into(m, tail.inner(), tail.inner_span(), dst)?;
-            Ok(MaybeReg(Some(dst)))
-        }
+    match tail {
+        None => Ok(NOTHING),
+        Some(tail) => eval_expr(m, tail.inner(), tail.inner_span(), dst),
     }
 }
 
@@ -823,7 +934,7 @@ fn emit_stmt<'a>(m: &mut State<'a>, stmt: Node<'a, Stmt>) -> Result<()> {
         ast::StmtKind::Loop(node) => emit_stmt_loop(m, node)?,
         ast::StmtKind::FuncDecl(node) => emit_stmt_func(m, node)?,
         ast::StmtKind::StmtExpr(node) => {
-            let _ = emit_expr(m, node.inner(), node.inner_span(), NO_REG)?;
+            let _ = eval_expr(m, node.inner(), node.inner_span(), NO_REG)?;
         }
     }
 
@@ -889,58 +1000,56 @@ fn emit_stmt_func<'a>(m: &mut State<'a>, func: Node<'a, ast::FuncDecl>) -> Resul
     Ok(())
 }
 
-fn emit_expr<'a>(
+fn eval_expr<'a>(
     m: &mut State<'a>,
     expr: Node<'a, Expr>,
     span: Span,
     dst: MaybeReg,
-) -> Result<MaybeReg> {
+) -> Result<Value<'a>> {
     match expr.kind() {
         ast::ExprKind::Return(node) => todo!(),
-        ast::ExprKind::Break(node) => emit_expr_break(m, node, span, dst),
-        ast::ExprKind::Continue(node) => emit_expr_continue(m, node, span, dst),
+        ast::ExprKind::Break(node) => eval_expr_break(m, node, span, dst),
+        ast::ExprKind::Continue(node) => eval_expr_continue(m, node, span, dst),
         ast::ExprKind::IfSimple(node) => todo!(),
         ast::ExprKind::IfMulti(node) => todo!(),
-        ast::ExprKind::Block(node) => emit_expr_block(m, node, span, dst),
+        ast::ExprKind::Block(node) => eval_expr_block(m, node, span, dst),
         ast::ExprKind::FuncAnon(node) => todo!(),
         ast::ExprKind::GetVar(node) => emit_expr_get_var(m, node, span, dst),
-        ast::ExprKind::SetVar(node) => emit_expr_set_var(m, node, span, dst),
+        ast::ExprKind::SetVar(node) => {
+            emit_expr_set_var(m, node, span, dst)?;
+            Ok(NOTHING)
+        }
         ast::ExprKind::GetField(node) => todo!(),
         ast::ExprKind::SetField(node) => todo!(),
         ast::ExprKind::GetIndex(node) => todo!(),
         ast::ExprKind::SetIndex(node) => todo!(),
         ast::ExprKind::Call(node) => emit_expr_call(m, node, span, dst),
         ast::ExprKind::CallObject(node) => todo!(),
-        ast::ExprKind::Infix(node) => todo!(),
-        ast::ExprKind::Prefix(node) => todo!(),
+        ast::ExprKind::Infix(node) => eval_expr_infix(m, node, span, dst),
+        ast::ExprKind::Prefix(node) => eval_expr_prefix(m, node, span, dst),
         ast::ExprKind::Array(node) => todo!(),
         ast::ExprKind::Object(node) => todo!(),
-        ast::ExprKind::Int32(node) => emit_expr_int(m, IntExpr::I32(node), span, dst),
-        ast::ExprKind::Int64(node) => emit_expr_int(m, IntExpr::I64(node), span, dst),
-        ast::ExprKind::Float32(node) => emit_expr_float(m, FloatExpr::F32(node), span, dst),
-        ast::ExprKind::Float64(node) => emit_expr_float(m, FloatExpr::F64(node), span, dst),
-        ast::ExprKind::Bool(node) => emit_expr_bool(m, node, span, dst),
-        ast::ExprKind::Str(node) => emit_expr_str(m, node, span, dst),
-        ast::ExprKind::Nil(node) => emit_expr_nil(m, node, span, dst),
+        ast::ExprKind::Int32(node) => Ok(eval_expr_int(m, IntExpr::I32(node), span)),
+        ast::ExprKind::Int64(node) => Ok(eval_expr_int(m, IntExpr::I64(node), span)),
+        ast::ExprKind::Float32(node) => Ok(eval_expr_float(m, FloatExpr::F32(node), span)),
+        ast::ExprKind::Float64(node) => Ok(eval_expr_float(m, FloatExpr::F64(node), span)),
+        ast::ExprKind::Bool(node) => Ok(eval_expr_bool(m, node, span)),
+        ast::ExprKind::Str(node) => Ok(eval_expr_str(m, node, span)),
+        ast::ExprKind::Nil(node) => Ok(eval_expr_nil(m, node, span)),
     }
 }
 
 fn emit_expr_into<'a>(m: &mut State<'a>, expr: Node<'a, Expr>, span: Span, dst: Reg) -> Result<()> {
-    if let Some(src) = emit_expr(m, expr, span, Some(dst).into())?.inner() {
-        if src.get() != dst.get() {
-            m.emit(asm::mov(dst, src), span);
-        }
-    }
-
-    Ok(())
+    let val = eval_expr(m, expr, span, Some(dst).into())?;
+    emit_value_into(m, val, dst)
 }
 
-fn emit_expr_break<'a>(
+fn eval_expr_break<'a>(
     m: &mut State<'a>,
     brk: Node<'a, ast::Break>,
     span: Span,
     dst: MaybeReg,
-) -> Result<MaybeReg> {
+) -> Result<Value<'a>> {
     let f = f!(m);
     let Some(mut loop_) = f.loop_.take() else {
         return error("cannot use `break` outside of loop", span).into();
@@ -955,15 +1064,15 @@ fn emit_expr_break<'a>(
 
     f.loop_ = Some(loop_);
 
-    Ok(NO_REG)
+    Ok(NOTHING)
 }
 
-fn emit_expr_continue<'a>(
+fn eval_expr_continue<'a>(
     m: &mut State<'a>,
     brk: Node<'a, ast::Continue>,
     span: Span,
     dst: MaybeReg,
-) -> Result<MaybeReg> {
+) -> Result<Value<'a>> {
     let Some(loop_) = f!(m).loop_.take() else {
         return error("cannot use `continue` outside of loop", span).into();
     };
@@ -976,17 +1085,17 @@ fn emit_expr_continue<'a>(
 
     f!(m).loop_ = Some(loop_);
 
-    Ok(NO_REG)
+    Ok(NOTHING)
 }
 
-fn emit_expr_block<'a>(
+fn eval_expr_block<'a>(
     m: &mut State<'a>,
     block: Node<'a, ast::Block>,
     span: Span,
     dst: MaybeReg,
-) -> Result<MaybeReg> {
+) -> Result<Value<'a>> {
     m.begin_scope();
-    let dst = emit_stmt_list_with_tail(m, block.body(), dst)?;
+    let dst = emit_stmt_list_with_tail_eval(m, block.body(), dst)?;
     m.end_scope();
     Ok(dst)
 }
@@ -996,13 +1105,13 @@ fn emit_expr_get_var<'a>(
     get: Node<'a, ast::GetVar>,
     span: Span,
     dst: MaybeReg,
-) -> Result<MaybeReg> {
+) -> Result<Value<'a>> {
     // variable must exist at this point
     match m
         .resolve(get.name().get())
         .ok_or_else(|| error("could not resolve name", get.name_span()))?
     {
-        Symbol::Local { reg, .. } => Ok(MaybeReg(Some(*reg))),
+        Symbol::Local { reg, .. } => Ok(Value::dynamic(*reg, get.name_span())),
         Symbol::Function { id, .. } => {
             todo!("function to variable")
         }
@@ -1014,7 +1123,7 @@ fn emit_expr_set_var<'a>(
     set: Node<'a, ast::SetVar>,
     span: Span,
     dst: MaybeReg,
-) -> Result<MaybeReg> {
+) -> Result<()> {
     // variable must exist at this point
     match m
         .resolve(set.base().name().get())
@@ -1028,7 +1137,7 @@ fn emit_expr_set_var<'a>(
         Symbol::Function { .. } => return error("cannot assign to function", span).into(),
     };
 
-    Ok(NO_REG)
+    Ok(())
 }
 
 fn emit_expr_call<'a>(
@@ -1036,7 +1145,7 @@ fn emit_expr_call<'a>(
     call: Node<'a, ast::Call>,
     span: Span,
     dst: MaybeReg,
-) -> Result<MaybeReg> {
+) -> Result<Value<'a>> {
     enum Base {
         NeedsMov { base: Reg, to: Reg },
         InPlace(Reg),
@@ -1164,7 +1273,162 @@ fn emit_expr_call<'a>(
         f!(m).ra.reset_to(reset);
     }
 
-    Ok(MaybeReg(Some(base.out())))
+    Ok(Value::dynamic(base.out(), span))
+}
+
+fn eval_expr_infix<'a>(
+    m: &mut State<'a>,
+    node: Node<'a, ast::Infix>,
+    span: Span,
+    dst: MaybeReg,
+) -> Result<Value<'a>> {
+    if node.op().is_logical() {
+        return emit_expr_infix_logical(m, node, span, dst);
+    }
+
+    if node.op().is_comparison() {
+        return emit_expr_infix_comparison(m, node, span, dst);
+    }
+
+    // in case the return value is unused, we should still
+    // evaluate the entire expression. for that we need an
+    // output register.
+    let (dst, free) = match dst.inner() {
+        Some(dst) => (dst, false),
+        None => (m.reg(node.lhs_span())?, true),
+    };
+
+    // TODO: constant lhs/rhs
+    let lhs = eval_expr(m, node.lhs(), node.lhs_span(), Some(dst).into())?;
+    let rhs_reg = m.reg(node.rhs_span())?;
+    let rhs = eval_expr(m, node.rhs(), node.rhs_span(), Some(rhs_reg).into())?;
+
+    let result = if lhs.is_const() && rhs.is_const() {
+        // both sides are constants, return a constant.
+        use ast::InfixOp as Op;
+        let (iop, fop, desc): (
+            fn(i64, i64) -> Result<i64, &'static str>,
+            fn(f64n, f64n) -> f64n,
+            &'static str,
+        ) = match *node.op() {
+            Op::Add => (|a, b| Ok(a + b), |a, b| a + b, "add"),
+            Op::Sub => (|a, b| Ok(a - b), |a, b| a - b, "subtract"),
+            Op::Mul => (|a, b| Ok(a * b), |a, b| a * b, "multiply"),
+            Op::Div => (
+                |a: i64, b: i64| {
+                    if b == 0 {
+                        Err("evaluation would fail: cannot divide by zero")
+                    } else {
+                        Ok(a / b)
+                    }
+                },
+                |a, b| a / b,
+                "divide",
+            ),
+            op => unreachable!("ICE: invalid op in emit_infix: {op:?}"),
+        };
+
+        use ValueKind as V;
+        match (lhs.kind, rhs.kind) {
+            (V::Int(lhs), V::Int(rhs)) => {
+                Value::int(iop(lhs, rhs).map_err(|err| error(err, span))?, span)
+            }
+            (V::Float(lhs), V::Float(rhs)) => Value::float(fop(lhs, rhs), span),
+            (V::Float(lhs), V::Int(rhs)) => Value::float(fop(lhs, f64n::new(rhs as f64)), span),
+            (V::Int(lhs), V::Float(rhs)) => Value::float(fop(f64n::new(lhs as f64), rhs), span),
+            _ => {
+                return error(
+                    format!(
+                        "evaluation would fail with a type mismatch: cannot {desc} {} and {}",
+                        lhs.type_name(),
+                        rhs.type_name()
+                    ),
+                    span,
+                )
+                .into();
+            }
+        }
+    } else {
+        // One or both sides are runtime-known.
+        //
+        // If a value is runtime-known, it exists in some register.
+        //
+        // If `emit_expr` returns a constant, it will not have used the
+        // register, so we can still use it for the literal.
+
+        let lhs = emit_value_as_operand_or_load(m, lhs, dst)?;
+        let rhs = emit_value_as_operand_or_load(m, rhs, rhs_reg)?;
+
+        use RegOrConst as R;
+        let instruction = match *node.op() {
+            // TODO: other ops
+            ast::InfixOp::Add => match (lhs, rhs) {
+                (R::Reg(lhs), R::Reg(rhs)) => asm::addvv(dst, lhs, rhs),
+                (R::Reg(lhs), R::Const(rhs)) => asm::addvn(dst, lhs, rhs),
+                (R::Const(lhs), R::Reg(rhs)) => asm::addnv(dst, lhs, rhs),
+                _ => unreachable!("ICE: const/const in non-const path"),
+            },
+            ast::InfixOp::Sub => match (lhs, rhs) {
+                (R::Reg(lhs), R::Reg(rhs)) => asm::subvv(dst, lhs, rhs),
+                (R::Reg(lhs), R::Const(rhs)) => asm::subvn(dst, lhs, rhs),
+                (R::Const(lhs), R::Reg(rhs)) => asm::subnv(dst, lhs, rhs),
+                _ => unreachable!("ICE: const/const in non-const path"),
+            },
+            ast::InfixOp::Mul => match (lhs, rhs) {
+                (R::Reg(lhs), R::Reg(rhs)) => asm::mulvv(dst, lhs, rhs),
+                (R::Reg(lhs), R::Const(rhs)) => asm::mulvn(dst, lhs, rhs),
+                (R::Const(lhs), R::Reg(rhs)) => asm::mulnv(dst, lhs, rhs),
+                _ => unreachable!("ICE: const/const in non-const path"),
+            },
+            ast::InfixOp::Div => match (lhs, rhs) {
+                (R::Reg(lhs), R::Reg(rhs)) => asm::divvv(dst, lhs, rhs),
+                (R::Reg(lhs), R::Const(rhs)) => asm::divvn(dst, lhs, rhs),
+                (R::Const(lhs), R::Reg(rhs)) => asm::divnv(dst, lhs, rhs),
+                _ => unreachable!("ICE: const/const in non-const path"),
+            },
+            op => unreachable!("ICE: invalid op in emit_infix: {op:?}"),
+        };
+
+        m.emit(instruction, span);
+
+        Value::dynamic(dst, span)
+    };
+
+    m.rfree(rhs_reg);
+    // the output register allocated by us is guaranteed to
+    // be unused by the caller, so we shouldn't return it.
+    if free {
+        m.rfree(dst);
+    }
+
+    Ok(result)
+}
+
+fn emit_expr_infix_logical<'a>(
+    m: &mut State<'a>,
+    node: Node<'a, ast::Infix>,
+    span: Span,
+    dst: MaybeReg,
+) -> Result<Value<'a>> {
+    todo!()
+}
+
+fn emit_expr_infix_comparison<'a>(
+    m: &mut State<'a>,
+    node: Node<'a, ast::Infix>,
+    span: Span,
+    dst: MaybeReg,
+) -> Result<Value<'a>> {
+    todo!()
+}
+
+fn eval_expr_prefix<'a>(
+    m: &mut State<'a>,
+    node: Node<'a, ast::Prefix>,
+    span: Span,
+    dst: MaybeReg,
+) -> Result<Value<'a>> {
+    todo!()
 }
 
 enum IntExpr<'a> {
@@ -1181,20 +1445,24 @@ impl<'a> IntExpr<'a> {
     }
 }
 
-fn emit_expr_int(m: &mut State, int: IntExpr, span: Span, dst: MaybeReg) -> Result<MaybeReg> {
-    let f = f!(m);
-    let v: i64 = int.value();
-    if let Some(dst) = dst.inner() {
-        if v <= i16::MAX as i64 {
-            let v = unsafe { Imm16::new_unchecked(v as i16) };
-            f.emit(asm::lsmi(dst, v), span);
-        } else {
-            let id = f.literals.i64(v as i64, span)?;
-            f.emit(asm::lint(dst, id), span);
-        }
-    }
+fn eval_expr_int<'a>(m: &mut State<'a>, int: IntExpr<'a>, span: Span) -> Value<'a> {
+    Value::int(int.value(), span)
 
-    Ok(NO_REG)
+    // let f = f!(m);
+    // let v: i64 = int.value();
+    // if let Some(dst) = dst.inner() {
+    //     if v <= i16::MAX as i64 {
+    //         let v = unsafe { Imm16::new_unchecked(v as i16) };
+    //         f.emit(asm::lsmi(dst, v), span);
+    //         Ok(Some(dst).into())
+    //     } else {
+    //         let id = f.literals.i64(v as i64, span)?;
+    //         f.emit(asm::lint(dst, id), span);
+    //         Ok(Some(dst).into())
+    //     }
+    // } else {
+    //     Ok(NO_REG)
+    // }
 }
 
 enum FloatExpr<'a> {
@@ -1211,63 +1479,150 @@ impl<'a> FloatExpr<'a> {
     }
 }
 
-fn emit_expr_float(m: &mut State, float: FloatExpr, span: Span, dst: MaybeReg) -> Result<MaybeReg> {
-    let f = f!(m);
-    let v: f64n = float.value();
-    if let Some(dst) = dst.inner() {
-        let id = f.literals.f64(v, span)?;
-        f.emit(asm::lnum(dst, id), span);
-    }
+fn eval_expr_float<'a>(m: &mut State<'a>, float: FloatExpr<'a>, span: Span) -> Value<'a> {
+    Value::float(float.value(), span)
 
-    Ok(NO_REG)
+    // let f = f!(m);
+    // let v: f64n = float.value();
+    // if let Some(dst) = dst.inner() {
+    //     let id = f.literals.f64(v, span)?;
+    //     f.emit(asm::lnum(dst, id), span);
+    //     Ok(Some(dst).into())
+    // } else {
+    //     Ok(NO_REG)
+    // }
 }
 
-fn emit_expr_bool(
-    m: &mut State,
-    bool: Node<ast::Bool>,
-    span: Span,
-    dst: MaybeReg,
-) -> Result<MaybeReg> {
-    let f = f!(m);
-    let v: bool = *bool.value();
-    if let Some(dst) = dst.inner() {
-        match v {
-            true => f.emit(asm::ltrue(dst), span),
-            false => f.emit(asm::lfalse(dst), span),
+fn eval_expr_bool<'a>(m: &mut State, bool: Node<'a, ast::Bool>, span: Span) -> Value<'a> {
+    Value::bool(*bool.value(), span)
+
+    // let f = f!(m);
+    // let v: bool = *bool.value();
+    // if let Some(dst) = dst.inner() {
+    //     match v {
+    //         true => f.emit(asm::ltrue(dst), span),
+    //         false => f.emit(asm::lfalse(dst), span),
+    //     }
+    //     Ok(Some(dst).into())
+    // } else {
+    //     Ok(NO_REG)
+    // }
+}
+
+fn eval_expr_str<'a>(m: &mut State<'a>, str: Node<'a, ast::Str>, span: Span) -> Value<'a> {
+    Value::str(str.get(), span)
+
+    // let f = f!(m);
+    // let v: &str = str.get();
+    // if let Some(dst) = dst.inner() {
+    //     let id = f.literals.str(v, span)?;
+    //     f.emit(asm::lstr(dst, id), span);
+    //     Ok(Some(dst).into())
+    // } else {
+    //     Ok(NO_REG)
+    // }
+}
+
+fn eval_expr_nil<'a>(m: &mut State<'a>, nil: Node<'a, ast::Nil>, span: Span) -> Value<'a> {
+    Value::nil(span)
+
+    // let f = f!(m);
+    // if let Some(dst) = dst.inner() {
+    //     f.emit(asm::lnil(dst), span);
+    //     Ok(Some(dst).into())
+    // } else {
+    //     Ok(NO_REG)
+    // }
+}
+
+fn emit_value_into<'a>(m: &mut State<'a>, value: Value<'a>, dst: Reg) -> Result<()> {
+    match value.kind {
+        ValueKind::Nil => {
+            m.emit(asm::lnil(dst), value.span);
+        }
+        ValueKind::Bool(v) => match v {
+            true => m.emit(asm::ltrue(dst), value.span),
+            false => m.emit(asm::lfalse(dst), value.span),
+        },
+        ValueKind::Int(v) => {
+            if v <= i16::MAX as i64 {
+                let v = unsafe { Imm16::new_unchecked(v as i16) };
+                m.emit(asm::lsmi(dst, v), value.span);
+            } else {
+                let id = f!(m).literals.i64(v, value.span)?;
+                m.emit(asm::lint(dst, id), value.span);
+            }
+        }
+        ValueKind::Float(v) => {
+            let id = f!(m).literals.f64(v, value.span)?;
+            m.emit(asm::lnum(dst, id), value.span);
+        }
+        ValueKind::Str(v) => {
+            let id = f!(m).literals.str(v, value.span)?;
+            m.emit(asm::lstr(dst, id), value.span);
+        }
+        ValueKind::Dynamic(reg) => {
+            if reg.get() != dst.get() {
+                m.emit(asm::mov(dst, reg), value.span);
+            }
         }
     }
 
-    Ok(NO_REG)
+    Ok(())
 }
 
-fn emit_expr_str(
-    m: &mut State,
-    str: Node<ast::Str>,
-    span: Span,
-    dst: MaybeReg,
-) -> Result<MaybeReg> {
-    let f = f!(m);
-    let v: &str = str.get();
-    if let Some(dst) = dst.inner() {
-        let id = f.literals.str(v, span)?;
-        f.emit(asm::lstr(dst, id), span);
-    }
-
-    Ok(NO_REG)
+enum RegOrConst {
+    Reg(Reg),
+    Const(Lit8),
 }
 
-fn emit_expr_nil(
-    m: &mut State,
-    nil: Node<ast::Nil>,
-    span: Span,
-    dst: MaybeReg,
-) -> Result<MaybeReg> {
-    let f = f!(m);
-    if let Some(dst) = dst.inner() {
-        f.emit(asm::lnil(dst), span);
-    }
+fn emit_value_as_operand_or_load<'a>(
+    m: &mut State<'a>,
+    value: Value<'a>,
+    dst: Reg,
+) -> Result<RegOrConst> {
+    use RegOrConst as R;
+    use ValueKind as V;
 
-    Ok(NO_REG)
+    match value.kind {
+        V::Dynamic(reg) => {
+            // already materialized
+            Ok(R::Reg(reg))
+        }
+        V::Int(v) => {
+            if f!(m).literals.is_next_id_8bit() {
+                // emit it as a literal, use it as operand
+                let id = f!(m).literals.i64(v, value.span)?;
+                Ok(R::Const(unsafe { Lit8::new_unchecked(id.get() as u8) }))
+            } else {
+                // TODO: DEDUP
+                // emit it as a load, use the register
+                if v <= i16::MAX as i64 {
+                    let v = unsafe { Imm16::new_unchecked(v as i16) };
+                    m.emit(asm::lsmi(dst, v), value.span);
+                } else {
+                    let id = f!(m).literals.i64(v, value.span)?;
+                    m.emit(asm::lint(dst, id), value.span);
+                }
+                Ok(R::Reg(dst))
+            }
+        }
+        V::Float(v) => {
+            if f!(m).literals.is_next_id_8bit() {
+                // emit it as a literal, use it as operand
+                let id = f!(m).literals.f64(v, value.span)?;
+                Ok(R::Const(unsafe { Lit8::new_unchecked(id.get() as u8) }))
+            } else {
+                // TODO: dedup
+                // emit it as a load, use the register
+                let id = f!(m).literals.f64(v, value.span)?;
+                m.emit(asm::lnum(dst, id), value.span);
+                Ok(R::Reg(dst))
+            }
+        }
+
+        _ => todo!(),
+    }
 }
 
 #[cfg(test)]

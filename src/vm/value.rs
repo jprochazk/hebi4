@@ -20,6 +20,18 @@ pub enum Literal {
     String(std::string::String),
 }
 
+impl std::fmt::Display for Literal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Literal::Nil => write!(f, "nil"),
+            Literal::Bool(v) => write!(f, "{v}"),
+            Literal::Int(v) => write!(f, "{v}"),
+            Literal::Float(v) => write!(f, "{v:#?}"),
+            Literal::String(v) => write!(f, "{v:?}"),
+        }
+    }
+}
+
 #[derive(Default, Clone, Copy)]
 #[repr(C, u64)]
 pub enum ValueRaw {

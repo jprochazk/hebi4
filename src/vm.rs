@@ -447,6 +447,12 @@ static JT: JumpTable = jump_table! {
     isnen,
     iseqp,
     isnep,
+    isltv,
+    islev,
+    isgtv,
+    isgev,
+    iseqv,
+    isnev,
     addvv,
     addvn,
     addnv,
@@ -720,6 +726,36 @@ unsafe fn iseqp(args: Iseqp, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Contro
 
 #[inline(always)]
 unsafe fn isnep(args: Isnep, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control {
+    todo!()
+}
+
+#[inline(always)]
+unsafe fn isltv(args: Isltv, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control {
+    todo!()
+}
+
+#[inline(always)]
+unsafe fn islev(args: Islev, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control {
+    todo!()
+}
+
+#[inline(always)]
+unsafe fn isgtv(args: Isgtv, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control {
+    todo!()
+}
+
+#[inline(always)]
+unsafe fn isgev(args: Isgev, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control {
+    todo!()
+}
+
+#[inline(always)]
+unsafe fn iseqv(args: Iseqv, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control {
+    todo!()
+}
+
+#[inline(always)]
+unsafe fn isnev(args: Isnev, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control {
     todo!()
 }
 

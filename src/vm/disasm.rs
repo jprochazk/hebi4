@@ -118,26 +118,39 @@ impl<'a> std::fmt::Display for DisasmFunc<'a> {
                 I::Isnen { lhs, rhs } => todo!(),
                 I::Iseqp { lhs, rhs, _c } => todo!(),
                 I::Isnep { lhs, rhs, _c } => todo!(),
-                I::Addvv { dst, lhs, rhs } => todo!(),
-                I::Addvn { dst, lhs, rhs } => todo!(),
-                I::Addnv { dst, lhs, rhs } => todo!(),
-                I::Subvv { dst, lhs, rhs } => todo!(),
-                I::Subvn { dst, lhs, rhs } => todo!(),
-                I::Subnv { dst, lhs, rhs } => todo!(),
-                I::Mulvv { dst, lhs, rhs } => todo!(),
-                I::Mulvn { dst, lhs, rhs } => todo!(),
-                I::Mulnv { dst, lhs, rhs } => todo!(),
-                I::Divvv { dst, lhs, rhs } => todo!(),
-                I::Divvn { dst, lhs, rhs } => todo!(),
-                I::Divnv { dst, lhs, rhs } => todo!(),
+                I::Isltv { dst, lhs, rhs } => todo!(),
+                I::Islev { dst, lhs, rhs } => todo!(),
+                I::Isgtv { dst, lhs, rhs } => todo!(),
+                I::Isgev { dst, lhs, rhs } => todo!(),
+                I::Iseqv { dst, lhs, rhs } => todo!(),
+                I::Isnev { dst, lhs, rhs } => todo!(),
+
+                I::Addvv { dst, lhs, rhs } => writeln!(f, "add {dst}, {lhs}, {rhs}")?,
+                I::Addvn { dst, lhs, rhs } => writeln!(f, "add {dst}, {lhs}, {}", &lit[rhs.zx()])?,
+                I::Addnv { dst, lhs, rhs } => writeln!(f, "add {dst}, {}, {rhs}", &lit[lhs.zx()])?,
+
+                I::Subvv { dst, lhs, rhs } => writeln!(f, "sub {dst}, {lhs}, {rhs}")?,
+                I::Subvn { dst, lhs, rhs } => writeln!(f, "sub {dst}, {lhs}, {}", &lit[rhs.zx()])?,
+                I::Subnv { dst, lhs, rhs } => writeln!(f, "sub {dst}, {}, {rhs}", &lit[lhs.zx()])?,
+
+                I::Mulvv { dst, lhs, rhs } => writeln!(f, "mul {dst}, {lhs}, {rhs}")?,
+                I::Mulvn { dst, lhs, rhs } => writeln!(f, "mul {dst}, {lhs}, {}", &lit[rhs.zx()])?,
+                I::Mulnv { dst, lhs, rhs } => writeln!(f, "mul {dst}, {}, {rhs}", &lit[lhs.zx()])?,
+
+                I::Divvv { dst, lhs, rhs } => writeln!(f, "div {dst}, {lhs}, {rhs}")?,
+                I::Divvn { dst, lhs, rhs } => writeln!(f, "div {dst}, {lhs}, {}", &lit[rhs.zx()])?,
+                I::Divnv { dst, lhs, rhs } => writeln!(f, "div {dst}, {}, {rhs}", &lit[lhs.zx()])?,
+
                 I::Unm { dst, rhs, _c } => todo!(),
                 I::Not { dst, rhs, _c } => todo!(),
+
                 I::Call { dst, args, _c } => writeln!(f, "call {dst}, {args}   ; dyn")?,
                 I::Fastcall { dst, id } => {
                     let name = chunk.functions.get(id.zx()).unwrap().name();
                     writeln!(f, "call {dst}, {id}   ; {id}={name}")?
                 }
                 I::Ret { _a, _b, _c } => writeln!(f, "ret")?,
+
                 I::Stop { _a, _b, _c } => writeln!(f, "stop")?,
             }
         }

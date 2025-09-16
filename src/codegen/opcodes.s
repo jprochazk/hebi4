@@ -138,15 +138,29 @@ iseqp lhs:reg rhs:imm8;
 /* Skip `jmp` if `lhs != rhs` (register, primitive) */
 isnep lhs:reg rhs:imm8;
 
-# Binary instructions
+
+/* `dst = lhs < rhs` (register, register) */
+isltv dst:reg lhs:reg rhs:reg;
+/* `dst = lhs <= rhs` (register, register) */
+islev dst:reg lhs:reg rhs:reg;
+/* `dst = lhs > rhs` (register, register) */
+isgtv dst:reg lhs:reg rhs:reg;
+/* `dst = lhs >= rhs` (register, register) */
+isgev dst:reg lhs:reg rhs:reg;
+/* `dst = lhs == rhs` (register, register) */
+iseqv dst:reg lhs:reg rhs:reg;
+/* `dst = lhs != rhs` (register, register) */
+isnev dst:reg lhs:reg rhs:reg;
+
+# Arithmetic instructions
 #
 # LHS and RHS may be either in a register, or a constant.
 # 
 # Using a constant typically avoids having to execute a few
 # instructions to materialize the value at runtime.
 #
-# When the compiler runs out of 8-bit literal slots, it generates
-# a load instruction of a 16-bit literal slot first.
+# When the compiler runs out of 8-bit literal slots, it falls back
+# to using `vv` variants by emitting a load of the literal first.
 
 /* `dst = lhs + rhs` (register, register) */
 addvv dst:reg lhs:reg rhs:reg;

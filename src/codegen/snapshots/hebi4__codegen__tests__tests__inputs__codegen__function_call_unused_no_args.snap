@@ -13,7 +13,8 @@ OK
   0  lsmi r1, 0
   1  lsmi r2, 1
   2  call r1, fn1   ; fn1=f
-  3  ret
+  3  lnil r0
+  4  ret
 
 .fn f
   params 0

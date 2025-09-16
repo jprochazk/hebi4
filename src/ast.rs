@@ -31,6 +31,42 @@ pub enum InfixOp {
     Mul, Div
 }
 
+impl InfixOp {
+    #[inline]
+    pub fn is_logical(self) -> bool {
+        match self {
+            InfixOp::Or | InfixOp::And => true,
+
+            InfixOp::Eq
+            | InfixOp::Ne
+            | InfixOp::Gt
+            | InfixOp::Ge
+            | InfixOp::Lt
+            | InfixOp::Le
+            | InfixOp::Add
+            | InfixOp::Sub
+            | InfixOp::Mul
+            | InfixOp::Div => false,
+        }
+    }
+
+    #[inline]
+    pub fn is_comparison(self) -> bool {
+        match self {
+            InfixOp::Eq | InfixOp::Ne | InfixOp::Gt | InfixOp::Ge | InfixOp::Lt | InfixOp::Le => {
+                true
+            }
+
+            InfixOp::Or
+            | InfixOp::And
+            | InfixOp::Add
+            | InfixOp::Sub
+            | InfixOp::Mul
+            | InfixOp::Div => false,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum PrefixOp {
@@ -75,6 +111,38 @@ impl std::fmt::Debug for f64n {
     #[inline]
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         std::fmt::Debug::fmt(&self.get(), f)
+    }
+}
+
+impl std::ops::Add<f64n> for f64n {
+    type Output = f64n;
+
+    fn add(self, rhs: f64n) -> Self::Output {
+        f64n::new(self.get() + rhs.get())
+    }
+}
+
+impl std::ops::Sub<f64n> for f64n {
+    type Output = f64n;
+
+    fn sub(self, rhs: f64n) -> Self::Output {
+        f64n::new(self.get() - rhs.get())
+    }
+}
+
+impl std::ops::Mul<f64n> for f64n {
+    type Output = f64n;
+
+    fn mul(self, rhs: f64n) -> Self::Output {
+        f64n::new(self.get() * self.get())
+    }
+}
+
+impl std::ops::Div<f64n> for f64n {
+    type Output = f64n;
+
+    fn div(self, rhs: f64n) -> Self::Output {
+        f64n::new(self.get() / self.get())
     }
 }
 
