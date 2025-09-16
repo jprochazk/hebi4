@@ -771,6 +771,14 @@ unsafe fn arith_eval<Op: ArithOp>(
             *dst = Float(Op::f64(lhs, rhs));
             Ok(())
         }
+        (Float(lhs), Int(rhs)) => {
+            *dst = Float(Op::f64(lhs, rhs as f64));
+            Ok(())
+        }
+        (Int(lhs), Float(rhs)) => {
+            *dst = Float(Op::f64(lhs as f64, rhs));
+            Ok(())
+        }
         (lhs, rhs) => arith_type_error(lhs, rhs, Op::NAME, ip, ctx),
     }
 }
@@ -916,7 +924,7 @@ unsafe fn mulnv(args: Mulnv, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Contro
 }
 
 #[inline(always)]
-unsafe fn div_checked(
+unsafe fn div_eval_checked(
     dst: *mut ValueRaw,
     lhs: ValueRaw,
     rhs: ValueRaw,
@@ -934,10 +942,18 @@ unsafe fn div_checked(
             *dst = Int(lhs / rhs);
             Ok(())
         }
-        (Float(lhs), Float(rhs)) => {
-            // float div by zero = inf
 
+        // float div by zero = inf
+        (Float(lhs), Float(rhs)) => {
             *dst = Float(lhs / rhs);
+            Ok(())
+        }
+        (Float(lhs), Int(rhs)) => {
+            *dst = Float(lhs / (rhs as f64));
+            Ok(())
+        }
+        (Int(lhs), Float(rhs)) => {
+            *dst = Float((lhs as f64) / rhs);
             Ok(())
         }
         (lhs, rhs) => div_type_error(lhs, rhs, ip, ctx),
@@ -970,7 +986,7 @@ unsafe fn divvv(args: Divvv, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Contro
     let lhs = *sp.at(args.lhs);
     let rhs = *sp.at(args.rhs);
 
-    if let Err(()) = div_checked(dst, lhs, rhs, ip, ctx) {
+    if let Err(()) = div_eval_checked(dst, lhs, rhs, ip, ctx) {
         return Control::Error;
     }
 
@@ -983,7 +999,7 @@ unsafe fn divvn(args: Divvn, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Contro
     let lhs = *sp.at(args.lhs);
     let rhs = ValueRaw::Int(lp.int(args.rhs));
 
-    if let Err(()) = div_checked(dst, lhs, rhs, ip, ctx) {
+    if let Err(()) = div_eval_checked(dst, lhs, rhs, ip, ctx) {
         return Control::Error;
     }
 
@@ -996,7 +1012,7 @@ unsafe fn divnv(args: Divnv, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Contro
     let lhs = ValueRaw::Int(lp.int(args.lhs));
     let rhs = *sp.at(args.rhs);
 
-    if let Err(()) = div_checked(dst, lhs, rhs, ip, ctx) {
+    if let Err(()) = div_eval_checked(dst, lhs, rhs, ip, ctx) {
         return Control::Error;
     }
 
