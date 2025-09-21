@@ -415,8 +415,66 @@ struct ForwardLabel<'a> {
 }
 
 impl<'a> ForwardLabel<'a> {
+    fn new(buf: &'a Bump) -> Self {
+        Self {
+            patch_targets: vec![in buf],
+        }
+    }
+
     fn add_target(&mut self, pos: usize) {
         self.patch_targets.push(pos);
+    }
+
+    fn bind(self, f: &mut FunctionState<'a>) -> Result<()> {
+        let pos = f.code.len();
+        let span = *f.dbg.spans.last().unwrap();
+        for target in self.patch_targets {
+            let offset = i24::try_from((pos - target) as isize)
+                .map_err(|_| error("jump offset out of bounds for i24", span))?;
+
+            let span = f.dbg.spans[target];
+            let ins = &mut f.code[target];
+            let Instruction::Jmp { rel } = ins else {
+                return error("invalid label referree", span).into();
+            };
+            *rel = unsafe { Imm24s::new_unchecked(offset) }
+        }
+
+        Ok(())
+    }
+}
+
+struct BasicForwardLabel {
+    patch_target: Option<usize>,
+}
+
+impl BasicForwardLabel {
+    fn new() -> Self {
+        Self { patch_target: None }
+    }
+
+    fn set_target(&mut self, pos: usize) {
+        self.patch_target = Some(pos);
+    }
+
+    fn bind(self, f: &mut FunctionState<'_>) -> Result<()> {
+        let pos = f.code.len();
+        let span = *f.dbg.spans.last().unwrap();
+        let Some(target) = self.patch_target else {
+            unreachable!("ICE: basic forward label bound without patch target");
+        };
+
+        let offset = i24::try_from((pos - target) as isize)
+            .map_err(|_| error("jump offset out of bounds for i24", span))?;
+
+        let span = f.dbg.spans[target];
+        let ins = &mut f.code[target];
+        let Instruction::Jmp { rel } = ins else {
+            return error("invalid label referree", span).into();
+        };
+        *rel = unsafe { Imm24s::new_unchecked(offset) };
+
+        Ok(())
     }
 }
 
@@ -426,6 +484,10 @@ struct BackwardLabel {
 }
 
 impl BackwardLabel {
+    fn bind(f: &mut FunctionState<'_>) -> Self {
+        Self { pos: f.code.len() }
+    }
+
     fn offset(&self, jmp_pos: usize, span: Span) -> Result<Imm24s> {
         let offset = i24::try_from((self.pos as isize) - (jmp_pos as isize))
             .map_err(|_| error("jump offset exceeds u24::MAX", span))?;
@@ -467,15 +529,15 @@ impl<'a> FunctionState<'a> {
     }
 
     fn begin_loop(&mut self, buf: &'a Bump) -> Option<Loop<'a>> {
-        let entry = self.backward_label();
-        let exit = self.forward_label(buf);
+        let entry = BackwardLabel::bind(self);
+        let exit = ForwardLabel::new(buf);
         self.loop_.replace(Loop { entry, exit })
     }
 
     fn end_loop(&mut self, prev: Option<Loop<'a>>) -> Result<()> {
         let loop_ = std::mem::replace(&mut self.loop_, prev).expect("some loop");
 
-        self.bind_forward_label(loop_.exit)
+        loop_.exit.bind(self)
     }
 
     fn reg(&mut self, span: Span) -> Result<Reg> {
@@ -542,36 +604,6 @@ impl<'a> FunctionState<'a> {
         self.code.push(inst);
         self.dbg.spans.push(span);
         // TODO: peep-opt
-    }
-
-    fn forward_label(&self, buf: &'a Bump) -> ForwardLabel<'a> {
-        ForwardLabel {
-            patch_targets: vec![in buf],
-        }
-    }
-
-    fn backward_label(&self) -> BackwardLabel {
-        BackwardLabel {
-            pos: self.code.len(),
-        }
-    }
-
-    fn bind_forward_label(&mut self, label: ForwardLabel) -> Result<()> {
-        let pos = self.code.len();
-        let span = *self.dbg.spans.last().unwrap();
-        for target in label.patch_targets {
-            let offset = i24::try_from((pos - target) as isize)
-                .map_err(|_| error("jump offset out of bounds for i24", span))?;
-
-            let span = self.dbg.spans[target];
-            let ins = &mut self.code[target];
-            let Instruction::Jmp { rel } = ins else {
-                return error("invalid label referree", span).into();
-            };
-            *rel = unsafe { Imm24s::new_unchecked(offset) }
-        }
-
-        Ok(())
     }
 }
 
@@ -1014,8 +1046,8 @@ fn eval_expr<'a>(
         ast::ExprKind::Return(node) => eval_expr_return(m, node, span, dst),
         ast::ExprKind::Break(node) => eval_expr_break(m, node, span, dst),
         ast::ExprKind::Continue(node) => eval_expr_continue(m, node, span, dst),
-        ast::ExprKind::IfSimple(node) => todo!(),
-        ast::ExprKind::IfMulti(node) => todo!(),
+        ast::ExprKind::IfSimple(node) => eval_expr_if(m, If::Simple(node), span, dst),
+        ast::ExprKind::IfMulti(node) => eval_expr_if(m, If::Multi(node), span, dst),
         ast::ExprKind::Block(node) => eval_expr_block(m, node, span, dst),
         ast::ExprKind::FuncAnon(node) => todo!(),
         ast::ExprKind::GetVar(node) => eval_expr_get_var(m, node, span, dst),
@@ -1067,6 +1099,8 @@ fn eval_expr_return<'a>(
     Ok(NOTHING)
 }
 
+const PLACEHOLDER: Imm24s = unsafe { Imm24s::new_unchecked(i24::ZERO) };
+
 fn eval_expr_break<'a>(
     m: &mut State<'a>,
     brk: Node<'a, ast::Break>,
@@ -1080,9 +1114,7 @@ fn eval_expr_break<'a>(
 
     // break = unconditional jump to loop exit
     let pos = f.code.len();
-    let rel = unsafe { Imm24s::new_unchecked(i24::ZERO) };
-
-    f.emit(asm::jmp(rel), span);
+    f.emit(asm::jmp(PLACEHOLDER), span);
     loop_.exit.add_target(pos);
 
     f.loop_ = Some(loop_);
@@ -1109,6 +1141,109 @@ fn eval_expr_continue<'a>(
     f!(m).loop_ = Some(loop_);
 
     Ok(NOTHING)
+}
+
+enum If<'a> {
+    Simple(Node<'a, ast::IfSimple>),
+    Multi(Node<'a, ast::IfMulti>),
+}
+
+fn eval_expr_if<'a>(
+    m: &mut State<'a>,
+    node: If<'a>,
+    span: Span,
+    dst: MaybeReg,
+) -> Result<Value<'a>> {
+    let (dst, free) = match dst.inner() {
+        Some(reg) => (reg, false),
+        None => (m.reg(span)?, true),
+    };
+
+    match node {
+        // if <cond> do <body> else <tail>
+        If::Simple(node) => {
+            let mut exit = BasicForwardLabel::new();
+            let mut next = BasicForwardLabel::new();
+
+            emit_if_cond(m, node.cond(), node.cond_span(), dst)?;
+
+            let pos = f!(m).code.len();
+            m.emit(asm::jmp(PLACEHOLDER), node.cond_span());
+            next.set_target(pos);
+
+            m.begin_scope();
+            emit_stmt_list_with_tail_eval(m, node.body(), Some(dst).into())?;
+            m.end_scope();
+
+            if node.tail().is_some() {
+                let pos = f!(m).code.len();
+                m.emit(asm::jmp(PLACEHOLDER), node.cond_span());
+                exit.set_target(pos);
+            }
+
+            next.bind(f!(m))?;
+
+            if let Some(tail) = node.tail().as_option() {
+                let value = eval_expr_block(m, tail, node.tail_span(), Some(dst).into())?;
+                emit_value_into(m, value, dst)?;
+            }
+
+            if node.tail().is_some() {
+                exit.bind(f!(m))?;
+            }
+        }
+        If::Multi(node) => {
+            let mut exit = ForwardLabel::new(m.buf);
+
+            todo!();
+
+            exit.bind(f!(m))?;
+        }
+    }
+
+    if free {
+        m.rfree(dst);
+    }
+
+    Ok(Value::dynamic(dst, span))
+}
+
+/*
+
+# sample program:
+
+var a = 0
+var b = 1
+
+if a < b and b >= a do
+  return 1
+else
+  return 0
+end
+
+# resulting code:
+
+  lsmi r1, 0
+  lsmi r2, 1
+  islt r1, r2
+  jmp .next
+  isge r2, r1
+  jmp .next
+  lsmi r0, 1
+  ret
+next:
+  lsmi r0, 0
+  ret
+
+*/
+
+fn emit_if_cond<'a>(
+    m: &mut State<'a>,
+    cond: Node<'a, ast::Expr>,
+    span: Span,
+    dst: Reg,
+) -> Result<()> {
+    todo!()
 }
 
 fn eval_expr_block<'a>(
