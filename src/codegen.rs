@@ -1011,7 +1011,7 @@ fn eval_expr<'a>(
     dst: MaybeReg,
 ) -> Result<Value<'a>> {
     match expr.kind() {
-        ast::ExprKind::Return(node) => todo!(),
+        ast::ExprKind::Return(node) => eval_expr_return(m, node, span, dst),
         ast::ExprKind::Break(node) => eval_expr_break(m, node, span, dst),
         ast::ExprKind::Continue(node) => eval_expr_continue(m, node, span, dst),
         ast::ExprKind::IfSimple(node) => todo!(),
@@ -1043,6 +1043,28 @@ fn eval_expr<'a>(
 fn emit_expr_into<'a>(m: &mut State<'a>, expr: Node<'a, Expr>, span: Span, dst: Reg) -> Result<()> {
     let val = eval_expr(m, expr, span, Some(dst).into())?;
     emit_value_into(m, val, dst)
+}
+
+fn eval_expr_return<'a>(
+    m: &mut State<'a>,
+    node: Node<'a, ast::Return>,
+    span: Span,
+    dst: MaybeReg,
+) -> Result<Value<'a>> {
+    let _ = dst;
+
+    // return always places value into register 0
+    let dst = unsafe { Reg::new_unchecked(0) };
+    if let Some(value) = node.value().as_option() {
+        let value = eval_expr(m, value, node.value_span(), Some(dst).into())?;
+        emit_value_into(m, value, dst)?;
+    } else {
+        emit_value_into(m, Value::nil(span), dst)?;
+    }
+
+    m.emit(asm::ret(), span);
+
+    Ok(NOTHING)
 }
 
 fn eval_expr_break<'a>(
