@@ -557,6 +557,7 @@ impl Control {
 
 #[cfg(debug_assertions)]
 #[derive(Clone, Copy)]
+#[repr(C)]
 pub(crate) enum Control {
     Stop,
     Error(VmError),
