@@ -1,4 +1,0 @@
-var a = true
-if a do
-  a = false
-end

@@ -1,0 +1,8 @@
+var a = 0
+var b = 1
+
+if a < b and b >= a do
+  return 0
+else
+  return 1
+end

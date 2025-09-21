@@ -1,0 +1,10 @@
+var a = 1
+var b = 2
+var result = 0
+
+if (a<b) and (a<b) do result+=1 end
+if not ((a<b) and (a<b)) do else result+=1 end
+if (a<b) or (a<b) do result+=1 else end
+if not ((a<b) or (a<b)) do else result+=1 end
+
+result

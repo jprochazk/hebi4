@@ -7,6 +7,6 @@ OK
   params 0
   stack 1
   .code
-  0  jmp 0
+  0  jmp 0   ; to 0
   1  lnil r0
   2  ret

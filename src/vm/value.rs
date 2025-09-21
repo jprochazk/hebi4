@@ -10,6 +10,8 @@ use super::gc::{Heap, ObjectKind, Ref, RefMut, Root, Trace, Tracer, ValueRef, Va
 // NOTE: `Value` must be bit-compatible with `Literal`,
 // so that `Literal` can be directly treated as a `Value`
 
+// TODO: `nil` should contain `0xFF` as payload
+
 #[repr(C, u64)]
 pub enum Literal {
     Nil = 0,

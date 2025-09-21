@@ -258,7 +258,7 @@ impl RegAlloc {
 
     fn free(&mut self, r: Reg) {
         if self.current != r.get() + 1 {
-            panic!("registers freed out of order");
+            unreachable!("ICE: registers freed out of order");
         }
         self.current = r.get();
     }
@@ -1159,26 +1159,34 @@ fn eval_expr_if<'a>(
         None => (m.reg(span)?, true),
     };
 
+    let mut exit = ForwardLabel::new(m.buf);
+
     match node {
         // if <cond> do <body> else <tail>
         If::Simple(node) => {
-            let mut exit = BasicForwardLabel::new();
-            let mut next = BasicForwardLabel::new();
+            let mut next = ForwardLabel::new(m.buf);
+            let mut body = ForwardLabel::new(m.buf);
 
-            emit_if_cond(m, node.cond(), node.cond_span(), dst)?;
-
+            // if the condition is true, execute `body`. otherwise, `jmp` to `tail`.
+            emit_if_cond(m, node.cond(), node.cond_span(), dst, &mut next, &mut body)?;
             let pos = f!(m).code.len();
             m.emit(asm::jmp(PLACEHOLDER), node.cond_span());
-            next.set_target(pos);
+            next.add_target(pos);
+
+            body.bind(f!(m))?;
 
             m.begin_scope();
-            emit_stmt_list_with_tail_eval(m, node.body(), Some(dst).into())?;
+            let value = emit_stmt_list_with_tail_eval(m, node.body(), Some(dst).into())?;
+            if !free {
+                emit_value_into(m, value, dst)?;
+            }
             m.end_scope();
 
+            // if `tail` exists and we execute `body`, we should skip `tail`.
             if node.tail().is_some() {
                 let pos = f!(m).code.len();
                 m.emit(asm::jmp(PLACEHOLDER), node.cond_span());
-                exit.set_target(pos);
+                exit.add_target(pos);
             }
 
             next.bind(f!(m))?;
@@ -1193,11 +1201,7 @@ fn eval_expr_if<'a>(
             }
         }
         If::Multi(node) => {
-            let mut exit = ForwardLabel::new(m.buf);
-
-            todo!();
-
-            exit.bind(f!(m))?;
+            todo!()
         }
     }
 
@@ -1208,38 +1212,134 @@ fn eval_expr_if<'a>(
     Ok(Value::dynamic(dst, span))
 }
 
-/*
-
-# sample program:
-
-var a = 0
-var b = 1
-
-if a < b and b >= a do
-  return 1
-else
-  return 0
-end
-
-# resulting code:
-
-  lsmi r1, 0
-  lsmi r2, 1
-  islt r1, r2
-  jmp .next
-  isge r2, r1
-  jmp .next
-  lsmi r0, 1
-  ret
-next:
-  lsmi r0, 0
-  ret
-
-*/
-
 fn emit_if_cond<'a>(
     m: &mut State<'a>,
-    cond: Node<'a, ast::Expr>,
+    node: Node<'a, ast::Expr>,
+    span: Span,
+    dst: Reg,
+    next: &mut ForwardLabel<'a>,
+    body: &mut ForwardLabel<'a>,
+) -> Result<()> {
+    emit_if_cond_inner(m, node, span, dst, false, next, body)
+}
+
+fn emit_if_cond_inner<'a>(
+    m: &mut State<'a>,
+    node: Node<'a, ast::Expr>,
+    span: Span,
+    dst: Reg,
+    negated: bool,
+    next: &mut ForwardLabel<'a>,
+    body: &mut ForwardLabel<'a>,
+) -> Result<()> {
+    use ast::InfixOp as Op;
+    match node.kind() {
+        ast::ExprKind::Infix(node) if node.op().is_logical() => match (*node.op(), negated) {
+            (Op::And, false) => {
+                emit_if_cond_inner(m, node.lhs(), node.lhs_span(), dst, false, next, body)?;
+                let pos = f!(m).code.len();
+                m.emit(asm::jmp(PLACEHOLDER), node.lhs_span());
+                next.add_target(pos);
+
+                emit_if_cond_inner(m, node.rhs(), node.rhs_span(), dst, false, next, body)?;
+                // `rhs` jmp is emitted by caller
+
+                Ok(())
+            }
+            (Op::And, true) => {
+                // de morgan says: not(lhs and rhs) == not(lhs) or not(rhs)
+                // semantics:
+                //   if not(lhs) do body()
+                //   else if not(rhs) do body()
+                //   end
+                emit_if_cond_inner(m, node.lhs(), node.lhs_span(), dst, false, next, body)?;
+                let pos = f!(m).code.len();
+                m.emit(asm::jmp(PLACEHOLDER), node.lhs_span());
+                body.add_target(pos);
+
+                emit_if_cond_inner(m, node.rhs(), node.rhs_span(), dst, true, next, body)?;
+                // `rhs` jmp is emitted by caller
+
+                Ok(())
+            }
+
+            (Op::Or, false) => {
+                // semantics:
+                //   if lhs do body()
+                //   else if rhs do body()
+                //   end
+                emit_if_cond_inner(m, node.lhs(), node.lhs_span(), dst, true, next, body)?;
+                let pos = f!(m).code.len();
+                m.emit(asm::jmp(PLACEHOLDER), node.lhs_span());
+                body.add_target(pos);
+
+                emit_if_cond_inner(m, node.rhs(), node.rhs_span(), dst, false, next, body)?;
+                // `rhs` jmp is emitted by caller
+
+                Ok(())
+            }
+            (Op::Or, true) => {
+                // de morgan says: not(lhs or rhs) == not(lhs) and not(rhs)
+                // semantics:
+                //   if not(lhs) do
+                //     if not(rhs) do body() end
+                //   end
+                emit_if_cond_inner(m, node.lhs(), node.lhs_span(), dst, true, next, body)?;
+                let pos = f!(m).code.len();
+                m.emit(asm::jmp(PLACEHOLDER), node.lhs_span());
+                next.add_target(pos);
+
+                emit_if_cond_inner(m, node.rhs(), node.rhs_span(), dst, true, next, body)?;
+                // `rhs` jmp is emitted by caller
+
+                Ok(())
+            }
+
+            _ => unreachable!(),
+        },
+
+        ast::ExprKind::Infix(node) if node.op().is_comparison() => {
+            let lhs_reg = dst;
+            let rhs_reg = m.reg(node.rhs_span())?;
+
+            // TODO: handle lhs/rhs constant:
+            // if `lhs` is constant, move it to `rhs`
+            // if `rhs` is constant, try to emit specialized literal variants of eq
+            // (?) const-eval if both are constant
+
+            let lhs = eval_expr(m, node.lhs(), node.lhs_span(), Some(lhs_reg).into())?;
+            let lhs = emit_value(m, lhs, lhs_reg)?;
+
+            let rhs = eval_expr(m, node.rhs(), node.rhs_span(), Some(rhs_reg).into())?;
+            let rhs = emit_value(m, rhs, rhs_reg)?;
+
+            let inst = match (*node.op(), negated) {
+                (Op::Eq, false) | (Op::Ne, true) => asm::iseq(lhs, rhs),
+                (Op::Ne, false) | (Op::Eq, true) => asm::isne(lhs, rhs),
+                (Op::Gt, false) | (Op::Le, true) => asm::isgt(lhs, rhs),
+                (Op::Ge, false) | (Op::Lt, true) => asm::isge(lhs, rhs),
+                (Op::Lt, false) | (Op::Ge, true) => asm::islt(lhs, rhs),
+                (Op::Le, false) | (Op::Gt, true) => asm::isle(lhs, rhs),
+                _ => unreachable!(),
+            };
+            m.emit(inst, span);
+
+            m.rfree(rhs_reg);
+
+            Ok(())
+        }
+
+        ast::ExprKind::Prefix(node) if *node.op() == ast::PrefixOp::Not => {
+            emit_if_cond_inner(m, node.rhs(), node.rhs_span(), dst, true, next, body)
+        }
+
+        _ => emit_if_cond_generic(m, node, span, dst),
+    }
+}
+
+fn emit_if_cond_generic<'a>(
+    m: &mut State<'a>,
+    node: Node<'a, ast::Expr>,
     span: Span,
     dst: Reg,
 ) -> Result<()> {
@@ -1313,7 +1413,7 @@ fn eval_expr_set_var<'a>(
     let rhs_reg = m.reg(set.value_span())?;
     let rhs = eval_expr(m, set.value(), set.value_span(), Some(rhs_reg).into())?;
 
-    let inst = match emit_value_as_operand_or_load(m, rhs, rhs_reg)? {
+    let inst = match materialize_value(m, rhs, rhs_reg)? {
         RegOrConst::Reg(rhs) => vv(dst, dst, rhs),
         RegOrConst::Const(rhs) => vn(dst, dst, rhs),
     };
@@ -1538,8 +1638,8 @@ fn eval_expr_infix<'a>(
         // If `eval_expr` returns a constant, it will not have used the
         // register, so we can still use it for the literal.
 
-        let lhs = emit_value_as_operand_or_load(m, lhs, dst)?;
-        let rhs = emit_value_as_operand_or_load(m, rhs, rhs_reg)?;
+        let lhs = materialize_value(m, lhs, dst)?;
+        let rhs = materialize_value(m, rhs, rhs_reg)?;
 
         use RegOrConst as R;
         let instruction = match *node.op() {
@@ -1715,16 +1815,36 @@ fn eval_expr_nil<'a>(m: &mut State<'a>, nil: Node<'a, ast::Nil>, span: Span) -> 
     // }
 }
 
+/// Emits `value` and ensures it is placed in `dst`.
+///
+/// For variables, this may emit a `mov`.
 fn emit_value_into<'a>(m: &mut State<'a>, value: Value<'a>, dst: Reg) -> Result<()> {
+    let reg = emit_value(m, value, dst)?;
+    if reg.get() != dst.get() {
+        m.emit(asm::mov(dst, reg), value.span);
+    }
+
+    Ok(())
+}
+
+/// Emits `value`.
+///
+/// For variables, this ignores `dst` and returns the variable's register.
+fn emit_value<'a>(m: &mut State<'a>, value: Value<'a>, dst: Reg) -> Result<Reg> {
     match value.kind {
         ValueKind::Nil => {
             m.emit(asm::lnil(dst), value.span);
+            Ok(dst)
         }
-        ValueKind::Bool(v) => match v {
-            true => m.emit(asm::ltrue(dst), value.span),
-            false => m.emit(asm::lfalse(dst), value.span),
-        },
+        ValueKind::Bool(v) => {
+            match v {
+                true => m.emit(asm::ltrue(dst), value.span),
+                false => m.emit(asm::lfalse(dst), value.span),
+            };
+            Ok(dst)
+        }
         ValueKind::Int(v) => {
+            // TODO: dedup
             if v <= i16::MAX as i64 {
                 let v = unsafe { Imm16::new_unchecked(v as i16) };
                 m.emit(asm::lsmi(dst, v), value.span);
@@ -1732,35 +1852,32 @@ fn emit_value_into<'a>(m: &mut State<'a>, value: Value<'a>, dst: Reg) -> Result<
                 let id = f!(m).literals.i64(v, value.span)?;
                 m.emit(asm::lint(dst, id), value.span);
             }
+            Ok(dst)
         }
         ValueKind::Float(v) => {
             let id = f!(m).literals.f64(v, value.span)?;
             m.emit(asm::lnum(dst, id), value.span);
+            Ok(dst)
         }
         ValueKind::Str(v) => {
             let id = f!(m).literals.str(v, value.span)?;
             m.emit(asm::lstr(dst, id), value.span);
+            Ok(dst)
         }
-        ValueKind::Dynamic(reg) => {
-            if reg.get() != dst.get() {
-                m.emit(asm::mov(dst, reg), value.span);
-            }
-        }
+        ValueKind::Dynamic(reg) => Ok(reg),
     }
-
-    Ok(())
 }
 
 enum RegOrConst {
+    /// The value exists in this register.
     Reg(Reg),
+
+    /// The value exists only in the literal pool.
     Const(Lit8),
 }
 
-fn emit_value_as_operand_or_load<'a>(
-    m: &mut State<'a>,
-    value: Value<'a>,
-    dst: Reg,
-) -> Result<RegOrConst> {
+/// Materialize `value` for use in emit.
+fn materialize_value<'a>(m: &mut State<'a>, value: Value<'a>, dst: Reg) -> Result<RegOrConst> {
     use RegOrConst as R;
     use ValueKind as V;
 

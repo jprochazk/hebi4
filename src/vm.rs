@@ -436,6 +436,7 @@ pub enum VmError {
     DivisionByZero = 0,
     ArithTypeError = 1,
     UnopInvalidType = 2,
+    CmpTypeError = 3,
 }
 
 impl VmError {
@@ -447,13 +448,17 @@ impl VmError {
             // TODO: also print type names
             VmError::ArithTypeError => error("type mismatch", span),
             VmError::UnopInvalidType => error("invalid type", span),
+            VmError::CmpTypeError => error("type mismatch", span),
         }
     }
 
     #[inline]
     fn is_external(self) -> bool {
         match self {
-            VmError::DivisionByZero | VmError::ArithTypeError | VmError::UnopInvalidType => false,
+            VmError::DivisionByZero
+            | VmError::ArithTypeError
+            | VmError::UnopInvalidType
+            | VmError::CmpTypeError => false,
         }
     }
 }
@@ -761,34 +766,103 @@ unsafe fn isfalsec(args: Isfalsec, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> 
     }
 }
 
+macro_rules! try_cmp_eval {
+    ($lhs:ident, $rhs:ident, $ctx:ident, $ip:ident, $op:tt) => {{
+        use ValueRaw::*;
+        match ($lhs, $rhs) {
+            // TODO: other types support comparisons too:
+            //       nil, bool, str
+            (Int(lhs), Int(rhs)) => lhs $op rhs,
+            (Float(lhs), Float(rhs)) => lhs $op rhs,
+            (Float(lhs), Int(rhs)) => lhs $op (rhs as f64),
+            (Int(lhs), Float(rhs)) => (lhs as f64) $op rhs,
+            _ => vm_exit!($ctx, $ip, CmpTypeError),
+        }
+    }};
+}
+
 #[inline(always)]
 unsafe fn islt(args: Islt, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control {
-    todo!()
+    let lhs = *sp.at(args.lhs);
+    let rhs = *sp.at(args.rhs);
+
+    if try_cmp_eval!(lhs, rhs, ctx, ip, <) {
+        let ip = ip.offset(2);
+        dispatch_current(jt, sp, lp, ip, ctx)
+    } else {
+        let ip = ip.offset(1);
+        dispatch_current(jt, sp, lp, ip, ctx)
+    }
 }
 
 #[inline(always)]
 unsafe fn isle(args: Isle, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control {
-    todo!()
+    let lhs = *sp.at(args.lhs);
+    let rhs = *sp.at(args.rhs);
+
+    if try_cmp_eval!(lhs, rhs, ctx, ip, <=) {
+        let ip = ip.offset(2);
+        dispatch_current(jt, sp, lp, ip, ctx)
+    } else {
+        let ip = ip.offset(1);
+        dispatch_current(jt, sp, lp, ip, ctx)
+    }
 }
 
 #[inline(always)]
 unsafe fn isgt(args: Isgt, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control {
-    todo!()
+    let lhs = *sp.at(args.lhs);
+    let rhs = *sp.at(args.rhs);
+
+    if try_cmp_eval!(lhs, rhs, ctx, ip, >) {
+        let ip = ip.offset(2);
+        dispatch_current(jt, sp, lp, ip, ctx)
+    } else {
+        let ip = ip.offset(1);
+        dispatch_current(jt, sp, lp, ip, ctx)
+    }
 }
 
 #[inline(always)]
 unsafe fn isge(args: Isge, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control {
-    todo!()
+    let lhs = *sp.at(args.lhs);
+    let rhs = *sp.at(args.rhs);
+
+    if try_cmp_eval!(lhs, rhs, ctx, ip, >=) {
+        let ip = ip.offset(2);
+        dispatch_current(jt, sp, lp, ip, ctx)
+    } else {
+        let ip = ip.offset(1);
+        dispatch_current(jt, sp, lp, ip, ctx)
+    }
 }
 
 #[inline(always)]
 unsafe fn iseq(args: Iseq, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control {
-    todo!()
+    let lhs = *sp.at(args.lhs);
+    let rhs = *sp.at(args.rhs);
+
+    if try_cmp_eval!(lhs, rhs, ctx, ip, ==) {
+        let ip = ip.offset(2);
+        dispatch_current(jt, sp, lp, ip, ctx)
+    } else {
+        let ip = ip.offset(1);
+        dispatch_current(jt, sp, lp, ip, ctx)
+    }
 }
 
 #[inline(always)]
 unsafe fn isne(args: Isne, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control {
-    todo!()
+    let lhs = *sp.at(args.lhs);
+    let rhs = *sp.at(args.rhs);
+
+    if try_cmp_eval!(lhs, rhs, ctx, ip, !=) {
+        let ip = ip.offset(2);
+        dispatch_current(jt, sp, lp, ip, ctx)
+    } else {
+        let ip = ip.offset(1);
+        dispatch_current(jt, sp, lp, ip, ctx)
+    }
 }
 
 #[inline(always)]

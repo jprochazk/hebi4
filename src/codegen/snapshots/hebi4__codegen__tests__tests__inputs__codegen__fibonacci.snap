@@ -1,0 +1,31 @@
+---
+source: src/codegen/tests.rs
+expression: snapshot
+---
+OK
+.fn @main
+  params 0
+  stack 2
+  .code
+  0  lsmi r1, 10
+  1  call r0, fn1   ; fn1=fib
+  2  ret
+
+.fn fib
+  params 1
+  stack 5
+  .locals
+    n = r1
+  .code
+   0  lsmi r2, 2
+   1  islt r1, r2
+   2  jmp 3   ; to 5
+   3  mov r0, r1
+   4  jmp 7   ; to 11
+   5  sub r3, r1, 1
+   6  call r2, fn1   ; fn1=fib
+   7  mov r0, r2
+   8  sub r3, r1, 2
+   9  call r2, fn1   ; fn1=fib
+  10  add r0, r0, r2
+  11  ret
