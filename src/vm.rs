@@ -54,7 +54,7 @@ pub mod value;
 
 use beef::lean::Cow;
 
-use std::marker::PhantomData;
+use std::{marker::PhantomData, ptr::null};
 
 use array::{DynArray, DynStack};
 
@@ -246,21 +246,37 @@ impl Lp {
     }
 
     #[inline(always)]
-    pub unsafe fn int(self, r: impl LpIdx) -> i64 {
-        let Literal::Int(v) = self._at(r.idx()).read() else {
-            core::hint::unreachable_unchecked();
-        };
+    pub unsafe fn int_or_float_unchecked(self, r: impl LpIdx) -> ValueRaw {
+        let v = self._at(r.idx());
 
-        v
+        // NOTE: `ValueRaw` and `Literal` have the same representation,
+        // and `Int` and `Float` have the same tag in both, so we can
+        // just reinterpret.
+
+        debug_assert!(matches!(&*v, Literal::Int(..) | Literal::Float(..)));
+        v.cast::<ValueRaw>().read()
     }
 
     #[inline(always)]
-    pub unsafe fn float(self, r: impl LpIdx) -> f64 {
-        let Literal::Float(v) = self._at(r.idx()).read() else {
-            core::hint::unreachable_unchecked();
-        };
+    pub unsafe fn int_unchecked(self, r: impl LpIdx) -> i64 {
+        let v = self._at(r.idx());
 
-        v
+        // we're doing this instead of matching to avoid a call to `Literal::drop`.
+        // TODO: use some kind of `offset_of` thing instead?
+
+        debug_assert!(matches!(&*v, Literal::Int(..)));
+        v.cast::<u64>().add(1).cast::<i64>().read()
+    }
+
+    #[inline(always)]
+    pub unsafe fn float_unchecked(self, r: impl LpIdx) -> f64 {
+        let v = self._at(r.idx());
+
+        // we're doing this instead of matching to avoid a call to `Literal::drop`.
+        // TODO: use some kind of `offset_of` thing instead?
+
+        debug_assert!(matches!(&*v, Literal::Float(..)));
+        v.cast::<u64>().add(1).cast::<f64>().read()
     }
 }
 
@@ -338,6 +354,7 @@ pub(crate) struct Context {
     vm: *mut Vm,
     current_module: *const Chunk,
     error: *mut Option<Error>,
+    saved_ip: Ip,
     current_frame: CallFrame,
 }
 
@@ -393,27 +410,59 @@ impl Ctx {
             None => None,
         }
     }
+
+    #[inline]
+    unsafe fn set_saved_ip(self, ip: Ip) {
+        let ptr = &raw mut (*self.0).saved_ip;
+        ptr.write(ip);
+    }
+
+    #[inline]
+    unsafe fn saved_ip(self) -> Option<Ip> {
+        let ip = (*self.0).saved_ip;
+        if ip.0.is_null() { None } else { Some(ip) }
+    }
+
+    #[inline]
+    unsafe fn get_span_for_saved_ip(self) -> Option<Span> {
+        let ip = self.saved_ip()?;
+        self.get_span(ip)
+    }
 }
 
-enum VmError {
-    DivisionByZero,
+#[derive(Clone, Copy)]
+#[repr(u8)]
+pub enum VmError {
+    DivisionByZero = 0,
+    ArithTypeError = 1,
+    UnopInvalidType = 2,
 }
 
 impl VmError {
-    fn with_context(&self, ctx: &Context) -> Error {
-        let span = Span::empty(); // TODO
+    // NOTE: assumes `ctx.saved_ip` is set
+    unsafe fn with_context(&self, ctx: Ctx) -> Error {
+        let span = ctx.get_span_for_saved_ip().unwrap_or_default();
         match self {
             VmError::DivisionByZero => error("division by zero", span),
+            // TODO: also print type names
+            VmError::ArithTypeError => error("type mismatch", span),
+            VmError::UnopInvalidType => error("invalid type", span),
+        }
+    }
+
+    #[inline]
+    fn is_external(self) -> bool {
+        match self {
+            VmError::DivisionByZero | VmError::ArithTypeError | VmError::UnopInvalidType => false,
         }
     }
 }
 
-impl From<VmError> for Error {
-    fn from(value: VmError) -> Self {
-        match value {
-            VmError::DivisionByZero => todo!(),
-        }
-    }
+macro_rules! vm_exit {
+    ($ctx:ident, $ip:ident, $error:ident) => {{
+        $ctx.set_saved_ip($ip);
+        return Control::error(VmError::$error);
+    }};
 }
 
 static JT: JumpTable = jump_table! {
@@ -473,16 +522,58 @@ static JT: JumpTable = jump_table! {
     stop,
 };
 
+#[cfg(not(debug_assertions))]
 #[derive(Clone, Copy)]
-#[repr(u8)]
-pub enum Control {
-    Yield = 0,
-    Error = 1,
+#[repr(transparent)]
+pub(crate) struct Control(u8);
 
-    /// Used only in debug mode to convert a tail-call
-    /// interpreter to a loop-match interpreter.
-    #[cfg(debug_assertions)]
+#[cfg(not(debug_assertions))]
+impl Control {
+    #[inline]
+    fn stop() -> Control {
+        Control(0)
+    }
+
+    #[inline]
+    fn error(code: VmError) -> Control {
+        Control(1 & ((code as u8) << 1))
+    }
+
+    #[inline]
+    fn is_stop(self) -> bool {
+        self.0 == 0
+    }
+
+    #[inline]
+    fn is_error(self) -> bool {
+        self.0 & 1 == 1
+    }
+
+    #[inline]
+    unsafe fn error_code(self) -> VmError {
+        core::mem::transmute(self.0 >> 1)
+    }
+}
+
+#[cfg(debug_assertions)]
+#[derive(Clone, Copy)]
+pub(crate) enum Control {
+    Stop,
+    Error(VmError),
     Continue(Sp, Lp, Ip),
+}
+
+#[cfg(debug_assertions)]
+impl Control {
+    #[inline]
+    fn stop() -> Control {
+        Control::Stop
+    }
+
+    #[inline]
+    fn error(code: VmError) -> Control {
+        Control::Error(code)
+    }
 }
 
 /// Dispatch instruction at `ip`
@@ -536,14 +627,14 @@ unsafe fn lsmi(args: Lsmi, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control 
 
 #[inline(always)]
 unsafe fn lint(args: Lint, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control {
-    *sp.at(args.dst) = ValueRaw::Int(lp.int(args.id));
+    *sp.at(args.dst) = ValueRaw::Int(lp.int_unchecked(args.id));
 
     dispatch_next(jt, sp, lp, ip, ctx)
 }
 
 #[inline(always)]
 unsafe fn lnum(args: Lnum, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control {
-    *sp.at(args.dst) = ValueRaw::Float(lp.float(args.id));
+    *sp.at(args.dst) = ValueRaw::Float(lp.float_unchecked(args.id));
 
     dispatch_next(jt, sp, lp, ip, ctx)
 }
@@ -759,84 +850,40 @@ unsafe fn isnev(args: Isnev, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Contro
     todo!()
 }
 
-trait ArithOp {
-    const NAME: &'static str;
-
-    fn i64(lhs: i64, rhs: i64) -> i64;
-    fn f64(lhs: f64, rhs: f64) -> f64;
-}
-
-macro_rules! arith_op {
-    ($name:ident, $description:literal, $op:tt) => {
-        #[allow(non_camel_case_types)]
-        struct $name;
-        impl ArithOp for $name {
-            const NAME: &'static str = $description;
-
-            #[inline(always)]
-            fn i64(lhs: i64, rhs: i64) -> i64 {
-                lhs $op rhs
+macro_rules! try_arith_eval {
+    ($dst:ident, $lhs:ident, $rhs:ident, $ctx:ident, $ip:ident, $op:tt) => {
+        use ValueRaw::*;
+        match ($lhs, $rhs) {
+            (Int(lhs), Int(rhs)) => {
+                *$dst = Int(lhs $op rhs);
             }
-
-            #[inline(always)]
-            fn f64(lhs: f64, rhs: f64) -> f64 {
-                lhs $op rhs
+            (Float(lhs), Float(rhs)) => {
+                *$dst = Float(lhs $op rhs);
+            }
+            (Float(lhs), Int(rhs)) => {
+                *$dst = Float(lhs $op (rhs as f64));
+            }
+            (Int(lhs), Float(rhs)) => {
+                *$dst = Float((lhs as f64) $op rhs);
+            }
+            _ => {
+                vm_exit!($ctx, $ip, ArithTypeError);
             }
         }
     };
 }
 
-type ArithResult = Result<(), ()>;
+// #[inline(never)]
+// #[cold]
+// unsafe fn arith_type_error(lhs: ValueRaw, rhs: ValueRaw, ip: Ip, ctx: Ctx) -> ArithResult {
+//     let lhs_ty = lhs.type_name();
+//     let rhs_ty = rhs.type_name();
+//     let err = format!("failed to {op_name} {lhs_ty} and {rhs_ty}");
+//     let span = ctx.get_span(ip).unwrap_or_default();
+//     ctx.write_error(error(err, span));
 
-#[inline(always)]
-unsafe fn arith_eval<Op: ArithOp>(
-    dst: *mut ValueRaw,
-    lhs: ValueRaw,
-    rhs: ValueRaw,
-
-    ip: Ip,
-    ctx: Ctx,
-) -> ArithResult {
-    use ValueRaw::*;
-    match (lhs, rhs) {
-        (Int(lhs), Int(rhs)) => {
-            *dst = Int(Op::i64(lhs, rhs));
-            Ok(())
-        }
-        (Float(lhs), Float(rhs)) => {
-            *dst = Float(Op::f64(lhs, rhs));
-            Ok(())
-        }
-        (Float(lhs), Int(rhs)) => {
-            *dst = Float(Op::f64(lhs, rhs as f64));
-            Ok(())
-        }
-        (Int(lhs), Float(rhs)) => {
-            *dst = Float(Op::f64(lhs as f64, rhs));
-            Ok(())
-        }
-        (lhs, rhs) => arith_type_error(lhs, rhs, Op::NAME, ip, ctx),
-    }
-}
-
-#[cold]
-unsafe fn arith_type_error(
-    lhs: ValueRaw,
-    rhs: ValueRaw,
-    op_name: &str,
-    ip: Ip,
-    ctx: Ctx,
-) -> ArithResult {
-    let lhs_ty = lhs.type_name();
-    let rhs_ty = rhs.type_name();
-    let err = format!("failed to {op_name} {lhs_ty} and {rhs_ty}");
-    let span = ctx.get_span(ip).unwrap_or_default();
-    ctx.write_error(error(err, span));
-
-    Err(())
-}
-
-arith_op!(add, "add", +);
+//     Err(())
+// }
 
 #[inline(always)]
 unsafe fn addvv(args: Addvv, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control {
@@ -844,9 +891,7 @@ unsafe fn addvv(args: Addvv, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Contro
     let lhs = *sp.at(args.lhs);
     let rhs = *sp.at(args.rhs);
 
-    if let Err(()) = arith_eval::<add>(dst, lhs, rhs, ip, ctx) {
-        return Control::Error;
-    }
+    try_arith_eval!(dst, lhs, rhs, ctx, ip, +);
 
     dispatch_next(jt, sp, lp, ip, ctx)
 }
@@ -855,11 +900,9 @@ unsafe fn addvv(args: Addvv, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Contro
 unsafe fn addvn(args: Addvn, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control {
     let dst = sp.at(args.dst);
     let lhs = *sp.at(args.lhs);
-    let rhs = ValueRaw::Int(lp.int(args.rhs));
+    let rhs = lp.int_or_float_unchecked(args.rhs);
 
-    if let Err(()) = arith_eval::<add>(dst, lhs, rhs, ip, ctx) {
-        return Control::Error;
-    }
+    try_arith_eval!(dst, lhs, rhs, ctx, ip, +);
 
     dispatch_next(jt, sp, lp, ip, ctx)
 }
@@ -867,17 +910,13 @@ unsafe fn addvn(args: Addvn, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Contro
 #[inline(always)]
 unsafe fn addnv(args: Addnv, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control {
     let dst = sp.at(args.dst);
-    let lhs = ValueRaw::Int(lp.int(args.lhs));
+    let lhs = lp.int_or_float_unchecked(args.lhs);
     let rhs = *sp.at(args.rhs);
 
-    if let Err(()) = arith_eval::<add>(dst, lhs, rhs, ip, ctx) {
-        return Control::Error;
-    }
+    try_arith_eval!(dst, lhs, rhs, ctx, ip, +);
 
     dispatch_next(jt, sp, lp, ip, ctx)
 }
-
-arith_op!(sub, "subtract", -);
 
 #[inline(always)]
 unsafe fn subvv(args: Subvv, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control {
@@ -885,9 +924,7 @@ unsafe fn subvv(args: Subvv, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Contro
     let lhs = *sp.at(args.lhs);
     let rhs = *sp.at(args.rhs);
 
-    if let Err(()) = arith_eval::<sub>(dst, lhs, rhs, ip, ctx) {
-        return Control::Error;
-    }
+    try_arith_eval!(dst, lhs, rhs, ctx, ip, -);
 
     dispatch_next(jt, sp, lp, ip, ctx)
 }
@@ -896,11 +933,9 @@ unsafe fn subvv(args: Subvv, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Contro
 unsafe fn subvn(args: Subvn, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control {
     let dst = sp.at(args.dst);
     let lhs = *sp.at(args.lhs);
-    let rhs = ValueRaw::Int(lp.int(args.rhs));
+    let rhs = lp.int_or_float_unchecked(args.rhs);
 
-    if let Err(()) = arith_eval::<sub>(dst, lhs, rhs, ip, ctx) {
-        return Control::Error;
-    }
+    try_arith_eval!(dst, lhs, rhs, ctx, ip, -);
 
     dispatch_next(jt, sp, lp, ip, ctx)
 }
@@ -908,17 +943,13 @@ unsafe fn subvn(args: Subvn, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Contro
 #[inline(always)]
 unsafe fn subnv(args: Subnv, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control {
     let dst = sp.at(args.dst);
-    let lhs = ValueRaw::Int(lp.int(args.lhs));
+    let lhs = lp.int_or_float_unchecked(args.lhs);
     let rhs = *sp.at(args.rhs);
 
-    if let Err(()) = arith_eval::<sub>(dst, lhs, rhs, ip, ctx) {
-        return Control::Error;
-    }
+    try_arith_eval!(dst, lhs, rhs, ctx, ip, -);
 
     dispatch_next(jt, sp, lp, ip, ctx)
 }
-
-arith_op!(mul, "multiply", *);
 
 #[inline(always)]
 unsafe fn mulvv(args: Mulvv, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control {
@@ -926,9 +957,7 @@ unsafe fn mulvv(args: Mulvv, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Contro
     let lhs = *sp.at(args.lhs);
     let rhs = *sp.at(args.rhs);
 
-    if let Err(()) = arith_eval::<mul>(dst, lhs, rhs, ip, ctx) {
-        return Control::Error;
-    }
+    try_arith_eval!(dst, lhs, rhs, ctx, ip, *);
 
     dispatch_next(jt, sp, lp, ip, ctx)
 }
@@ -937,11 +966,9 @@ unsafe fn mulvv(args: Mulvv, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Contro
 unsafe fn mulvn(args: Mulvn, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control {
     let dst = sp.at(args.dst);
     let lhs = *sp.at(args.lhs);
-    let rhs = ValueRaw::Int(lp.int(args.rhs));
+    let rhs = lp.int_or_float_unchecked(args.rhs);
 
-    if let Err(()) = arith_eval::<mul>(dst, lhs, rhs, ip, ctx) {
-        return Control::Error;
-    }
+    try_arith_eval!(dst, lhs, rhs, ctx, ip, *);
 
     dispatch_next(jt, sp, lp, ip, ctx)
 }
@@ -949,71 +976,61 @@ unsafe fn mulvn(args: Mulvn, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Contro
 #[inline(always)]
 unsafe fn mulnv(args: Mulnv, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control {
     let dst = sp.at(args.dst);
-    let lhs = ValueRaw::Int(lp.int(args.lhs));
+    let lhs = lp.int_or_float_unchecked(args.lhs);
     let rhs = *sp.at(args.rhs);
 
-    if let Err(()) = arith_eval::<mul>(dst, lhs, rhs, ip, ctx) {
-        return Control::Error;
-    }
+    try_arith_eval!(dst, lhs, rhs, ctx, ip, *);
 
     dispatch_next(jt, sp, lp, ip, ctx)
 }
 
-#[inline(always)]
-unsafe fn div_eval_checked(
-    dst: *mut ValueRaw,
-    lhs: ValueRaw,
-    rhs: ValueRaw,
+// #[cold]
+// unsafe fn int_div_by_zero_error(ip: Ip, ctx: Ctx) -> ArithResult {
+//     let err = "integer division by zero";
+//     let span = ctx.get_span(ip).unwrap_or_default();
+//     ctx.write_error(error(err, span));
 
-    ip: Ip,
-    ctx: Ctx,
-) -> ArithResult {
-    use ValueRaw::*;
-    match (lhs, rhs) {
-        (Int(lhs), Int(rhs)) => {
-            if rhs == 0 {
-                return int_div_by_zero_error(ip, ctx);
+//     Err(())
+// }
+
+// #[cold]
+// unsafe fn div_type_error(lhs: ValueRaw, rhs: ValueRaw, ip: Ip, ctx: Ctx) -> ArithResult {
+//     let lhs_ty = lhs.type_name();
+//     let rhs_ty = rhs.type_name();
+//     let err = format!("cannot divide {lhs_ty} and {rhs_ty}");
+//     let span = ctx.get_span(ip).unwrap_or_default();
+//     ctx.write_error(error(err, span));
+
+//     Err(())
+// }
+
+macro_rules! try_div_eval {
+    ($dst:ident, $lhs:ident, $rhs:ident, $ctx:ident, $ip:ident) => {
+        use ValueRaw::*;
+        match ($lhs, $rhs) {
+            (Int(lhs), Int(rhs)) => {
+                if rhs == 0 {
+                    vm_exit!($ctx, $ip, DivisionByZero);
+                }
+
+                *$dst = Int(lhs / rhs);
             }
 
-            *dst = Int(lhs / rhs);
-            Ok(())
+            // float div by zero = inf
+            (Float(lhs), Float(rhs)) => {
+                *$dst = Float(lhs / rhs);
+            }
+            (Float(lhs), Int(rhs)) => {
+                *$dst = Float(lhs / (rhs as f64));
+            }
+            (Int(lhs), Float(rhs)) => {
+                *$dst = Float((lhs as f64) / rhs);
+            }
+            _ => {
+                vm_exit!($ctx, $ip, ArithTypeError);
+            }
         }
-
-        // float div by zero = inf
-        (Float(lhs), Float(rhs)) => {
-            *dst = Float(lhs / rhs);
-            Ok(())
-        }
-        (Float(lhs), Int(rhs)) => {
-            *dst = Float(lhs / (rhs as f64));
-            Ok(())
-        }
-        (Int(lhs), Float(rhs)) => {
-            *dst = Float((lhs as f64) / rhs);
-            Ok(())
-        }
-        (lhs, rhs) => div_type_error(lhs, rhs, ip, ctx),
-    }
-}
-
-#[cold]
-unsafe fn int_div_by_zero_error(ip: Ip, ctx: Ctx) -> ArithResult {
-    let err = "integer division by zero";
-    let span = ctx.get_span(ip).unwrap_or_default();
-    ctx.write_error(error(err, span));
-
-    Err(())
-}
-
-#[cold]
-unsafe fn div_type_error(lhs: ValueRaw, rhs: ValueRaw, ip: Ip, ctx: Ctx) -> ArithResult {
-    let lhs_ty = lhs.type_name();
-    let rhs_ty = rhs.type_name();
-    let err = format!("cannot divide {lhs_ty} and {rhs_ty}");
-    let span = ctx.get_span(ip).unwrap_or_default();
-    ctx.write_error(error(err, span));
-
-    Err(())
+    };
 }
 
 #[inline(always)]
@@ -1022,9 +1039,7 @@ unsafe fn divvv(args: Divvv, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Contro
     let lhs = *sp.at(args.lhs);
     let rhs = *sp.at(args.rhs);
 
-    if let Err(()) = div_eval_checked(dst, lhs, rhs, ip, ctx) {
-        return Control::Error;
-    }
+    try_div_eval!(dst, lhs, rhs, ctx, ip);
 
     dispatch_next(jt, sp, lp, ip, ctx)
 }
@@ -1033,11 +1048,9 @@ unsafe fn divvv(args: Divvv, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Contro
 unsafe fn divvn(args: Divvn, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control {
     let dst = sp.at(args.dst);
     let lhs = *sp.at(args.lhs);
-    let rhs = ValueRaw::Int(lp.int(args.rhs));
+    let rhs = lp.int_or_float_unchecked(args.rhs);
 
-    if let Err(()) = div_eval_checked(dst, lhs, rhs, ip, ctx) {
-        return Control::Error;
-    }
+    try_div_eval!(dst, lhs, rhs, ctx, ip);
 
     dispatch_next(jt, sp, lp, ip, ctx)
 }
@@ -1045,12 +1058,10 @@ unsafe fn divvn(args: Divvn, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Contro
 #[inline(always)]
 unsafe fn divnv(args: Divnv, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control {
     let dst = sp.at(args.dst);
-    let lhs = ValueRaw::Int(lp.int(args.lhs));
+    let lhs = lp.int_or_float_unchecked(args.lhs);
     let rhs = *sp.at(args.rhs);
 
-    if let Err(()) = div_eval_checked(dst, lhs, rhs, ip, ctx) {
-        return Control::Error;
-    }
+    try_div_eval!(dst, lhs, rhs, ctx, ip);
 
     dispatch_next(jt, sp, lp, ip, ctx)
 }
@@ -1071,7 +1082,7 @@ unsafe fn unm(args: Unm, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control {
 
         _ => {
             unm_type_error(ip, ctx);
-            return Control::Error;
+            return Control::error(VmError::ArithTypeError);
         }
     }
 
@@ -1120,7 +1131,7 @@ unsafe fn ret(args: Ret, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control {
 
 #[inline(always)]
 unsafe fn stop(args: Stop, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control {
-    Control::Yield
+    Control::stop()
 }
 
 /// call procedure:
@@ -1304,6 +1315,7 @@ impl<'gc> Runtime<'gc> {
                 vm: self.vm,
                 current_module: &raw const chunk,
                 error: &raw mut error,
+                saved_ip: Ip(null()),
                 current_frame: CallFrame {
                     callee: FuncInfoPtr(&*entry),
                     stack_base: 0,
@@ -1331,8 +1343,9 @@ impl<'gc> Runtime<'gc> {
                     let inst = ip.get();
                     let op = jt.at(inst);
                     match op(inst, jt, sp, lp, ip, ctx) {
-                        Control::Yield => return Ok(()),
-                        Control::Error => return Err(error.unwrap()),
+                        Control::Stop => return Ok(()),
+                        Control::Error(err) if err.is_external() => return Err(error.unwrap()),
+                        Control::Error(err) => return Err(err.with_context(ctx)),
 
                         #[cfg(debug_assertions)]
                         Control::Continue(new_sp, new_lp, new_ip) => {
@@ -1347,10 +1360,18 @@ impl<'gc> Runtime<'gc> {
 
             #[cfg(not(debug_assertions))]
             {
-                match dispatch_current(jt, sp, lp, ip, ctx) {
-                    Control::Yield => return Ok(()),
-                    Control::Error => return Err(error.unwrap()),
+                let ctrl = dispatch_current(jt, sp, lp, ip, ctx);
+
+                if ctrl.is_error() {
+                    let err = ctrl.error_code();
+                    if err.is_external() {
+                        return Err(error.unwrap());
+                    } else {
+                        return Err(err.with_context(ctx));
+                    }
                 }
+
+                return Ok(());
             }
         }
     }
