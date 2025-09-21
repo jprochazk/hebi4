@@ -1018,16 +1018,13 @@ fn eval_expr<'a>(
         ast::ExprKind::IfMulti(node) => todo!(),
         ast::ExprKind::Block(node) => eval_expr_block(m, node, span, dst),
         ast::ExprKind::FuncAnon(node) => todo!(),
-        ast::ExprKind::GetVar(node) => emit_expr_get_var(m, node, span, dst),
-        ast::ExprKind::SetVar(node) => {
-            emit_expr_set_var(m, node, span, dst)?;
-            Ok(NOTHING)
-        }
+        ast::ExprKind::GetVar(node) => eval_expr_get_var(m, node, span, dst),
+        ast::ExprKind::SetVar(node) => eval_expr_set_var(m, node, span, dst),
         ast::ExprKind::GetField(node) => todo!(),
         ast::ExprKind::SetField(node) => todo!(),
         ast::ExprKind::GetIndex(node) => todo!(),
         ast::ExprKind::SetIndex(node) => todo!(),
-        ast::ExprKind::Call(node) => emit_expr_call(m, node, span, dst),
+        ast::ExprKind::Call(node) => eval_expr_call(m, node, span, dst),
         ast::ExprKind::CallObject(node) => todo!(),
         ast::ExprKind::Infix(node) => eval_expr_infix(m, node, span, dst),
         ast::ExprKind::Prefix(node) => eval_expr_prefix(m, node, span, dst),
@@ -1104,7 +1101,7 @@ fn eval_expr_block<'a>(
     Ok(dst)
 }
 
-fn emit_expr_get_var<'a>(
+fn eval_expr_get_var<'a>(
     m: &mut State<'a>,
     get: Node<'a, ast::GetVar>,
     span: Span,
@@ -1122,29 +1119,53 @@ fn emit_expr_get_var<'a>(
     }
 }
 
-fn emit_expr_set_var<'a>(
+fn eval_expr_set_var<'a>(
     m: &mut State<'a>,
     set: Node<'a, ast::SetVar>,
     span: Span,
     dst: MaybeReg,
-) -> Result<()> {
+) -> Result<Value<'a>> {
+    let _ = dst;
+
     // variable must exist at this point
-    match m
+    let dst = match m
         .resolve(set.base().name().get())
         .ok_or_else(|| error("could not resolve name", set.base().name_span()))?
     {
         // when adding other symbols, remember to error out here,
         // only local variables may be assigned to
-        Symbol::Local { reg: dst, .. } => {
-            emit_expr_into(m, set.value(), span, *dst)?;
-        }
+        Symbol::Local { reg: dst, .. } => *dst,
         Symbol::Function { .. } => return error("cannot assign to function", span).into(),
     };
 
-    Ok(())
+    // lhs is always a register, so we only evaluate rhs, and emit either `vv` or `vn`.
+    let (vv, vn): (
+        fn(Reg, Reg, Reg) -> Instruction,
+        fn(Reg, Reg, Lit8) -> Instruction,
+    ) = match *set.op() {
+        ast::AssignOp::None => {
+            emit_expr_into(m, set.value(), span, dst)?;
+            return Ok(NOTHING);
+        }
+        ast::AssignOp::Add => (asm::addvv, asm::addvn),
+        ast::AssignOp::Sub => (asm::subvv, asm::subvn),
+        ast::AssignOp::Mul => (asm::mulvv, asm::mulvn),
+        ast::AssignOp::Div => (asm::divvv, asm::divvn),
+    };
+
+    let rhs_reg = m.reg(set.value_span())?;
+    let rhs = eval_expr(m, set.value(), set.value_span(), Some(rhs_reg).into())?;
+
+    let inst = match emit_value_as_operand_or_load(m, rhs, rhs_reg)? {
+        RegOrConst::Reg(rhs) => vv(dst, dst, rhs),
+        RegOrConst::Const(rhs) => vn(dst, dst, rhs),
+    };
+    m.emit(inst, span);
+
+    Ok(NOTHING)
 }
 
-fn emit_expr_call<'a>(
+fn eval_expr_call<'a>(
     m: &mut State<'a>,
     call: Node<'a, ast::Call>,
     span: Span,
@@ -1287,11 +1308,11 @@ fn eval_expr_infix<'a>(
     dst: MaybeReg,
 ) -> Result<Value<'a>> {
     if node.op().is_logical() {
-        return emit_expr_infix_logical(m, node, span, dst);
+        return eval_expr_infix_logical(m, node, span, dst);
     }
 
     if node.op().is_comparison() {
-        return emit_expr_infix_comparison(m, node, span, dst);
+        return eval_expr_infix_comparison(m, node, span, dst);
     }
 
     // in case the return value is unused, we should still
@@ -1406,7 +1427,7 @@ fn eval_expr_infix<'a>(
     Ok(result)
 }
 
-fn emit_expr_infix_logical<'a>(
+fn eval_expr_infix_logical<'a>(
     m: &mut State<'a>,
     node: Node<'a, ast::Infix>,
     span: Span,
@@ -1415,7 +1436,7 @@ fn emit_expr_infix_logical<'a>(
     todo!()
 }
 
-fn emit_expr_infix_comparison<'a>(
+fn eval_expr_infix_comparison<'a>(
     m: &mut State<'a>,
     node: Node<'a, ast::Infix>,
     span: Span,

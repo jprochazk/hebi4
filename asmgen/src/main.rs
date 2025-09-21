@@ -521,6 +521,20 @@ fn emit_operand_structs(o: &mut String, is: &Instructions) {
                 ),
             },
         );
+
+        // emit cast to raw instruction
+        ml!(
+            o,
+            "
+            impl {name} {{
+                #[inline(always)]
+                pub fn raw(self) -> Instruction {{
+                    unsafe {{ ::core::mem::transmute(self) }}
+                }}
+            }}
+            ",
+            name = i.type_name(),
+        );
     }
 
     ml!(
