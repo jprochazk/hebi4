@@ -1,0 +1,11 @@
+var result = 1
+var a = 2
+var b = 2
+
+result *= a * b  # 1 * 2 * 2 = 4
+result *= 1 * b  # 4 * 1 * 2 = 8
+result *= a * 1  # 8 * 2 * 1 = 16
+
+result  #=16
+
+

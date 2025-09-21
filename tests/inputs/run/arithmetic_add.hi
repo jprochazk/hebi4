@@ -1,0 +1,9 @@
+var result = 1
+var a = 2
+var b = 2
+
+result += a + b  # 1 + 2 + 2 = 5
+result += 1 + b  # 5 + 1 + 2 = 8
+result += a + 1  # 8 + 2 + 1 = 11
+
+result  #=11

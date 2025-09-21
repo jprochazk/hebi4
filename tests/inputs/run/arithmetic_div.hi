@@ -1,0 +1,12 @@
+var result = 10
+var a = 10
+var b = 10
+
+# note: integer division
+result /= a  / b  # 10 / (10 / 10) = 10
+result /= 10 / b  # 10 / (10 / 10) = 10
+result /= a  / 10 # 10 / (10 / 10) = 10
+
+result #=10
+
+
