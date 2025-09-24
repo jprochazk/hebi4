@@ -1,0 +1,5 @@
+var x = 1
+var y = 0
+
+if not x do return 1 end
+if not y do return 2 end

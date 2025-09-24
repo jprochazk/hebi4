@@ -1,0 +1,31 @@
+---
+source: src/codegen/tests.rs
+expression: snapshot
+---
+OK
+.fn @main
+  params 0
+  stack 5
+  .locals
+    a = r1
+    b = r2
+  .code
+   0  lsmi r1, 5
+   1  lsmi r2, 3
+   2  add r3, r1, r2
+   3  istrue r3
+   4  jmp 3   ; to 7
+   5  lsmi r0, 1
+   6  ret
+   7  sub r3, r1, 5
+   8  istrue r3
+   9  jmp 3   ; to 12
+  10  lsmi r0, 2
+  11  ret
+  12  mul r0, r1, 0
+  13  istrue r0
+  14  jmp 4   ; to 18
+  15  lsmi r0, 3
+  16  ret
+  17  lnil r0
+  18  ret

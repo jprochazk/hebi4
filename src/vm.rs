@@ -167,7 +167,7 @@ impl Literal {
     }
 
     #[inline]
-    pub fn str(&self) -> Option<&String> {
+    pub fn str(&self) -> Option<&str> {
         match self {
             Self::String(v) => Some(v),
             _ => None,

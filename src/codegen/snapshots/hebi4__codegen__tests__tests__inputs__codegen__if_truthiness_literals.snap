@@ -1,0 +1,46 @@
+---
+source: src/codegen/tests.rs
+expression: snapshot
+---
+OK
+.fn @main
+  params 0
+  stack 2
+  .code
+   0  lsmi r1, 1
+   1  istrue r1
+   2  jmp 3   ; to 5
+   3  lsmi r0, 1
+   4  ret
+   5  lsmi r1, 0
+   6  istrue r1
+   7  jmp 3   ; to 10
+   8  lsmi r0, 2
+   9  ret
+  10  lstr r1, l0   ; l0="hello"
+  11  istrue r1
+  12  jmp 3   ; to 15
+  13  lsmi r0, 3
+  14  ret
+  15  lstr r1, l1   ; l1=""
+  16  istrue r1
+  17  jmp 3   ; to 20
+  18  lsmi r0, 4
+  19  ret
+  20  ltrue r1
+  21  istrue r1
+  22  jmp 3   ; to 25
+  23  lsmi r0, 5
+  24  ret
+  25  lfalse r1
+  26  istrue r1
+  27  jmp 3   ; to 30
+  28  lsmi r0, 6
+  29  ret
+  30  lnil r0
+  31  istrue r0
+  32  jmp 4   ; to 36
+  33  lsmi r0, 7
+  34  ret
+  35  lnil r0
+  36  ret

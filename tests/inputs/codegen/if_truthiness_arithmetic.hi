@@ -1,0 +1,6 @@
+var a = 5
+var b = 3
+
+if a + b do return 1 end
+if a - 5 do return 2 end
+if a * 0 do return 3 end

@@ -1,0 +1,10 @@
+var x = 1
+var result = 0
+
+if x do
+    result = 10
+else
+    result = 20
+end
+
+result

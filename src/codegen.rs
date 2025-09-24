@@ -1378,7 +1378,7 @@ fn emit_if_cond_inner<'a>(
             emit_if_cond_inner(m, node.rhs(), node.rhs_span(), dst, true, targets)
         }
 
-        _ => emit_if_cond_generic(m, node, span, dst),
+        _ => emit_if_cond_generic(m, node, span, dst, negated, targets),
     }
 }
 
@@ -1387,8 +1387,28 @@ fn emit_if_cond_generic<'a>(
     node: Node<'a, ast::Expr>,
     span: Span,
     dst: Reg,
+    negated: bool,
+    targets: &mut BranchTargets<'a>,
 ) -> Result<()> {
-    todo!()
+    // we don't know what `node` holds, so we have to emit it into `dst`
+    // and then test it.
+    let value = eval_expr(m, node, span, Some(dst).into())?;
+    let test_reg = emit_value(m, value, dst)?;
+
+    // values will be coerced to `bool` by `isfalse`/`istrue`.
+    let inst = if negated {
+        // we want to skip the `jmp` if the value is _falsey_.
+        asm::isfalse(test_reg)
+    } else {
+        // we want to skip the `jmp` if the value is _truthy_.
+        asm::istrue(test_reg)
+    };
+
+    m.emit(inst, span);
+
+    // `jmp` is emitted by caller.
+
+    Ok(())
 }
 
 fn eval_expr_block<'a>(
