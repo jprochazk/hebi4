@@ -37,11 +37,6 @@
 
 #![allow(dead_code)]
 
-// TODO: statically prevent one AST's nodes from being used with another AST
-// - each node gains an invariant lifetime
-// - retrieving a node will brand it with its AST's lifetime
-// - many places have to be updated to deal with this
-
 use heck::AsPascalCase;
 use std::path::Path;
 use std::{collections::BTreeMap, str::FromStr};

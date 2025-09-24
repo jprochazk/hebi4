@@ -7,6 +7,8 @@ use crate::vm::gc::Gc;
 
 use super::gc::{Heap, ObjectKind, Ref, RefMut, Root, Trace, Tracer, ValueRef, ValueRoot};
 
+pub mod thin;
+
 // NOTE: `Value` must be bit-compatible with `Literal`,
 // so that `Literal` can be directly treated as a `Value`
 
@@ -19,7 +21,7 @@ pub enum Literal {
     Int(i64) = 2,
     Float(f64) = 3,
 
-    String(std::string::String),
+    String(thin::ThinStr),
 }
 
 impl std::fmt::Display for Literal {
@@ -85,6 +87,26 @@ impl ValueRaw {
         }
     }
 }
+
+const _: () = {
+    macro_rules! assert_bit_equality {
+        ($a:expr, $b:pat) => {
+            let v = match unsafe { core::mem::transmute($a) } {
+                v @ $b => v,
+                v => {
+                    panic!("not bit equal");
+                }
+            };
+            let _: ValueRaw = unsafe { core::mem::transmute(v) };
+        };
+    }
+
+    // These values must be bit-compatible.
+    assert_bit_equality!(ValueRaw::Nil, Literal::Nil);
+    assert_bit_equality!(ValueRaw::Bool(true), Literal::Bool(true));
+    assert_bit_equality!(ValueRaw::Int(100), Literal::Int(100));
+    assert_bit_equality!(ValueRaw::Float(100.0), Literal::Float(100.0));
+};
 
 #[repr(align(16))]
 pub struct String {

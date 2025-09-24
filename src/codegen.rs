@@ -60,6 +60,7 @@ use crate::{
 // TODO: basic optimizations (configurable)
 // - peephole
 // - jump chaining
+//    - jump-to-jump should forward the address
 // - dead code elimination
 //   - mark bb exit (break, return, continue, if),
 //     any emitted code is discarded until the exit label is bound
@@ -392,7 +393,7 @@ impl<'a> Literals<'a> {
             hashbrown::hash_map::Entry::Occupied(entry) => Ok(*entry.get()),
             hashbrown::hash_map::Entry::Vacant(entry) => {
                 let id = Self::next_id(&mut self.flat, span)?;
-                self.flat.push(Literal::String(v.to_owned()));
+                self.flat.push(Literal::String(v.into()));
                 entry.insert(id);
 
                 Ok(id)
@@ -603,7 +604,7 @@ impl<'a> FunctionState<'a> {
     fn emit(&mut self, inst: Instruction, span: Span) {
         self.code.push(inst);
         self.dbg.spans.push(span);
-        // TODO: peep-opt
+        // TODO(opt): peep-opt
     }
 }
 
@@ -1164,7 +1165,7 @@ fn eval_expr_if<'a>(
     match node {
         // if <cond> do <body> else <tail>
         If::Simple(node) => {
-            // TODO: dedup
+            // TODO(clean): dedup
             let mut targets = BranchTargets {
                 next: ForwardLabel::new(m.buf),
                 body: ForwardLabel::new(m.buf),
@@ -1346,7 +1347,7 @@ fn emit_if_cond_inner<'a>(
             let lhs_reg = dst;
             let rhs_reg = m.reg(node.rhs_span())?;
 
-            // TODO: handle lhs/rhs constant:
+            // TODO(opt): handle lhs/rhs constant:
             // if `lhs` is constant, move it to `rhs`
             // if `rhs` is constant, try to emit specialized literal variants of eq
             // (?) const-eval if both are constant
@@ -1624,7 +1625,6 @@ fn eval_expr_infix<'a>(
         None => (m.reg(node.lhs_span())?, true),
     };
 
-    // TODO: constant lhs/rhs
     let lhs = eval_expr(m, node.lhs(), node.lhs_span(), Some(dst).into())?;
     let rhs_reg = m.reg(node.rhs_span())?;
     let rhs = eval_expr(m, node.rhs(), node.rhs_span(), Some(rhs_reg).into())?;
@@ -1888,7 +1888,7 @@ fn emit_value<'a>(m: &mut State<'a>, value: Value<'a>, dst: Reg) -> Result<Reg> 
             Ok(dst)
         }
         ValueKind::Int(v) => {
-            // TODO: dedup
+            // TODO(clean): dedup
             if v <= i16::MAX as i64 {
                 let v = unsafe { Imm16::new_unchecked(v as i16) };
                 m.emit(asm::lsmi(dst, v), value.span);
@@ -1936,7 +1936,7 @@ fn materialize_value<'a>(m: &mut State<'a>, value: Value<'a>, dst: Reg) -> Resul
                 let id = f!(m).literals.i64(v, value.span)?;
                 Ok(R::Const(unsafe { Lit8::new_unchecked(id.get() as u8) }))
             } else {
-                // TODO: DEDUP
+                // TODO(clean): DEDUP
                 // emit it as a load, use the register
                 if v <= i16::MAX as i64 {
                     let v = unsafe { Imm16::new_unchecked(v as i16) };
@@ -1954,7 +1954,7 @@ fn materialize_value<'a>(m: &mut State<'a>, value: Value<'a>, dst: Reg) -> Resul
                 let id = f!(m).literals.f64(v, value.span)?;
                 Ok(R::Const(unsafe { Lit8::new_unchecked(id.get() as u8) }))
             } else {
-                // TODO: dedup
+                // TODO(clean): dedup
                 // emit it as a load, use the register
                 let id = f!(m).literals.f64(v, value.span)?;
                 m.emit(asm::lnum(dst, id), value.span);

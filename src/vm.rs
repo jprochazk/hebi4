@@ -84,7 +84,7 @@ impl Chunk {
     }
 }
 
-// TODO: colocate data (?)
+// TODO(opt): colocate data (?)
 /// A function "prototype".
 ///
 /// Stores the actual code and associated constants generated
@@ -148,9 +148,6 @@ pub mod dbg {
         pub(crate) reg: Reg,
     }
 }
-
-// NOTE: `Value` and `Literal` must be partialy bit-compatible
-// TODO: check this at compile time
 
 impl Literal {
     #[inline]
