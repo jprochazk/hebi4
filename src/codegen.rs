@@ -1164,6 +1164,7 @@ fn eval_expr_if<'a>(
     match node {
         // if <cond> do <body> else <tail>
         If::Simple(node) => {
+            // TODO: dedup
             let mut targets = BranchTargets {
                 next: ForwardLabel::new(m.buf),
                 body: ForwardLabel::new(m.buf),
