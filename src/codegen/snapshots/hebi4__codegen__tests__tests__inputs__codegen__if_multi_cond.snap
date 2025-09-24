@@ -1,0 +1,38 @@
+---
+source: src/codegen/tests.rs
+expression: snapshot
+---
+OK
+.fn @main
+  params 0
+  stack 4
+  .locals
+    a = r1
+    b = r2
+  .code
+   0  lsmi r1, 0
+   1  lsmi r2, 1
+   2  islt r1, r2
+   3  jmp 3   ; to 6
+   4  lnil r0
+   5  jmp 20   ; to 25
+   6  isgt r1, r2
+   7  jmp 3   ; to 10
+   8  lnil r0
+   9  jmp 16   ; to 25
+  10  isle r1, r2
+  11  jmp 3   ; to 14
+  12  lnil r0
+  13  jmp 12   ; to 25
+  14  isge r1, r2
+  15  jmp 3   ; to 18
+  16  lnil r0
+  17  jmp 8   ; to 25
+  18  iseq r1, r2
+  19  jmp 3   ; to 22
+  20  lnil r0
+  21  jmp 4   ; to 25
+  22  isne r1, r2
+  23  jmp 2   ; to 25
+  24  lnil r0
+  25  ret

@@ -1164,16 +1164,18 @@ fn eval_expr_if<'a>(
     match node {
         // if <cond> do <body> else <tail>
         If::Simple(node) => {
-            let mut next = ForwardLabel::new(m.buf);
-            let mut body = ForwardLabel::new(m.buf);
+            let mut targets = BranchTargets {
+                next: ForwardLabel::new(m.buf),
+                body: ForwardLabel::new(m.buf),
+            };
 
             // if the condition is true, execute `body`. otherwise, `jmp` to `tail`.
-            emit_if_cond(m, node.cond(), node.cond_span(), dst, &mut next, &mut body)?;
+            emit_if_cond(m, node.cond(), node.cond_span(), dst, &mut targets)?;
             let pos = f!(m).code.len();
             m.emit(asm::jmp(PLACEHOLDER), node.cond_span());
-            next.add_target(pos);
+            targets.next.add_target(pos);
 
-            body.bind(f!(m))?;
+            targets.body.bind(f!(m))?;
 
             m.begin_scope();
             let value = emit_stmt_list_with_tail_eval(m, node.body(), Some(dst).into())?;
@@ -1189,7 +1191,7 @@ fn eval_expr_if<'a>(
                 exit.add_target(pos);
             }
 
-            next.bind(f!(m))?;
+            targets.next.bind(f!(m))?;
 
             if let Some(tail) = node.tail().as_option() {
                 let value = eval_expr_block(m, tail, node.tail_span(), Some(dst).into())?;
@@ -1201,7 +1203,45 @@ fn eval_expr_if<'a>(
             }
         }
         If::Multi(node) => {
-            todo!()
+            let mut branches = node.branches().iter().peekable();
+
+            while let Some(branch) = branches.next() {
+                let mut targets = BranchTargets {
+                    next: ForwardLabel::new(m.buf),
+                    body: ForwardLabel::new(m.buf),
+                };
+
+                // if the condition is true, execute `body`. otherwise, `jmp` to `tail`.
+                emit_if_cond(m, branch.cond(), branch.cond_span(), dst, &mut targets)?;
+                let pos = f!(m).code.len();
+                m.emit(asm::jmp(PLACEHOLDER), branch.cond_span());
+                targets.next.add_target(pos);
+
+                targets.body.bind(f!(m))?;
+
+                m.begin_scope();
+                let value = emit_stmt_list_with_tail_eval(m, branch.body(), Some(dst).into())?;
+                if !free {
+                    emit_value_into(m, value, dst)?;
+                }
+                m.end_scope();
+
+                let has_next = branches.peek().is_some() || node.tail().is_some();
+                if has_next {
+                    let pos = f!(m).code.len();
+                    m.emit(asm::jmp(PLACEHOLDER), branch.cond_span());
+                    exit.add_target(pos);
+                }
+
+                targets.next.bind(f!(m))?;
+            }
+
+            if let Some(tail) = node.tail().as_option() {
+                let value = eval_expr_block(m, tail, node.tail_span(), Some(dst).into())?;
+                emit_value_into(m, value, dst)?;
+            }
+
+            exit.bind(f!(m))?;
         }
     }
 
@@ -1212,15 +1252,19 @@ fn eval_expr_if<'a>(
     Ok(Value::dynamic(dst, span))
 }
 
+struct BranchTargets<'a> {
+    next: ForwardLabel<'a>,
+    body: ForwardLabel<'a>,
+}
+
 fn emit_if_cond<'a>(
     m: &mut State<'a>,
     node: Node<'a, ast::Expr>,
     span: Span,
     dst: Reg,
-    next: &mut ForwardLabel<'a>,
-    body: &mut ForwardLabel<'a>,
+    targets: &mut BranchTargets<'a>,
 ) -> Result<()> {
-    emit_if_cond_inner(m, node, span, dst, false, next, body)
+    emit_if_cond_inner(m, node, span, dst, false, targets)
 }
 
 fn emit_if_cond_inner<'a>(
@@ -1229,19 +1273,18 @@ fn emit_if_cond_inner<'a>(
     span: Span,
     dst: Reg,
     negated: bool,
-    next: &mut ForwardLabel<'a>,
-    body: &mut ForwardLabel<'a>,
+    targets: &mut BranchTargets<'a>,
 ) -> Result<()> {
     use ast::InfixOp as Op;
     match node.kind() {
         ast::ExprKind::Infix(node) if node.op().is_logical() => match (*node.op(), negated) {
             (Op::And, false) => {
-                emit_if_cond_inner(m, node.lhs(), node.lhs_span(), dst, false, next, body)?;
+                emit_if_cond_inner(m, node.lhs(), node.lhs_span(), dst, false, targets)?;
                 let pos = f!(m).code.len();
                 m.emit(asm::jmp(PLACEHOLDER), node.lhs_span());
-                next.add_target(pos);
+                targets.next.add_target(pos);
 
-                emit_if_cond_inner(m, node.rhs(), node.rhs_span(), dst, false, next, body)?;
+                emit_if_cond_inner(m, node.rhs(), node.rhs_span(), dst, false, targets)?;
                 // `rhs` jmp is emitted by caller
 
                 Ok(())
@@ -1252,12 +1295,12 @@ fn emit_if_cond_inner<'a>(
                 //   if not(lhs) do body()
                 //   else if not(rhs) do body()
                 //   end
-                emit_if_cond_inner(m, node.lhs(), node.lhs_span(), dst, false, next, body)?;
+                emit_if_cond_inner(m, node.lhs(), node.lhs_span(), dst, false, targets)?;
                 let pos = f!(m).code.len();
                 m.emit(asm::jmp(PLACEHOLDER), node.lhs_span());
-                body.add_target(pos);
+                targets.body.add_target(pos);
 
-                emit_if_cond_inner(m, node.rhs(), node.rhs_span(), dst, true, next, body)?;
+                emit_if_cond_inner(m, node.rhs(), node.rhs_span(), dst, true, targets)?;
                 // `rhs` jmp is emitted by caller
 
                 Ok(())
@@ -1268,12 +1311,12 @@ fn emit_if_cond_inner<'a>(
                 //   if lhs do body()
                 //   else if rhs do body()
                 //   end
-                emit_if_cond_inner(m, node.lhs(), node.lhs_span(), dst, true, next, body)?;
+                emit_if_cond_inner(m, node.lhs(), node.lhs_span(), dst, true, targets)?;
                 let pos = f!(m).code.len();
                 m.emit(asm::jmp(PLACEHOLDER), node.lhs_span());
-                body.add_target(pos);
+                targets.body.add_target(pos);
 
-                emit_if_cond_inner(m, node.rhs(), node.rhs_span(), dst, false, next, body)?;
+                emit_if_cond_inner(m, node.rhs(), node.rhs_span(), dst, false, targets)?;
                 // `rhs` jmp is emitted by caller
 
                 Ok(())
@@ -1284,12 +1327,12 @@ fn emit_if_cond_inner<'a>(
                 //   if not(lhs) do
                 //     if not(rhs) do body() end
                 //   end
-                emit_if_cond_inner(m, node.lhs(), node.lhs_span(), dst, true, next, body)?;
+                emit_if_cond_inner(m, node.lhs(), node.lhs_span(), dst, true, targets)?;
                 let pos = f!(m).code.len();
                 m.emit(asm::jmp(PLACEHOLDER), node.lhs_span());
-                next.add_target(pos);
+                targets.next.add_target(pos);
 
-                emit_if_cond_inner(m, node.rhs(), node.rhs_span(), dst, true, next, body)?;
+                emit_if_cond_inner(m, node.rhs(), node.rhs_span(), dst, true, targets)?;
                 // `rhs` jmp is emitted by caller
 
                 Ok(())
@@ -1330,7 +1373,7 @@ fn emit_if_cond_inner<'a>(
         }
 
         ast::ExprKind::Prefix(node) if *node.op() == ast::PrefixOp::Not => {
-            emit_if_cond_inner(m, node.rhs(), node.rhs_span(), dst, true, next, body)
+            emit_if_cond_inner(m, node.rhs(), node.rhs_span(), dst, true, targets)
         }
 
         _ => emit_if_cond_generic(m, node, span, dst),
