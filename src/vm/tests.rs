@@ -10,15 +10,15 @@ fn run(path: &Path) {
             panic!("{}", err.render(&input));
         }
     };
-    let chunk = match crate::codegen::emit(&ast) {
-        Ok(chunk) => chunk,
+    let module = match crate::codegen::emit(&ast) {
+        Ok(m) => m,
         Err(err) => panic!("{}", err.render(&input)),
     };
-    let disasm = chunk.disasm(&input).to_string();
+    let disasm = module.disasm(&input).to_string();
 
     let mut vm = crate::vm::Vm::new();
     vm.with(|mut r| {
-        let (snapshot, failure) = match r.run(chunk) {
+        let (snapshot, failure) = match r.run(&module) {
             Ok(value) => (format!("OK\n{}", r.fmt(value)), false),
             Err(err) => (
                 format!("ERROR\n{}\n\nDISASM:\n\n{disasm}", err.render(&input)),

@@ -30,11 +30,11 @@
 //! - `eval` methods return `Value`s, and may emit some bytecode.
 //! - `emit` methods only emit bytecode.
 //!
-//! The result of code generation is a [`Chunk`], which is:
+//! The result of code generation is a [`Module`], which is:
 //! - A list of functions, each with a unique stable ID ([`FnId`]), and
 //! - The ID of the main function.
 //!
-//! The VM begins execution by dispatching the chunk's main function.
+//! The VM begins execution by dispatching the module's main entrypoint.
 
 #[macro_use]
 pub mod opcodes;
@@ -43,7 +43,7 @@ use crate::{
     ast::{self, Expr, Node, NodeList, f64n},
     span::Span,
     vm::{
-        self, Chunk, Context, Control, FuncInfo,
+        self, Context, Control, FuncInfo, Module,
         value::{Literal, ValueRaw},
     },
 };
@@ -83,7 +83,7 @@ macro_rules! f {
 
 const NO_SPAN: Span = Span::empty();
 
-pub fn emit(ast: &Ast) -> Result<Chunk> {
+pub fn emit(ast: &Ast) -> Result<Module> {
     let buf = &Bump::new();
     let mut m = State {
         buf,
@@ -109,7 +109,7 @@ pub fn emit(ast: &Ast) -> Result<Chunk> {
 
     m.func_table.define(main, f);
 
-    Ok(Chunk::new(main, m.func_table.finish()))
+    Ok(Module::new(main, m.func_table.finish()))
 }
 
 struct State<'a> {

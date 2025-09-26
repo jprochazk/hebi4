@@ -22,8 +22,8 @@ fn run(path: &Path) {
         }
     };
 
-    let chunk = match hebi4::emit(&ast) {
-        Ok(chunk) => chunk,
+    let module = match hebi4::emit(&ast) {
+        Ok(m) => m,
         Err(err) => {
             eprintln!("{}", err.render(&code));
             std::process::exit(1);
@@ -31,7 +31,7 @@ fn run(path: &Path) {
     };
 
     hebi4::Vm::new().with(|mut vm| {
-        let result = match vm.run(chunk) {
+        let result = match vm.run(&module) {
             Ok(v) => vm.fmt(v).to_string(),
             Err(err) => err.render(&code).to_string(),
         };

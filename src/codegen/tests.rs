@@ -15,7 +15,7 @@ fn emitter(path: &Path) {
         }
     };
     let (snapshot, failure) = match emit(&ast) {
-        Ok(chunk) => (format!("OK\n{}", chunk.disasm(&input)), false),
+        Ok(m) => (format!("OK\n{}", m.disasm(&input)), false),
         Err(err) => (format!("ERROR\n{}", err.render(&input)), true),
     };
 

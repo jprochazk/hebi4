@@ -1,25 +1,24 @@
 // use crate::{error::Location, span::Span};
 
-use super::{Chunk, FuncInfo, dbg::Local};
+use super::{FuncInfo, Module, dbg::Local};
 
-impl Chunk {
+impl Module {
     pub fn disasm<'a>(&'a self, src: &'a str) -> Disasm<'a> {
-        Disasm { chunk: self, src }
+        Disasm { module: self, src }
     }
 }
 
 pub struct Disasm<'a> {
-    chunk: &'a Chunk,
+    module: &'a Module,
     src: &'a str,
 }
 
 impl<'a> std::fmt::Display for Disasm<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let functions = &*self.chunk.functions;
-        for func in functions {
+        for func in self.module.functions() {
             std::fmt::Display::fmt(
                 &DisasmFunc {
-                    chunk: self.chunk,
+                    module: self.module,
                     func,
                     src: self.src,
                 },
@@ -31,7 +30,7 @@ impl<'a> std::fmt::Display for Disasm<'a> {
 }
 
 pub struct DisasmFunc<'a> {
-    chunk: &'a Chunk,
+    module: &'a Module,
     func: &'a FuncInfo,
     src: &'a str,
 }
@@ -45,9 +44,10 @@ impl<'a> std::fmt::Display for DisasmFunc<'a> {
             code,
             literals,
             dbg,
+            module: _,
         } = &self.func;
 
-        let chunk = self.chunk;
+        let module = self.module;
         let src = self.src;
         let dbg = dbg;
         let code = &code[..];
@@ -164,7 +164,7 @@ impl<'a> std::fmt::Display for DisasmFunc<'a> {
 
                 I::Call { dst, args, _c } => writeln!(f, "call {dst}, {args}   ; dyn")?,
                 I::Fastcall { dst, id } => {
-                    let name = chunk.functions.get(id.zx()).unwrap().name();
+                    let name = module.functions().get(id.zx()).unwrap().name();
                     writeln!(f, "call {dst}, {id}   ; {id}={name}")?
                 }
                 I::Ret { _a, _b, _c } => writeln!(f, "ret")?,
