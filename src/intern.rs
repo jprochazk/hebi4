@@ -1,6 +1,6 @@
 //! String interner which stores strings in a single contiguous buffer.
 //!
-//! Adapted from https://github.com/CAD97/strena/blob/1ddbf48b9f639ffbb4c89b0d51cb005fc0e3a4f7/src/lib.rs
+//! Adapted from <https://github.com/CAD97/strena/blob/1ddbf48b9f639ffbb4c89b0d51cb005fc0e3a4f7/src/lib.rs>
 //!
 //! MIT/Apache-2.0 licensed
 

@@ -1,3 +1,5 @@
+//! "Simple" value interner, a kind of flat [`std::collections::HashSet`].
+
 use std::hash::{BuildHasher, Hash};
 
 use hashbrown::{HashMap, hash_map::RawEntryMut};

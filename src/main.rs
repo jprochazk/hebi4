@@ -12,17 +12,7 @@ fn main() {
 
 fn run(path: &Path) {
     let code = read_to_string(path).expect("failed to read file");
-
-    let tokens = hebi4::tokenize(&code);
-    let ast = match hebi4::parse(&tokens) {
-        Ok(ast) => ast,
-        Err(err) => {
-            eprintln!("{}", err.render(&code));
-            std::process::exit(1);
-        }
-    };
-
-    let module = match hebi4::emit(&ast) {
+    let module = match code.parse::<hebi4::Module>() {
         Ok(m) => m,
         Err(err) => {
             eprintln!("{}", err.render(&code));
@@ -30,7 +20,7 @@ fn run(path: &Path) {
         }
     };
 
-    hebi4::Vm::new().with(|mut vm| {
+    hebi4::Hebi::new().with(|mut vm| {
         let result = match vm.run(&module) {
             Ok(v) => vm.fmt(v).to_string(),
             Err(err) => err.render(&code).to_string(),

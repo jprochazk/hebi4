@@ -11,17 +11,17 @@
 //! - Fully safe implementation
 //!
 //! # GC rooting api:
-//! - Root<'a, T> => rooted on the stack
-//! - Persistent<T> => rooted via a special list
+//! - `Root<'a, T>` => rooted on the stack
+//! - `Persistent<T>` => rooted via a special list
 //!   - `Rc<T>`, but GC-managed.
-//! - Handle<'a, T>, HandleMut<'a, T> => rooted _somehow_
+//! - `Handle<'a, T>`, `HandleMut<'a, T>` => rooted _somehow_
 //!   - Both `Root<'a, T>` and `Persistent<'a, T>` yield handles,
 //!     given a shared/exclusive reference to the heap.
 //!   - Allows for write barriers to exist, opening up incremental collection
 //!     at some point in the future.
 //!     - Ideally the write barriers would already exist and be called,
 //!       even if they are no-ops, just to prove that it can work.
-//! - Gc<T> => internal "raw pointer" type, not exposed in any way,
+//! - `Gc<T>` => internal "raw pointer" type, not exposed in any way,
 //!   unsafe to use.
 //!   - e.g. `Value` stores this, builtin arrays hold a list of them, etc.
 //!   - requires unsafe `Trace` impl to be correct when stored

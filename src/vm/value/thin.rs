@@ -2,7 +2,7 @@
 //!
 //! - [`ThinStr`]
 //!
-//! Implementation copied from: https://github.com/thomcc/thin_str/blob/d0367e0e876104dfa9860bec45f10b3e6e107ecd/src/lib.rs
+//! Implementation copied from: <https://github.com/thomcc/thin_str/blob/d0367e0e876104dfa9860bec45f10b3e6e107ecd/src/lib.rs>
 //! Original code is dual licensed under MIT/Apache 2.0, (C) github.com/thomcc
 
 use std::{
