@@ -114,13 +114,12 @@ pub struct String {
 }
 
 impl String {
-    #[inline]
     pub(crate) fn alloc(heap: &Heap, s: &str) -> Gc<Self> {
-        let this = Self {
-            inner: s.to_owned(),
-        };
-
-        heap.alloc_no_gc(this)
+        heap.alloc_no_gc(|ptr| unsafe {
+            (*ptr).write(Self {
+                inner: s.to_owned(),
+            });
+        })
     }
 
     #[inline]
@@ -150,13 +149,30 @@ pub struct List {
 }
 
 impl List {
-    #[inline]
+    #[inline(never)]
     pub(crate) fn alloc(heap: &Heap, capacity: usize) -> Gc<Self> {
-        let this = Self {
-            items: Vec::with_capacity(capacity),
-        };
+        heap.alloc_no_gc(|ptr| unsafe {
+            (*ptr).write(Self {
+                items: Vec::with_capacity(capacity),
+            });
+        })
+    }
 
-        heap.alloc_no_gc(this)
+    /// Allocate a `List` initialized to `len` `nil`s.
+    #[inline(never)]
+    pub(crate) fn new(heap: &Heap, len: usize) -> Gc<Self> {
+        heap.alloc_no_gc(|ptr| unsafe {
+            let mut items = Vec::with_capacity(len);
+            {
+                let items = items.spare_capacity_mut();
+                for i in 0..len {
+                    items.get_unchecked_mut(i).write(ValueRaw::Nil);
+                }
+            }
+            items.set_len(len);
+
+            (*ptr).write(Self { items });
+        })
     }
 }
 
@@ -263,7 +279,7 @@ impl<'a> RefMut<'a, List> {
         self.items.push(value.raw());
     }
 
-    /// Push without checking if we have capacity for another value.
+    /// Push without checking if the list has capacity for another value.
     #[inline]
     pub unsafe fn push_unchecked(&mut self, value: ValueRoot<'_>) {
         std::hint::assert_unchecked(self.items.spare_capacity_mut().len() > 0);
@@ -289,6 +305,45 @@ impl<'a> RefMut<'a, List> {
 
         Ok(())
     }
+
+    /// Set `self[index]` to `value`.
+    ///
+    /// Assumes that `value` is alive.
+    ///
+    /// ## Safety
+    ///
+    /// - `value` must still be alive.
+    #[inline]
+    pub unsafe fn set_raw_unchecked(&mut self, index: usize, value: ValueRaw) {
+        debug_assert!(index < self.items.len());
+        unsafe {
+            *self.items.get_unchecked_mut(index) = value;
+        }
+    }
+
+    /// Resizes `self` to exactly `new_size`, filling empty slots with `nil`.
+    ///
+    /// Assumes that `self` will _grow_, and that there is enough capacity for it.
+    ///
+    /// ## Safety
+    ///
+    /// - `self.len() <= new_size`
+    /// - `self.capacity() >= new_size`
+    #[inline]
+    pub unsafe fn resize_grow_unchecked(&mut self, new_size: usize) {
+        debug_assert!(self.items.len() <= new_size);
+
+        let additional = new_size - self.items.len();
+
+        let items = self.items.spare_capacity_mut();
+        for i in 0..additional {
+            items.get_unchecked_mut(i).write(ValueRaw::Nil);
+        }
+
+        unsafe {
+            self.items.set_len(new_size);
+        }
+    }
 }
 
 struct Opaque(u32);
@@ -308,15 +363,14 @@ fn hash_str(hasher: &impl BuildHasher, key: &str) -> u64 {
 }
 
 impl Table {
-    #[inline]
     pub fn alloc(heap: &Heap, capacity: usize) -> Gc<Self> {
-        let this = Self {
-            map: HashMap::with_capacity_and_hasher(capacity, ()),
-            kv: Vec::with_capacity(capacity),
-            hasher: FxBuildHasher::default(),
-        };
-
-        heap.alloc_no_gc(this)
+        heap.alloc_no_gc(|ptr| unsafe {
+            (*ptr).write(Self {
+                map: HashMap::with_capacity_and_hasher(capacity, ()),
+                kv: Vec::with_capacity(capacity),
+                hasher: FxBuildHasher::default(),
+            });
+        })
     }
 }
 
@@ -612,5 +666,12 @@ mod tests {
         heap.collect();
         assert_eq!(heap.stats().bytes(), 0);
         assert_eq!(heap.stats().collections(), 3);
+    }
+
+    #[test]
+    fn heap_collect_on_drop() {
+        // `heap` frees all managed objects on drop
+        let heap = &mut Heap::new();
+        list!(in heap; v = 0);
     }
 }

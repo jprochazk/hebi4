@@ -190,6 +190,12 @@ enum OperandType {
     /// 8-bit register
     Reg,
 
+    /// 16-bit module variable ID
+    Mvar,
+
+    /// 8-bit capture ID
+    Cap,
+
     /// 16-bit literal ID
     Lit,
 
@@ -205,6 +211,9 @@ enum OperandType {
     /// 16-bit value
     Imm16,
 
+    /// 16-bit value, signed
+    Imm16s,
+
     /// 24-bit value
     Imm24,
 
@@ -216,11 +225,14 @@ impl OperandType {
     fn bits(&self) -> u8 {
         match self {
             OperandType::Reg => 8,
+            OperandType::Mvar => 16,
+            OperandType::Cap => 8,
             OperandType::Lit => 16,
             OperandType::Lit8 => 8,
             OperandType::FnId => 16,
             OperandType::Imm8 => 8,
             OperandType::Imm16 => 16,
+            OperandType::Imm16s => 16,
             OperandType::Imm24 => 24,
             OperandType::Imm24s => 24,
         }
@@ -229,11 +241,14 @@ impl OperandType {
     fn str(&self) -> &'static str {
         match self {
             OperandType::Reg => "Reg",
+            OperandType::Mvar => "Mvar",
+            OperandType::Cap => "Cap",
             OperandType::Lit => "Lit",
             OperandType::Lit8 => "Lit8",
             OperandType::FnId => "FnId",
             OperandType::Imm8 => "Imm8",
             OperandType::Imm16 => "Imm16",
+            OperandType::Imm16s => "Imm16s",
             OperandType::Imm24 => "Imm24",
             OperandType::Imm24s => "Imm24s",
         }
@@ -242,11 +257,14 @@ impl OperandType {
     fn base(&self) -> &'static str {
         match self {
             OperandType::Reg => "u8",
+            OperandType::Mvar => "u16",
+            OperandType::Cap => "u8",
             OperandType::Lit => "u16",
             OperandType::Lit8 => "u8",
             OperandType::FnId => "u16",
             OperandType::Imm8 => "u8",
             OperandType::Imm16 => "u16",
+            OperandType::Imm16s => "i16",
             OperandType::Imm24 => "u24",
             OperandType::Imm24s => "i24",
         }
@@ -331,11 +349,14 @@ fn parse_instruction(s: &str, opcode: u8, docs: String) -> Instruction {
 
         let ty = match ty {
             "reg" => OperandType::Reg,
+            "mvar" => OperandType::Mvar,
+            "cap" => OperandType::Cap,
             "lit" => OperandType::Lit,
             "lit8" => OperandType::Lit8,
             "fnid" => OperandType::FnId,
             "imm8" => OperandType::Imm8,
             "imm16" => OperandType::Imm16,
+            "imm16s" => OperandType::Imm16s,
             "imm24" => OperandType::Imm24,
             "imm24s" => OperandType::Imm24s,
             other => panic!("invalid operand type {other:?} in instruction:\n{s}"),
@@ -486,7 +507,7 @@ fn emit_operand_structs(o: &mut String, is: &Instructions) {
             }}
 
             ",
-            doc = i.docs,
+            doc = i.docs.trim(),
             name = i.type_name(),
             fields = i.operands.fields(true),
         );
@@ -548,6 +569,7 @@ fn emit_instruction_asm(o: &mut String, is: &Instructions) {
         .iter()
         .map(|i| {
             let name = i.name;
+            let docs = i.docs.trim();
             let cname = i.type_name();
             let args = match i.operands {
                 Operands::None => String::new(),
@@ -569,7 +591,7 @@ fn emit_instruction_asm(o: &mut String, is: &Instructions) {
                 Operands::A8B8C8 { a, b, c } => format!("{{ {}, {}, {} }}", a.name, b.name, c.name),
             };
             format!(
-                "pub const fn {name}({args}) -> Instruction {{ Instruction::{cname} {fields} }}"
+                "#[doc = {docs:?}] pub const fn {name}({args}) -> Instruction {{ Instruction::{cname} {fields} }}"
             )
         })
         .join('\n');

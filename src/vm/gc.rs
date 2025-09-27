@@ -81,6 +81,7 @@
 use std::{
     cell::{Cell, UnsafeCell},
     marker::{PhantomData, PhantomPinned},
+    mem::MaybeUninit,
     ops::{Deref, DerefMut},
     pin::Pin,
     ptr::null_mut,
@@ -123,14 +124,30 @@ impl Heap {
     // NOTE: `&self` because it does not trigger a collection,
     // so it does not need to invalidate any shared references.
     #[inline]
-    pub(crate) fn alloc_no_gc<T: Trace + 'static>(&self, value: T) -> Gc<T> {
-        let ptr = Box::into_raw(Box::new(GcBox {
-            header: UnsafeCell::new(GcHeader::new(T::KIND, self.head.get())),
-            value: UnsafeCell::new(value),
-        }));
+    pub(crate) fn alloc_no_gc<T: Trace + 'static>(
+        &self,
+        init: impl FnOnce(*mut MaybeUninit<T>),
+    ) -> Gc<T> {
+        // We do manual piece-wise init, because allocation failure should _not_
+        // cause the value to be dropped! Therefore it must be constructed _after_
+        // we have a place to put it.
+        let ptr = Box::into_raw(Box::<GcBox<T>>::new_uninit());
+
+        unsafe {
+            let header = ptr.cast::<MaybeUninit<GcHeader>>();
+            (*header).write(GcHeader::new(T::KIND, self.head.get()));
+
+            let value_ptr = ptr
+                .cast::<u8>()
+                .add(size_of::<GcHeader>())
+                .cast::<MaybeUninit<T>>();
+            init(value_ptr);
+        }
+
+        let ptr = ptr.cast::<GcBox<T>>();
 
         // CAST: `GcBox` is a `repr(C)` struct with `GcHeader` as its first field
-        self.head.set(ptr.cast());
+        self.head.set(ptr.cast::<GcHeader>());
 
         self.stats.alloc(core::mem::size_of::<T>());
 
@@ -139,7 +156,17 @@ impl Heap {
 
     #[inline]
     pub(crate) fn collect(&mut self) {
-        mark_and_sweep::collect(self);
+        struct NoExternalRoots;
+        impl ExternalRoots for NoExternalRoots {
+            unsafe fn trace(&self, _: &Tracer) {}
+        }
+
+        self.collect_with_external_roots(&NoExternalRoots);
+    }
+
+    #[inline]
+    pub(crate) fn collect_with_external_roots(&mut self, external_roots: &dyn ExternalRoots) {
+        mark_and_sweep::collect(self, external_roots);
     }
 
     #[inline]
@@ -161,6 +188,14 @@ impl Heap {
     #[inline]
     pub fn id(&self) -> HeapId {
         self.heap_id
+    }
+}
+
+impl Drop for Heap {
+    fn drop(&mut self) {
+        unsafe {
+            mark_and_sweep::free_all(self);
+        }
     }
 }
 
@@ -411,6 +446,7 @@ const _: () = {
     );
 };
 
+// Think very carefully about changing the repr of this!
 #[repr(C, align(8))]
 struct GcBox<T: Sized + 'static> {
     header: UnsafeCell<GcHeader>,
@@ -429,6 +465,16 @@ impl<T: 'static> Clone for Gc<T> {
 impl<T: 'static> Copy for Gc<T> {}
 
 // # Tracing
+
+/// Trace external roots, which is any place outside of
+/// the object graph where `Gc` pointers may be placed
+/// by the VM, and where they need to stay alive.
+///
+/// An example of this is the VM's stack, which holds live
+/// values up to the top-most call frame.
+pub(crate) trait ExternalRoots: 'static {
+    unsafe fn trace(&self, tracer: &Tracer);
+}
 
 /// The GC must know how to traverse types in order to manage them.
 ///

@@ -7,7 +7,7 @@
 //!
 //! See the doc comment in the `vm` module for more information.
 
-use std::alloc::{Layout, alloc_zeroed as allocate_zeroed, dealloc as deallocate};
+use std::alloc::{Layout, alloc, dealloc, handle_alloc_error};
 
 /// A dynamically-sized heap-allocated array.
 ///
@@ -55,6 +55,44 @@ impl<T: Sized + Copy> DynStack<T> {
         self.length -= 1;
         self.inner.offset(self.length).read()
     }
+
+    #[inline]
+    pub fn len(&self) -> usize {
+        self.length
+    }
+
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.length == 0
+    }
+
+    #[inline]
+    pub fn iter(&self) -> DynStackIter<'_, T> {
+        DynStackIter {
+            stack: self,
+            index: 0,
+        }
+    }
+}
+
+pub struct DynStackIter<'a, T: Sized + Copy> {
+    stack: &'a DynStack<T>,
+    index: usize,
+}
+
+impl<'a, T: Sized + Copy> Iterator for DynStackIter<'a, T> {
+    type Item = &'a T;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.index >= self.stack.length {
+            return None;
+        }
+
+        let index = self.index;
+        self.index += 1;
+
+        Some(unsafe { &*self.stack.inner.offset(index) })
+    }
 }
 
 /// A statically-sized heap-allocated array.
@@ -75,7 +113,11 @@ impl<T: Sized + Copy> DynArray<T> {
         assert!(initial_capacity.is_power_of_two());
 
         let capacity = initial_capacity;
-        let base = unsafe { allocate_zeroed(Self::layout(capacity)).cast::<T>() };
+        let layout = Self::layout(capacity);
+        let base = unsafe { alloc(layout).cast::<T>() };
+        if base.is_null() {
+            handle_alloc_error(layout);
+        }
         Self { base, capacity }
     }
 
@@ -109,16 +151,19 @@ impl<T: Sized + Copy> DynArray<T> {
     /// Calling this invalidates any pointers to the array created by
     /// [`Self::offset`] before the call.
     #[inline(never)]
-    #[cold]
     pub unsafe fn grow(&mut self, additional: usize) {
         let old_capacity = self.capacity;
         let old_base = self.base;
 
         let new_capacity = (old_capacity + additional).next_power_of_two();
-        let new_base = allocate_zeroed(Self::layout(new_capacity)).cast::<T>();
+        let new_layout = Self::layout(new_capacity);
+        let new_base = alloc(new_layout).cast::<T>();
+        if new_base.is_null() {
+            handle_alloc_error(new_layout);
+        }
 
         core::ptr::copy_nonoverlapping(old_base, new_base, old_capacity);
-        deallocate(old_base.cast(), Self::layout(old_capacity));
+        dealloc(old_base.cast(), Self::layout(old_capacity));
 
         self.base = new_base;
         self.capacity = new_capacity;
@@ -133,6 +178,6 @@ impl<T: Sized + Copy> DynArray<T> {
 impl<T: Sized + Copy> Drop for DynArray<T> {
     #[inline]
     fn drop(&mut self) {
-        unsafe { deallocate(self.base.cast(), Self::layout(self.capacity)) }
+        unsafe { dealloc(self.base.cast(), Self::layout(self.capacity)) }
     }
 }

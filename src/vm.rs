@@ -52,11 +52,12 @@ pub mod gc;
 
 pub mod value;
 
+use array::{DynArray, DynStack};
 use beef::lean::Cow;
+use gc::Heap;
+use value::List;
 
 use std::{marker::PhantomData, ptr::null, sync::Arc};
-
-use array::{DynArray, DynStack};
 
 use crate::{
     codegen::opcodes::*,
@@ -479,15 +480,38 @@ impl Ctx {
         let ip = self.saved_ip()?;
         self.get_span(ip)
     }
+
+    #[inline]
+    unsafe fn heap(self) -> *mut Heap {
+        &raw mut (*(*self.0).vm).heap
+    }
+
+    #[inline]
+    unsafe fn maybe_gc(self) {
+        // TODO: GC thresholds
+        // for now, we always GC
+
+        self.full_gc();
+    }
+
+    #[cold]
+    unsafe fn full_gc(self) {
+        let vm = (*self.0).vm;
+        let roots = VmRoots { vm };
+        (*vm).heap.collect_with_external_roots(&roots);
+    }
 }
 
 #[derive(Clone, Copy)]
 #[repr(u8)]
 pub enum VmError {
-    DivisionByZero = 0,
-    ArithTypeError = 1,
-    UnopInvalidType = 2,
-    CmpTypeError = 3,
+    DivisionByZero,
+    ArithTypeError,
+    UnopInvalidType,
+    CmpTypeError,
+    NotAList,
+    InvalidArrayIndex,
+    IndexOutOfBounds,
 }
 
 impl VmError {
@@ -495,21 +519,26 @@ impl VmError {
     unsafe fn with_context(&self, ctx: Ctx) -> Error {
         let span = ctx.get_span_for_saved_ip().unwrap_or_default();
         match self {
-            VmError::DivisionByZero => error("division by zero", span),
-            // TODO: also print type names
-            VmError::ArithTypeError => error("type mismatch", span),
-            VmError::UnopInvalidType => error("invalid type", span),
-            VmError::CmpTypeError => error("type mismatch", span),
+            Self::DivisionByZero => error("division by zero", span),
+            Self::ArithTypeError => error("type mismatch", span),
+            Self::UnopInvalidType => error("invalid type", span),
+            Self::CmpTypeError => error("type mismatch", span),
+            Self::NotAList => error("not a list", span),
+            Self::InvalidArrayIndex => error("value is not a valid array index", span),
+            Self::IndexOutOfBounds => error("index out of bounds", span),
         }
     }
 
     #[inline]
     fn is_external(self) -> bool {
         match self {
-            VmError::DivisionByZero
-            | VmError::ArithTypeError
-            | VmError::UnopInvalidType
-            | VmError::CmpTypeError => false,
+            Self::DivisionByZero
+            | Self::ArithTypeError
+            | Self::UnopInvalidType
+            | Self::CmpTypeError
+            | Self::NotAList
+            | Self::InvalidArrayIndex
+            | Self::IndexOutOfBounds => false,
         }
     }
 }
@@ -524,6 +553,20 @@ macro_rules! vm_exit {
 static JT: JumpTable = jump_table! {
     nop,
     mov,
+
+    lmvar,
+    smvar,
+    lcap,
+    scap,
+    lidx,
+    lidxn,
+    sidx,
+    sidxn,
+    lkey,
+    lkeyc,
+    skey,
+    skeyc,
+
     lnil,
     lsmi,
     ltrue,
@@ -669,6 +712,118 @@ unsafe fn mov(args: Mov, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control {
 }
 
 #[inline(always)]
+unsafe fn lmvar(args: Lmvar, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control {
+    todo!()
+}
+
+#[inline(always)]
+unsafe fn smvar(args: Smvar, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control {
+    todo!()
+}
+
+#[inline(always)]
+unsafe fn lcap(args: Lcap, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control {
+    todo!()
+}
+
+#[inline(always)]
+unsafe fn scap(args: Scap, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control {
+    todo!()
+}
+
+#[inline(always)]
+unsafe fn lidx(args: Lidx, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control {
+    todo!()
+}
+
+#[inline(always)]
+unsafe fn lidxn(args: Lidxn, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control {
+    todo!()
+}
+
+#[inline(always)]
+unsafe fn sidx(args: Sidx, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control {
+    let idx = *sp.at(args.idx);
+    let list = *sp.at(args.target);
+    let src = *sp.at(args.src);
+
+    let ValueRaw::Int(idx) = idx else {
+        return invalid_array_index_error(ip, ctx);
+    };
+    let idx = idx as usize;
+
+    let ValueRaw::List(list) = list else {
+        return not_a_list_error(ip, ctx);
+    };
+
+    // UNROOTED: reachable through the stack
+    let len = list.as_ref().len();
+    if idx >= len {
+        return index_out_of_bounds_error(ip, ctx);
+    }
+
+    list.as_mut().set_raw_unchecked(idx, src);
+
+    dispatch_next(jt, sp, lp, ip, ctx)
+}
+
+#[cold]
+unsafe fn invalid_array_index_error(ip: Ip, ctx: Ctx) -> Control {
+    vm_exit!(ctx, ip, InvalidArrayIndex);
+}
+
+#[inline(always)]
+unsafe fn sidxn(args: Sidxn, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control {
+    let idx = lp.int_unchecked(args.idx) as usize;
+    let list = *sp.at(args.target);
+    let src = *sp.at(args.src);
+
+    let ValueRaw::List(list) = list else {
+        return not_a_list_error(ip, ctx);
+    };
+
+    // UNROOTED: reachable through the stack
+    let len = list.as_ref().len();
+    if idx >= len {
+        return index_out_of_bounds_error(ip, ctx);
+    }
+
+    list.as_mut().set_raw_unchecked(idx, src);
+
+    dispatch_next(jt, sp, lp, ip, ctx)
+}
+
+#[cold]
+unsafe fn not_a_list_error(ip: Ip, ctx: Ctx) -> Control {
+    vm_exit!(ctx, ip, NotAList);
+}
+
+#[cold]
+unsafe fn index_out_of_bounds_error(ip: Ip, ctx: Ctx) -> Control {
+    vm_exit!(ctx, ip, IndexOutOfBounds);
+}
+
+#[inline(always)]
+unsafe fn lkey(args: Lkey, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control {
+    todo!()
+}
+
+#[inline(always)]
+unsafe fn lkeyc(args: Lkeyc, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control {
+    todo!()
+}
+
+#[inline(always)]
+unsafe fn skey(args: Skey, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control {
+    todo!()
+}
+
+#[inline(always)]
+unsafe fn skeyc(args: Skeyc, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control {
+    todo!()
+}
+
+#[inline(always)]
 unsafe fn lnil(args: Lnil, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control {
     *sp.at(args.dst) = ValueRaw::Nil;
 
@@ -727,8 +882,17 @@ unsafe fn lfni(args: Lfni, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control 
 
 #[inline(always)]
 unsafe fn larr(args: Larr, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control {
-    // TODO: allocation
-    todo!()
+    ctx.maybe_gc();
+
+    let len = args.cap.zx();
+
+    // UNROOTED: immediately written to the stack
+    let heap = ctx.heap();
+    let list = List::new(&*heap, len);
+
+    *sp.at(args.dst) = ValueRaw::List(list);
+
+    dispatch_next(jt, sp, lp, ip, ctx)
 }
 
 #[inline(always)]
@@ -1134,13 +1298,12 @@ macro_rules! try_div_eval {
     ($dst:ident, $lhs:ident, $rhs:ident, $ctx:ident, $ip:ident) => {
         use ValueRaw::*;
         match ($lhs, $rhs) {
-            (Int(lhs), Int(rhs)) => {
-                if rhs == 0 {
-                    vm_exit!($ctx, $ip, DivisionByZero);
+            (Int(lhs), Int(rhs)) => match lhs.checked_div(rhs) {
+                Some(v) => *$dst = Int(v),
+                None => {
+                    vm_exit!($ctx, $ip, DivisionByZero)
                 }
-
-                *$dst = Int(lhs / rhs);
-            }
+            },
 
             // float div by zero = inf
             (Float(lhs), Float(rhs)) => {
@@ -1205,21 +1368,12 @@ unsafe fn unm(args: Unm, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control {
         ValueRaw::Float(rhs) => {
             *dst = Float(-rhs);
         }
-
         _ => {
-            unm_type_error(ip, ctx);
-            return Control::error(VmError::ArithTypeError);
+            vm_exit!(ctx, ip, ArithTypeError);
         }
     }
 
     dispatch_next(jt, sp, lp, ip, ctx)
-}
-
-#[cold]
-unsafe fn unm_type_error(ip: Ip, ctx: Ctx) {
-    let err = "integer division by zero";
-    let span = ctx.get_span(ip).unwrap_or_default();
-    ctx.write_error(error(err, span));
 }
 
 #[inline(always)]
@@ -1315,7 +1469,6 @@ unsafe fn maybe_grow_stack(ctx: Ctx, new_frame: &CallFrame) -> Sp {
     ctx.stack_at(new_stack_base)
 }
 
-#[inline(never)]
 #[cold]
 unsafe fn grow_stack(ctx: Ctx, new_frame: &CallFrame) {
     // NOTE: We allocate more than we need here, capacity doubles each time anyway.
@@ -1382,14 +1535,36 @@ impl Vm {
     }
 }
 
+struct VmRoots {
+    vm: *mut Vm,
+}
+
+impl gc::ExternalRoots for VmRoots {
+    unsafe fn trace(&self, tracer: &gc::Tracer) {
+        // iterate over VM stack
+        let frames = &(*self.vm).frames;
+        eprintln!("{}", frames.len());
+        let sp = (*self.vm).stack.offset(0);
+        for frame in (*self.vm).frames.iter() {
+            let base = frame.stack_base as usize;
+            let nstack = frame.callee.nstack() as usize;
+            for i in base..base + nstack {
+                tracer.visit_value(sp.add(i).read());
+            }
+        }
+    }
+}
+
 pub struct Runtime<'gc> {
     vm: *mut Vm,
 
     _lifetime: Invariant<'gc>,
 }
 
+// TODO: none of the public APIs should return `ValueRaw`.
+// Currently they are kept alive by the fact that we only
+// run gc during allocating instructions (`larr` and friends).
 impl<'gc> Runtime<'gc> {
-    // TODO: return persistent value here instead
     /// Execute the main entrypoint of the module to completion.
     pub fn run(&mut self, m: &Module) -> Result<ValueRaw> {
         self.run_inner(m)?;
@@ -1442,7 +1617,7 @@ impl<'gc> Runtime<'gc> {
                 error: &raw mut error,
                 saved_ip: Ip(null()),
                 current_frame: CallFrame {
-                    callee: FuncInfoPtr(&*entry),
+                    callee: FuncInfoPtr(&raw const *entry),
                     stack_base: 0,
                     return_addr: 0,
                 },

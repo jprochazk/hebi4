@@ -81,6 +81,36 @@ impl<'a> std::fmt::Display for DisasmFunc<'a> {
             match inst {
                 I::Nop { _a, _b, _c } => writeln!(f, "nop")?,
                 I::Mov { dst, src, _c } => writeln!(f, "mov {dst}, {src}")?,
+
+                I::Lmvar { dst, src } => writeln!(f, "lmvar {dst}, {src}")?,
+                I::Smvar { src, dst } => writeln!(f, "smvar {dst}, {src}")?,
+                I::Lcap { dst, src, _c } => writeln!(f, "lcap {dst}, {src}")?,
+                I::Scap { dst, src, _c } => writeln!(f, "scap {dst}, {src}")?,
+                I::Lidx { dst, target, idx } => writeln!(f, "lidx {dst}, {target}, {idx}")?,
+                I::Lidxn { dst, target, idx } => writeln!(
+                    f,
+                    "lidxn {dst}, {target}, {idx}",
+                    idx = lit[idx.zx()].int().unwrap()
+                )?,
+                I::Sidx { target, idx, src } => writeln!(f, "sidx {target}, {idx}, {src}")?,
+                I::Sidxn { target, idx, src } => writeln!(
+                    f,
+                    "sidxn {target}, {idx}, {src}",
+                    idx = lit[idx.zx()].int().unwrap(),
+                )?,
+                I::Lkey { dst, target, key } => writeln!(f, "lkey {dst}, {target}, {key}")?,
+                I::Lkeyc { dst, target, key } => writeln!(
+                    f,
+                    "lkeyc {dst}, {target}, {key}",
+                    key = lit[key.zx()].str().unwrap()
+                )?,
+                I::Skey { target, key, src } => writeln!(f, "skey {target}, {key}, {src}")?,
+                I::Skeyc { target, key, src } => writeln!(
+                    f,
+                    "skeyc {target}, {key}, {src}",
+                    key = lit[key.zx()].str().unwrap()
+                )?,
+
                 I::Lnil { dst, _b, _c } => writeln!(f, "lnil {dst}")?,
                 I::Lsmi { dst, v } => writeln!(f, "lsmi {dst}, {v}")?,
                 I::Ltrue { dst, _b, _c } => writeln!(f, "ltrue {dst}")?,
@@ -97,10 +127,14 @@ impl<'a> std::fmt::Display for DisasmFunc<'a> {
                     let v = lit[id.zx()].str().unwrap();
                     writeln!(f, "lstr {dst}, {id}   ; {id}={v:?}")?
                 }
-                I::Lcli { dst, id } => todo!(),
-                I::Lfni { dst, id } => todo!(),
-                I::Larr { dst, len, _c } => todo!(),
-                I::Lobj { dst, len, _c } => todo!(),
+                I::Lcli { dst, id } => {
+                    todo!()
+                }
+                I::Lfni { dst, id } => {
+                    todo!()
+                }
+                I::Larr { dst, cap } => writeln!(f, "larr {dst}, {cap}")?,
+                I::Lobj { dst, cap } => writeln!(f, "lobj {dst}, {cap}")?,
                 I::Jmp { rel } => writeln!(f, "jmp {rel}   ; to {}", (i as isize) + rel.sz())?,
                 I::Istrue { v, _b, _c } => writeln!(f, "istrue {v}")?,
                 I::Istruec { dst, v, _c } => writeln!(f, "istruec {dst}, {v}")?,
@@ -142,33 +176,26 @@ impl<'a> std::fmt::Display for DisasmFunc<'a> {
                 I::Isgev { dst, lhs, rhs } => writeln!(f, "isgev {dst}, {lhs}, {rhs}")?,
                 I::Iseqv { dst, lhs, rhs } => writeln!(f, "iseqv {dst}, {lhs}, {rhs}")?,
                 I::Isnev { dst, lhs, rhs } => writeln!(f, "isnev {dst}, {lhs}, {rhs}")?,
-
                 I::Addvv { dst, lhs, rhs } => writeln!(f, "add {dst}, {lhs}, {rhs}")?,
                 I::Addvn { dst, lhs, rhs } => writeln!(f, "add {dst}, {lhs}, {}", &lit[rhs.zx()])?,
                 I::Addnv { dst, lhs, rhs } => writeln!(f, "add {dst}, {}, {rhs}", &lit[lhs.zx()])?,
-
                 I::Subvv { dst, lhs, rhs } => writeln!(f, "sub {dst}, {lhs}, {rhs}")?,
                 I::Subvn { dst, lhs, rhs } => writeln!(f, "sub {dst}, {lhs}, {}", &lit[rhs.zx()])?,
                 I::Subnv { dst, lhs, rhs } => writeln!(f, "sub {dst}, {}, {rhs}", &lit[lhs.zx()])?,
-
                 I::Mulvv { dst, lhs, rhs } => writeln!(f, "mul {dst}, {lhs}, {rhs}")?,
                 I::Mulvn { dst, lhs, rhs } => writeln!(f, "mul {dst}, {lhs}, {}", &lit[rhs.zx()])?,
                 I::Mulnv { dst, lhs, rhs } => writeln!(f, "mul {dst}, {}, {rhs}", &lit[lhs.zx()])?,
-
                 I::Divvv { dst, lhs, rhs } => writeln!(f, "div {dst}, {lhs}, {rhs}")?,
                 I::Divvn { dst, lhs, rhs } => writeln!(f, "div {dst}, {lhs}, {}", &lit[rhs.zx()])?,
                 I::Divnv { dst, lhs, rhs } => writeln!(f, "div {dst}, {}, {rhs}", &lit[lhs.zx()])?,
-
-                I::Unm { dst, rhs, _c } => todo!(),
-                I::Not { dst, rhs, _c } => todo!(),
-
+                I::Unm { dst, rhs, _c } => writeln!(f, "unm {dst}, {rhs}")?,
+                I::Not { dst, rhs, _c } => writeln!(f, "not {dst}, {rhs}")?,
                 I::Call { dst, args, _c } => writeln!(f, "call {dst}, {args}   ; dyn")?,
                 I::Fastcall { dst, id } => {
                     let name = module.functions().get(id.zx()).unwrap().name();
                     writeln!(f, "call {dst}, {id}   ; {id}={name}")?
                 }
                 I::Ret { _a, _b, _c } => writeln!(f, "ret")?,
-
                 I::Stop { _a, _b, _c } => writeln!(f, "stop")?,
             }
         }

@@ -2,10 +2,10 @@ use super::*;
 use crate::vm::value::*;
 
 // Stop-the-world, mark and sweep GC.
-pub fn collect(heap: &mut Heap) {
+pub(crate) fn collect(heap: &mut Heap, external_roots: &dyn ExternalRoots) {
     heap.stats.collect();
     unsafe {
-        mark(heap);
+        mark(heap, external_roots);
         sweep(heap);
     }
 }
@@ -19,12 +19,13 @@ pub fn collect(heap: &mut Heap) {
 //
 // Note that we do not actually use a worklist.
 // Instead, we use depth-first recursive traversal.
-unsafe fn mark(heap: &mut Heap) {
+unsafe fn mark(heap: &mut Heap, external_roots: &dyn ExternalRoots) {
     let tracer = Tracer {
         _marker: PhantomData,
     };
 
-    // TODO: reduce duplication (?)
+    external_roots.trace(&tracer);
+
     RootList::iter(heap.roots(), |root| {
         let ptr = (*root).ptr;
         if ptr.is_marked() {
@@ -90,6 +91,33 @@ unsafe fn sweep(heap: &mut Heap) {
 
             freed_bytes += size;
         }
+
+        iter = next;
+    }
+
+    heap.stats.free(freed_bytes);
+}
+
+pub(crate) unsafe fn free_all(heap: &mut Heap) {
+    let mut iter = heap.head.get();
+    let mut freed_bytes = 0usize;
+
+    while !iter.is_null() {
+        let (next, kind, marked) = (*iter).into_parts();
+
+        macro_rules! free {
+                ($($ty:ident),*) => {
+                    match kind {
+                        $(ObjectKind::$ty => {
+                            let _ = Box::from_raw(iter.cast::<GcBox<$ty>>());
+                            core::mem::size_of::<$ty>()
+                        })*
+                    }
+                }
+            }
+
+        let size = free!(String, List, Table, Closure, UData);
+        freed_bytes += size;
 
         iter = next;
     }

@@ -4,7 +4,46 @@ nop;
 /* Move value from register `src` to register `dst`. */
 mov dst:reg src:reg;
 
-# TODO: module variables, closure captures, field loads
+# Module variables, captures, array indices and table keys.
+
+/* Load module variable `src` to register `dst`. */
+lmvar dst:reg src:mvar;
+
+# NOTE: `dst` comes 2nd here due to being 16-bit
+#       it's still disassembled as 1st operand for consistency
+
+/* Store register `dst` into module variable `mvar`. */
+smvar src:reg dst:mvar;
+
+/* Load current closure's capture `src` to register `dst`. */
+lcap dst:reg src:cap;
+
+/* Store register `src` to current closure's capture `dst`. */
+scap dst:cap src:reg;
+
+/* Load index `idx` (register) from `target` (array) to register `dst`. */
+lidx dst:reg target:reg idx:reg;
+
+/* Load index `idx` (literal) from `target` (array) to register `dst`. */
+lidxn dst:reg target:reg idx:lit8;
+
+/* Store value from `src` into `idx` (register) in `target` (array). */
+sidx target:reg idx:reg src:reg;
+
+/* Store value from `src` into `idx` (register) in `target` (array). */
+sidxn target:reg idx:lit8 src:reg;
+
+/* Load `key` (register) from `target` (object) to register `dst` (object). */
+lkey dst:reg target:reg key:reg;
+
+/* Load `key` (literal) from `target` (object) to register `dst` (object). */
+lkeyc dst:reg target:reg key:lit8;
+
+/* Store value from `src` into `key` (register) in `target` (object). */
+skey target:reg key:reg src:reg;
+
+/* Store value from `src` into `key` (literal) in `target` (object). */
+skeyc target:reg key:lit8 src:reg;
 
 # Value instructions
 
@@ -12,7 +51,7 @@ mov dst:reg src:reg;
 lnil dst:reg;
 
 /* Load 16-bit integer `v` into register `dst`. */
-lsmi dst:reg v:imm16;
+lsmi dst:reg v:imm16s;
 
 /* Load literal `true` into register `dst`. */
 ltrue dst:reg;
@@ -60,16 +99,14 @@ lfni dst:reg id:lit;
 
 # TODO: constant arrays/objects don't need to use stack space at all
 /*
- * Load array with values in range `dst..dst+len`.
+ * Allocate an array with `capacity` into register `dst`.
  */
-larr dst:reg len:imm8;
+larr dst:reg cap:imm16;
 
 /*
- * Load object with key-value pairs in range `dst..dst+len`.
- *
- * There are total `len*2` values in the range.
+ * Allocate an object with `capacity` into register `dst`.
  */
-lobj dst:reg len:imm8;
+lobj dst:reg cap:imm16;
 
 # In hebi4's VM, there is only one `jmp` instruction with
 # a signed offset (stored as u24 with a bias).

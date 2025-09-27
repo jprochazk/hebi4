@@ -382,13 +382,17 @@ macro_rules! declare_operand_types {
 declare_operand_types! {
     Reg(u8) = "r{}",
 
+    Mvar(u16) = "m{}",
+    Cap(u8) = "c{}",
+
     Lit(u16) = "l{}",
     Lit8(u8) = "l{}",
 
     FnId(u16) = "fn{}",
 
     Imm8(u8) = "{}",
-    Imm16(i16) = "{}",
+    Imm16(u16) = "{}",
+    Imm16s(i16) = "{}",
     Imm24(u24) = "{}",
     Imm24s(i24) = "{}",
 }
