@@ -7,7 +7,7 @@
 //!
 //! See the doc comment in the `vm` module for more information.
 
-use std::alloc::{Layout, alloc, dealloc, handle_alloc_error};
+use std::alloc::{Layout, alloc_zeroed, dealloc, handle_alloc_error};
 
 /// A dynamically-sized heap-allocated array.
 ///
@@ -114,7 +114,11 @@ impl<T: Sized + Copy> DynArray<T> {
 
         let capacity = initial_capacity;
         let layout = Self::layout(capacity);
-        let base = unsafe { alloc(layout).cast::<T>() };
+        // NOTE: `alloc_zeroed` is load-bearing:
+        // `0` is a valid `ValueRaw`, and we need the stack to
+        // not contain any uninitialized memory, otherwise the
+        // GC isn't allowed to trace it.
+        let base = unsafe { alloc_zeroed(layout).cast::<T>() };
         if base.is_null() {
             handle_alloc_error(layout);
         }
@@ -157,7 +161,11 @@ impl<T: Sized + Copy> DynArray<T> {
 
         let new_capacity = (old_capacity + additional).next_power_of_two();
         let new_layout = Self::layout(new_capacity);
-        let new_base = alloc(new_layout).cast::<T>();
+        // NOTE: `alloc_zeroed` is load-bearing:
+        // `0` is a valid `ValueRaw`, and we need the stack to
+        // not contain any uninitialized memory, otherwise the
+        // GC isn't allowed to trace it.
+        let new_base = alloc_zeroed(new_layout).cast::<T>();
         if new_base.is_null() {
             handle_alloc_error(new_layout);
         }
