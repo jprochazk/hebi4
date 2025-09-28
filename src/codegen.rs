@@ -1751,6 +1751,44 @@ fn eval_expr_call<'a>(
     Ok(Value::dynamic(base.out(), span))
 }
 
+trait ExprInfo {
+    fn needs_contiguous_registers(&self) -> bool;
+}
+
+impl ExprInfo for Node<'_, ast::Expr> {
+    fn needs_contiguous_registers(&self) -> bool {
+        match self.kind() {
+            ast::ExprKind::Call(node) => !node.args().is_empty(),
+            ast::ExprKind::CallObject(node) => !node.args().is_empty(),
+
+            ast::ExprKind::Return(..)
+            | ast::ExprKind::Break(..)
+            | ast::ExprKind::Continue(..)
+            | ast::ExprKind::IfSimple(..)
+            | ast::ExprKind::IfMulti(..)
+            | ast::ExprKind::Block(..)
+            | ast::ExprKind::FuncAnon(..)
+            | ast::ExprKind::GetVar(..)
+            | ast::ExprKind::SetVar(..)
+            | ast::ExprKind::GetField(..)
+            | ast::ExprKind::SetField(..)
+            | ast::ExprKind::GetIndex(..)
+            | ast::ExprKind::SetIndex(..)
+            | ast::ExprKind::Infix(..)
+            | ast::ExprKind::Prefix(..)
+            | ast::ExprKind::Array(..)
+            | ast::ExprKind::Object(..)
+            | ast::ExprKind::Int32(..)
+            | ast::ExprKind::Int64(..)
+            | ast::ExprKind::Float32(..)
+            | ast::ExprKind::Float64(..)
+            | ast::ExprKind::Bool(..)
+            | ast::ExprKind::Str(..)
+            | ast::ExprKind::Nil(..) => false,
+        }
+    }
+}
+
 fn eval_expr_infix<'a>(
     m: &mut State<'a>,
     node: Node<'a, ast::Infix>,
@@ -1779,7 +1817,20 @@ fn eval_expr_infix<'a>(
         None => (m.reg(node.lhs_span())?, true),
     };
 
-    let lhs = eval_expr(m, node.lhs(), node.lhs_span(), Some(dst).into())?;
+    // HACK: if `dst` is not at the top of the stack, then an expression
+    // requiring contiguous registers will not be able to use `dst` directly,
+    // and will instead have to allocate its own `dst` register and emit a
+    // `mov` to it.
+    // For `infix`, we don't actually need the lhs to be in the `dst` register,
+    // we have separate `dst` and `lhs` registers in the `add` instruction.
+    // It's just a convenient place to put it.
+    let lhs_reg = if !free && node.lhs().needs_contiguous_registers() && !f!(m).ra.is_at_top(dst) {
+        m.reg(node.lhs_span())?
+    } else {
+        dst
+    };
+
+    let lhs = eval_expr(m, node.lhs(), node.lhs_span(), Some(lhs_reg).into())?;
     let rhs_reg = m.reg(node.rhs_span())?;
     let rhs = eval_expr(m, node.rhs(), node.rhs_span(), Some(rhs_reg).into())?;
 
@@ -1836,7 +1887,7 @@ fn eval_expr_infix<'a>(
         // If `eval_expr` returns a constant, it will not have used the
         // register, so we can still use it for the literal.
 
-        let lhs = materialize_value(m, lhs, dst)?;
+        let lhs = materialize_value(m, lhs, lhs_reg)?;
         let rhs = materialize_value(m, rhs, rhs_reg)?;
 
         use RegOrConst as R;

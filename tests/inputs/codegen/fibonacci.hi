@@ -1,11 +1,6 @@
 fn fib(n) do
   if n<2 do n
-  else
-    var l=fib(n-1)
-    var r=fib(n-2)
-    l+r
-    # todo: the following curently has an extra `mov`
-    # fib(n-1)+fib(n-2)
+  else fib(n-1)+fib(n-2)
   end
 end
 
