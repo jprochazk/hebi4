@@ -51,3 +51,8 @@ pub mod __macro {
     pub use crate::vm::gc::{Gc, Root, StackRoot, ValueRoot};
     pub use crate::vm::value::{List, ValueRaw};
 }
+
+const _: () = assert!(
+    cfg!(target_endian = "little"),
+    "only little-endian architectures are supported"
+);

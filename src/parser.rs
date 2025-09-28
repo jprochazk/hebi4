@@ -596,16 +596,16 @@ fn parse_expr_prefix(p: &mut State, buf: &Bump) -> Result<Spanned<Expr>> {
 
 fn parse_expr_postfix(p: &mut State, buf: &Bump) -> Result<Spanned<Expr>> {
     let expr = parse_expr_primary(p, buf)?;
-    if !matches!(
-        Packed::kind(&expr.into_inner().into()),
-        NodeKind::GetVar
-            | NodeKind::GetField
-            | NodeKind::GetIndex
-            | NodeKind::Call
-            | NodeKind::CallObject
-    ) {
-        return Ok(expr);
-    }
+    // if !matches!(
+    //     Packed::kind(&expr.into_inner().into()),
+    //     NodeKind::GetVar
+    //         | NodeKind::GetField
+    //         | NodeKind::GetIndex
+    //         | NodeKind::Call
+    //         | NodeKind::CallObject
+    // ) {
+    //     return Ok(expr);
+    // }
 
     let mut expr = expr;
     while !p.end() {

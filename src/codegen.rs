@@ -1119,10 +1119,10 @@ fn eval_expr<'a>(
         ast::ExprKind::FuncAnon(node) => todo!(),
         ast::ExprKind::GetVar(node) => eval_expr_get_var(m, node, span, dst),
         ast::ExprKind::SetVar(node) => eval_expr_set_var(m, node, span, dst),
-        ast::ExprKind::GetField(node) => todo!(),
-        ast::ExprKind::SetField(node) => todo!(),
-        ast::ExprKind::GetIndex(node) => todo!(),
-        ast::ExprKind::SetIndex(node) => todo!(),
+        ast::ExprKind::GetField(node) => eval_expr_get_field(m, node, span, dst),
+        ast::ExprKind::SetField(node) => eval_expr_set_field(m, node, span, dst),
+        ast::ExprKind::GetIndex(node) => eval_expr_get_index(m, node, span, dst),
+        ast::ExprKind::SetIndex(node) => eval_expr_set_index(m, node, span, dst),
         ast::ExprKind::Call(node) => eval_expr_call(m, node, span, dst),
         ast::ExprKind::CallObject(node) => todo!(),
         ast::ExprKind::Infix(node) => eval_expr_infix(m, node, span, dst),
@@ -1553,6 +1553,68 @@ fn eval_expr_set_var<'a>(
     Ok(NOTHING)
 }
 
+fn eval_expr_get_field<'a>(
+    m: &mut State<'a>,
+    node: Node<'a, ast::GetField>,
+    span: Span,
+    dst: MaybeReg,
+) -> Result<Value<'a>> {
+    todo!()
+}
+
+fn eval_expr_set_field<'a>(
+    m: &mut State<'a>,
+    node: Node<'a, ast::SetField>,
+    span: Span,
+    dst: MaybeReg,
+) -> Result<Value<'a>> {
+    todo!()
+}
+
+fn eval_expr_get_index<'a>(
+    m: &mut State<'a>,
+    node: Node<'a, ast::GetIndex>,
+    span: Span,
+    dst: MaybeReg,
+) -> Result<Value<'a>> {
+    let (dst, free) = match dst.inner() {
+        Some(dst) => (dst, false),
+        None => (m.reg(node.parent_span())?, true),
+    };
+    let key_reg = m.reg(span)?;
+
+    let parent = eval_expr(m, node.parent(), node.parent_span(), Some(dst).into())?;
+    let parent = emit_value(m, parent, dst)?;
+    let key = eval_expr(m, node.key(), node.key_span(), Some(key_reg).into())?;
+
+    let key = match key.kind {
+        ValueKind::Int(idx) => materialize_int(m, idx, node.key_span(), key_reg)?,
+        _ => RegOrConst::Reg(emit_value(m, key, key_reg)?),
+    };
+
+    use RegOrConst as R;
+    match key {
+        R::Reg(idx) => m.emit(asm::lidx(dst, parent, idx), span),
+        R::Const(idx) => m.emit(asm::lidxn(dst, parent, idx), span),
+    }
+
+    m.rfree(key_reg);
+    if free {
+        m.rfree(dst);
+    }
+
+    Ok(Value::dynamic(dst, span))
+}
+
+fn eval_expr_set_index<'a>(
+    m: &mut State<'a>,
+    node: Node<'a, ast::SetIndex>,
+    span: Span,
+    dst: MaybeReg,
+) -> Result<Value<'a>> {
+    todo!()
+}
+
 fn eval_expr_call<'a>(
     m: &mut State<'a>,
     call: Node<'a, ast::Call>,
@@ -1702,6 +1764,12 @@ fn eval_expr_infix<'a>(
     if node.op().is_comparison() {
         return eval_expr_infix_comparison(m, node, span, dst);
     }
+
+    // TODO: hack `lhs` register for calls
+    // 1. if `lhs` is a call with args
+    // 2. if `dst` is not at the top of the stack
+    // Then allocate a separate register for `lhs` first
+    // This should remove a whole `mov`.
 
     // in case the return value is unused, we should still
     // evaluate the entire expression. for that we need an
@@ -1994,47 +2062,59 @@ enum RegOrConst {
     Const(Lit8),
 }
 
+fn materialize_int<'a>(m: &mut State<'a>, value: i64, span: Span, dst: Reg) -> Result<RegOrConst> {
+    use RegOrConst as R;
+
+    if f!(m).literals.is_next_id_8bit() {
+        // emit it as a literal, use it as operand
+        let id = f!(m).literals.i64(value, span)?;
+        Ok(R::Const(unsafe { Lit8::new_unchecked(id.get() as u8) }))
+    } else {
+        // TODO(clean): DEDUP
+        // emit it as a load, use the register
+        if value <= i16::MAX as i64 {
+            let v = unsafe { Imm16s::new_unchecked(value as i16) };
+            m.emit(asm::lsmi(dst, v), span);
+        } else {
+            let id = f!(m).literals.i64(value, span)?;
+            m.emit(asm::lint(dst, id), span);
+        }
+        Ok(R::Reg(dst))
+    }
+}
+
+fn materialize_float<'a>(
+    m: &mut State<'a>,
+    value: f64n,
+    span: Span,
+    dst: Reg,
+) -> Result<RegOrConst> {
+    use RegOrConst as R;
+
+    if f!(m).literals.is_next_id_8bit() {
+        // emit it as a literal, use it as operand
+        let id = f!(m).literals.f64(value, span)?;
+        Ok(R::Const(unsafe { Lit8::new_unchecked(id.get() as u8) }))
+    } else {
+        // TODO(clean): dedup
+        // emit it as a load, use the register
+        let id = f!(m).literals.f64(value, span)?;
+        m.emit(asm::lnum(dst, id), span);
+        Ok(R::Reg(dst))
+    }
+}
+
 /// Materialize `value` for use in emit.
 fn materialize_value<'a>(m: &mut State<'a>, value: Value<'a>, dst: Reg) -> Result<RegOrConst> {
     use RegOrConst as R;
     use ValueKind as V;
 
     match value.kind {
-        V::Dynamic(reg) => {
-            // already materialized
-            Ok(R::Reg(reg))
-        }
-        V::Int(v) => {
-            if f!(m).literals.is_next_id_8bit() {
-                // emit it as a literal, use it as operand
-                let id = f!(m).literals.i64(v, value.span)?;
-                Ok(R::Const(unsafe { Lit8::new_unchecked(id.get() as u8) }))
-            } else {
-                // TODO(clean): DEDUP
-                // emit it as a load, use the register
-                if v <= i16::MAX as i64 {
-                    let v = unsafe { Imm16s::new_unchecked(v as i16) };
-                    m.emit(asm::lsmi(dst, v), value.span);
-                } else {
-                    let id = f!(m).literals.i64(v, value.span)?;
-                    m.emit(asm::lint(dst, id), value.span);
-                }
-                Ok(R::Reg(dst))
-            }
-        }
-        V::Float(v) => {
-            if f!(m).literals.is_next_id_8bit() {
-                // emit it as a literal, use it as operand
-                let id = f!(m).literals.f64(v, value.span)?;
-                Ok(R::Const(unsafe { Lit8::new_unchecked(id.get() as u8) }))
-            } else {
-                // TODO(clean): dedup
-                // emit it as a load, use the register
-                let id = f!(m).literals.f64(v, value.span)?;
-                m.emit(asm::lnum(dst, id), value.span);
-                Ok(R::Reg(dst))
-            }
-        }
+        // already materialized
+        V::Dynamic(reg) => Ok(R::Reg(reg)),
+
+        V::Int(inner) => materialize_int(m, inner, value.span, dst),
+        V::Float(inner) => materialize_float(m, inner, value.span, dst),
 
         _ => todo!(),
     }
