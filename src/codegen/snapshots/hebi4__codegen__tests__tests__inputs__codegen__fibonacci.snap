@@ -13,20 +13,19 @@ OK
 
 .fn fib
   params 1
-  stack 6
+  stack 5
   .locals
     n = r1
-    l = r2
-    r = r3
   .code
    0  lsmi r2, 2
    1  islt r1, r2
    2  jmp 3   ; to 5
    3  mov r0, r1
-   4  jmp 6   ; to 10
+   4  jmp 7   ; to 11
    5  sub r3, r1, 1
    6  call r2, fn1   ; fn1=fib
-   7  sub r4, r1, 2
-   8  call r3, fn1   ; fn1=fib
-   9  add r0, r2, r3
-  10  ret
+   7  mov r0, r2
+   8  sub r3, r1, 2
+   9  call r2, fn1   ; fn1=fib
+  10  add r0, r0, r2
+  11  ret
