@@ -286,7 +286,7 @@ fn strip_single_line_comments(s: &str) -> String {
 }
 
 // parse opcode descriptions
-fn parse(s: &str) -> Instructions {
+fn parse(s: &'_ str) -> Instructions<'_> {
     let mut instructions = Instructions::default();
 
     let mut opcode = 0;
@@ -334,7 +334,7 @@ fn parse(s: &str) -> Instructions {
 // where <opcode> is either:
 // - hexcode (`0xFF`)
 // - `auto`, meaning "one plus the previous opcode"
-fn parse_instruction(s: &str, opcode: u8, docs: String) -> Instruction {
+fn parse_instruction(s: &'_ str, opcode: u8, docs: String) -> Instruction<'_> {
     let mut parts = s.split_ascii_whitespace();
 
     let Ok(name) = parts

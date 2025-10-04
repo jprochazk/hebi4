@@ -1,0 +1,18 @@
+---
+source: src/codegen/tests.rs
+expression: snapshot
+---
+OK
+.fn @main
+  params 0
+  stack 3
+  .locals
+    a = r1
+  .code
+  0  larr r1, 1
+  1  lsmi r2, 0
+  2  sidxn r1, 0, r2
+  3  lsmi r2, 1
+  4  sidxn r1, 0, r2
+  5  lnil r0
+  6  ret

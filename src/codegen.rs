@@ -105,11 +105,137 @@
 //! The VM begins execution by dispatching the module's main entrypoint.
 //!
 
+/*
+TODO: Rework register allocation
+
+- Replace the `Option<Reg>` shenanigans:
+  - `eval_expr` should _allocate registers for itself_,
+    emit the expression into it,
+    then return the register.
+  - If the expr is a variable use, this still returns
+    the variable's register.
+  - To reuse `dst`, a separate `eval_expr_into(dst)` is needed
+
+state:
+  num_vars: u8
+  current: u8
+  max: u8
+
+is_variable(reg) -> bool = reg < num_vars
+
+alloc_reg() -> RegId =
+  if state.current == 255
+    error("out of registers")
+  reg = state.current
+  state.current += 1
+  if state.current > state.max
+    state.max = state.current
+  return reg
+
+free_reg(reg) =
+  # don't free variables
+  if not is_variable(reg)
+    state.current = reg
+
+let_stmt(name, value) =
+  dst = alloc_reg()
+  emit_expr_into(dst, value)
+  declare_var(name, dst)
+
+emit_expr_into(dst, expr) =
+  match expr
+    case Infix(op, lhs, rhs) =
+      lhs_r = eval_expr_or_reuse(lhs, dst)
+      rhs_r = eval_expr(rhs)
+
+      emit_binop(dst, lhs_r, rhs_r, op)
+
+      if lhs_r != dst  # otherwise it's not temporary
+        free_reg(lhs_r)
+      free_reg(rhs_r)
+
+    case Use(name) =
+      reg = lookup_var(name)
+      if reg != dst
+        emit_mov(dst, reg)
+      # don't free reg - it's a variable
+
+    case Int(value) =
+      emit_lint(dst, value)
+
+eval_expr_or_reuse(expr, preferred_dst) -> RegId =
+  match expr
+    case Use(name) =
+      return lookup_var(name)
+
+    case Int(value) =
+      emit_lint(preferred_dst, value)
+      return preferred_dst
+
+    case _ =
+      emit_expr_into(preferred_dst, expr)
+      return preferred_dst
+
+# This should be the `Reg | Const` type, where `Const`
+# can be:
+# - used directly
+# - materialized into an (8bit or 16bit) literal id,
+# - materialized into a register
+# - etc.
+type Operand = Reg(RegId) | Imm(i32)
+
+eval_expr_operand(expr) -> Operand =
+  match expr
+    case Int(value) =
+      return Imm(value)
+
+    case Use(name) =
+      return Reg(lookup_var(name))  // Direct reference
+
+    case _ =
+      tmp = alloc_reg()
+      emit_expr_into(tmp, expr)
+      return Reg(tmp)
+
+eval_expr(expr) -> RegId =
+  match expr
+    case Use(name) =
+      return lookup_var(name)  // Direct reference
+
+    case Int(value) =
+      tmp = alloc_reg()
+      emit_lint(tmp, value)
+      return tmp
+
+    case _ =
+      tmp = alloc_reg()
+      emit_expr_into(tmp, expr)
+      return tmp
+
+# Note: expression, but statement semantics (=no value)
+emit_index_assign(arr_expr, idx_expr, val_expr) =
+  arr_reg = eval_expr(arr_expr)
+  idx_op = eval_expr_operand(idx_expr)
+  val_reg = eval_expr(val_expr)
+
+  match idx_op
+    case Imm(value) =
+      emit_sidx_imm(arr_reg, value, val_reg)
+    case Reg(reg) =
+      emit_sidx_reg(arr_reg, reg, val_reg)
+
+  free_reg(val_reg)
+  if idx_op is Reg(reg)
+    free_reg(reg)
+  free_reg(arr_reg)
+
+*/
+
 #[macro_use]
 pub mod opcodes;
 
 use crate::{
-    ast::{self, Expr, Node, NodeList, f64n},
+    ast::{self, Node, NodeList, f64n},
     span::Span,
     vm::{
         self, Context, Control, FuncInfo, Module,
@@ -263,7 +389,7 @@ struct FunctionState<'a> {
 }
 
 struct Scope<'a> {
-    last_reg_in_prev_scope: u8,
+    regalloc_snapshot: RegAllocSnapshot,
     symbols: Vec<'a, Symbol<'a>>,
     undefined_functions: Vec<'a, FnId>,
 }
@@ -280,65 +406,118 @@ struct FunctionDebug<'a> {
 }
 
 struct RegAlloc {
-    current: u8,
+    nvars: u8,
+    next: u8,
     num: u8,
 }
 
 impl RegAlloc {
     fn new() -> Self {
-        Self { current: 0, num: 0 }
+        Self {
+            nvars: 0,
+            next: 0,
+            num: 0,
+        }
     }
 
     fn alloc(&mut self, span: Span) -> Result<Reg> {
-        if self.current == u8::MAX {
+        if self.next == u8::MAX {
             return error("too many registers", span).into();
         }
 
-        let r = unsafe { Reg::new_unchecked(self.current) };
+        let r = unsafe { Reg::new_unchecked(self.next) };
 
-        self.current += 1;
-        if self.current > self.num {
-            self.num = self.current;
+        self.next += 1;
+        if self.next > self.num {
+            self.num = self.next;
         }
 
         Ok(r)
     }
 
-    fn alloc_n(&mut self, n: u8, span: Span) -> Result<RegRange> {
+    fn alloc_var(&mut self, span: Span) -> Result<Reg> {
+        let r = self.alloc(span)?;
+        self.nvars += 1;
+        Ok(r)
+    }
+
+    fn alloc_n(&mut self, span: Span, n: u8) -> Result<RegRange> {
         if n == 0 {
-            return error("cannot allocate zero registers", span).into();
+            return Ok(RegRange::empty());
         }
-        if self.current as usize + n as usize >= u8::MAX as usize {
+
+        if self.next as usize + n as usize >= u8::MAX as usize {
             return error("too many registers", span).into();
         }
 
-        let start = unsafe { Reg::new_unchecked(self.current) };
+        let start = unsafe { Reg::new_unchecked(self.next) };
 
-        self.current += n;
-        if self.current > self.num {
-            self.num = self.current;
+        self.next += n;
+        if self.next > self.num {
+            self.num = self.next;
         }
 
         Ok(RegRange { start, n })
     }
 
     fn is_at_top(&self, r: Reg) -> bool {
-        self.current == r.get() + 1
+        self.next == r.get() + 1
     }
 
     fn free(&mut self, r: Reg) {
-        if self.current != r.get() + 1 {
+        // Do not free variables. They are freed by `end_scope`,
+        // which snapshots the current scope depth.
+        if r.get() < self.nvars {
+            return;
+        }
+
+        if self.next != r.get() + 1 {
             unreachable!("ICE: registers freed out of order");
         }
-        self.current = r.get();
+        self.next = r.get();
     }
 
-    fn reset_to(&mut self, r: u8) {
-        self.current = r;
+    fn free_n(&mut self, range: RegRange) {
+        // ignore empty ranges
+        if range.n == 0 {
+            return;
+        }
+
+        // note: we never allocate use `alloc_n` for variables
+        assert!(
+            range.start.get() >= self.nvars,
+            "ICE: alloc_n range intersects with variables"
+        );
+
+        if self.next != range.end().get() + 1 {
+            unreachable!(
+                "ICE: registers freed out of order ({} != {})",
+                self.next,
+                range.end().get() + 1,
+            );
+        }
+        self.next = range.start.get();
+    }
+
+    fn snapshot(&self) -> RegAllocSnapshot {
+        RegAllocSnapshot {
+            nvars: self.nvars,
+            next: self.next,
+        }
+    }
+
+    fn restore(&mut self, snapshot: RegAllocSnapshot) {
+        self.nvars = snapshot.nvars;
+        self.next = snapshot.next;
     }
 }
 
-#[derive(Clone, Copy)]
+struct RegAllocSnapshot {
+    nvars: u8,
+    next: u8,
+}
+
+#[derive(Debug, Clone, Copy)]
 struct RegRange {
     start: Reg,
     n: u8,
@@ -347,6 +526,14 @@ struct RegRange {
 impl RegRange {
     fn empty() -> Self {
         Self { start: R0, n: 0 }
+    }
+
+    fn end(&self) -> Reg {
+        if self.n == 0 {
+            return R0;
+        }
+
+        unsafe { Reg::new_unchecked(self.start.get() + self.n - 1) }
     }
 }
 
@@ -382,6 +569,132 @@ impl Iterator for RegRangeIter {
         self.n -= 1;
 
         Some(unsafe { Reg::new_unchecked(self.end - n) })
+    }
+}
+
+/// Returns true if `reg` is at the top of the stack,
+/// meaning the next allocated register would be `reg + 1`.
+fn is_at_top<'a>(m: &mut State<'a>, reg: Reg) -> bool {
+    f!(m).ra.is_at_top(reg)
+}
+
+/// Attempt to reuse `reg` if present, otherwise allocate a fresh register.
+#[cfg_attr(debug_assertions, track_caller)]
+fn maybe_reuse_reg<'a>(m: &mut State<'a>, span: Span, reg: Option<Reg>) -> Result<Reg> {
+    let r = match reg {
+        Some(reg) => Ok(reg),
+        None => fresh_reg(m, span),
+    };
+
+    #[cfg(debug_assertions)]
+    if std::env::var("PRINT_REGALLOC").ok().is_some() {
+        eprintln!(
+            "reuse {span} {}: {reg:?} -> {r:?}",
+            std::panic::Location::caller()
+        );
+    }
+
+    r
+}
+
+#[cfg_attr(debug_assertions, track_caller)]
+/// Allocate a register.
+fn fresh_reg<'a>(m: &mut State<'a>, span: Span) -> Result<Reg> {
+    let r = f!(m).ra.alloc(span);
+
+    #[cfg(debug_assertions)]
+    if std::env::var("PRINT_REGALLOC").ok().is_some() {
+        eprintln!("alloc {span} {}: {r:?}", std::panic::Location::caller());
+    }
+
+    r
+}
+
+/// Allocate a contiguous range of registers.
+#[cfg_attr(debug_assertions, track_caller)]
+fn fresh_reg_range<'a>(m: &mut State<'a>, span: Span, n: u8) -> Result<RegRange> {
+    let range = f!(m).ra.alloc_n(span, n);
+
+    #[cfg(debug_assertions)]
+    if std::env::var("PRINT_REGALLOC").ok().is_some() {
+        eprintln!(
+            "alloc range {span} {}: {range:?}",
+            std::panic::Location::caller()
+        );
+    }
+
+    range
+}
+
+/// Allocate a register, and mark it as in use by a variable.
+///
+/// When in use by a variable, a register won't be freed by `free_reg` and others,
+/// instead being freed automatically at the end of the current scope.
+#[cfg_attr(debug_assertions, track_caller)]
+fn fresh_var<'a>(m: &mut State<'a>, span: Span) -> Result<Reg> {
+    let r = f!(m).ra.alloc_var(span);
+
+    #[cfg(debug_assertions)]
+    if std::env::var("PRINT_REGALLOC").ok().is_some() {
+        eprintln!("alloc var {span} {}: {r:?}", std::panic::Location::caller());
+    }
+
+    r
+}
+
+/// Free a register.
+#[cfg_attr(debug_assertions, track_caller)]
+fn free_reg<'a>(m: &mut State<'a>, reg: Reg) {
+    #[cfg(debug_assertions)]
+    if std::env::var("PRINT_REGALLOC").ok().is_some() {
+        eprintln!("free reg {}: {reg:?}", std::panic::Location::caller());
+    }
+
+    f!(m).ra.free(reg);
+}
+
+/// Free a register range.
+#[cfg_attr(debug_assertions, track_caller)]
+fn free_reg_range<'a>(m: &mut State<'a>, range: RegRange) {
+    #[cfg(debug_assertions)]
+    if std::env::var("PRINT_REGALLOC").ok().is_some() {
+        eprintln!("free range {}: {range:?}", std::panic::Location::caller());
+    }
+
+    f!(m).ra.free_n(range);
+}
+
+/// If `value` is dynamic, free its register.
+#[cfg_attr(debug_assertions, track_caller)]
+fn free_value<'a>(m: &mut State<'a>, value: Value<'a>) {
+    #[cfg(debug_assertions)]
+    if std::env::var("PRINT_REGALLOC").ok().is_some() {
+        eprintln!(
+            "free value {} {}: {:?}",
+            value.span,
+            std::panic::Location::caller(),
+            value.kind,
+        );
+    }
+
+    if let ValueKind::Dynamic(reg) = value.kind {
+        f!(m).ra.free(reg);
+    }
+}
+
+/// If `operand` is a register, free it.
+#[cfg_attr(debug_assertions, track_caller)]
+fn free_operand<'a>(m: &mut State<'a>, operand: Operand) {
+    #[cfg(debug_assertions)]
+    if std::env::var("PRINT_REGALLOC").ok().is_some() {
+        eprintln!(
+            "free operand {}: {operand:?}",
+            std::panic::Location::caller(),
+        );
+    }
+
+    if let Operand::Reg(reg) = operand {
+        f!(m).ra.free(reg);
     }
 }
 
@@ -581,7 +894,7 @@ impl<'a> FunctionState<'a> {
 
     fn begin_scope(&mut self, buf: &'a Bump) {
         self.scopes.push(Scope {
-            last_reg_in_prev_scope: self.ra.current,
+            regalloc_snapshot: self.ra.snapshot(),
             symbols: vec![in buf],
             undefined_functions: vec![in buf],
         });
@@ -592,7 +905,7 @@ impl<'a> FunctionState<'a> {
             .scopes
             .pop()
             .expect("`end_scope` called without any scopes");
-        self.ra.reset_to(scope.last_reg_in_prev_scope);
+        self.ra.restore(scope.regalloc_snapshot);
     }
 
     fn begin_loop(&mut self, buf: &'a Bump) -> Option<Loop<'a>> {
@@ -605,18 +918,6 @@ impl<'a> FunctionState<'a> {
         let loop_ = std::mem::replace(&mut self.loop_, prev).expect("some loop");
 
         loop_.exit.bind(self)
-    }
-
-    fn reg(&mut self, span: Span) -> Result<Reg> {
-        self.ra.alloc(span)
-    }
-
-    fn reg_n(&mut self, n: u8, span: Span) -> Result<RegRange> {
-        self.ra.alloc_n(n, span)
-    }
-
-    fn rfree(&mut self, reg: Reg) {
-        self.ra.free(reg);
     }
 
     fn declare_local(&mut self, name: &'a str, reg: Reg, span: Span) {
@@ -691,18 +992,6 @@ impl<'a> State<'a> {
         f!(self).end_loop(prev)
     }
 
-    fn reg(&mut self, span: Span) -> Result<Reg> {
-        f!(self).reg(span)
-    }
-
-    fn reg_n(&mut self, n: u8, span: Span) -> Result<RegRange> {
-        f!(self).reg_n(n, span)
-    }
-
-    fn rfree(&mut self, reg: Reg) {
-        f!(self).rfree(reg);
-    }
-
     fn declare_local(&mut self, name: &'a str, reg: Reg, span: Span) {
         f!(self).declare_local(name, reg, span)
     }
@@ -768,13 +1057,8 @@ enum Symbol<'a> {
 impl<'a> Symbol<'a> {
     fn name(&self) -> &str {
         match self {
-            Symbol::Local { name, span, reg } => name.as_ref(),
-            Symbol::Function {
-                name,
-                arity,
-                span,
-                id,
-            } => name.as_ref(),
+            Symbol::Local { name, .. } => name.as_ref(),
+            Symbol::Function { name, .. } => name.as_ref(),
         }
     }
 }
@@ -803,14 +1087,14 @@ fn emit_func<'a>(
         m.begin_scope();
         // NOTE: don't free `ret_reg` as locals are placed above it,
         //       will be freed in `end_scope`.
-        let ret_reg = m.reg(span)?;
+        let r0 = fresh_var(m, span)?;
         for (param, &span) in params.iter().zip(param_spans.iter()) {
-            let dst = m.reg(span)?;
+            let dst = fresh_var(m, span)?;
             m.declare_local(param.get(), dst, span);
         }
 
-        let ret_val = emit_stmt_list_with_tail_eval(m, body, Some(ret_reg).into())?;
-        emit_value_into(m, ret_val, ret_reg)?;
+        let ret_val = eval_block(m, body, Some(r0))?;
+        value_force_reg(m, ret_val, r0)?;
 
         m.emit(asm::ret(), NO_SPAN);
         m.end_scope();
@@ -846,7 +1130,7 @@ struct Value<'a> {
     span: Span,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 enum ValueKind<'a> {
     /// `nil`
     Nil,
@@ -947,41 +1231,12 @@ enum Place {
     Literals(Lit8),
 }
 
-const NOTHING: Value<'static> = Value {
-    kind: ValueKind::Nil,
-    span: Span::empty(),
-};
-
-#[derive(Clone, Copy)]
-#[must_use = "unused register"]
-struct MaybeReg(Option<Reg>);
-
-const NO_REG: MaybeReg = MaybeReg(None);
-
-impl MaybeReg {
-    fn inner(self) -> Option<Reg> {
-        self.into()
-    }
-}
-
-impl From<Option<Reg>> for MaybeReg {
-    fn from(value: Option<Reg>) -> Self {
-        Self(value)
-    }
-}
-
-impl From<MaybeReg> for Option<Reg> {
-    fn from(value: MaybeReg) -> Self {
-        value.0
-    }
-}
-
 const R0: Reg = unsafe { Reg::new_unchecked(0) };
 
-fn emit_stmt_list_with_tail_eval<'a>(
+fn eval_block<'a>(
     m: &mut State<'a>,
     list: NodeList<'a, Stmt>,
-    dst: MaybeReg,
+    dst: Option<Reg>,
 ) -> Result<Value<'a>> {
     let (stmt_list, tail) = match list.last().map(|node| node.kind()) {
         Some(ast::StmtKind::StmtExpr(tail)) => (list.slice(0..list.len() - 1).unwrap(), Some(tail)),
@@ -991,8 +1246,8 @@ fn emit_stmt_list_with_tail_eval<'a>(
     emit_stmt_list(m, stmt_list)?;
 
     match tail {
-        None => Ok(NOTHING),
-        Some(tail) => eval_expr(m, tail.inner(), tail.inner_span(), dst),
+        None => Ok(Value::nil(Span::empty())),
+        Some(tail) => eval_expr_maybe_reuse(m, tail.inner(), tail.inner_span(), dst),
     }
 }
 
@@ -1037,7 +1292,8 @@ fn emit_stmt<'a>(m: &mut State<'a>, stmt: Node<'a, Stmt>) -> Result<()> {
         ast::StmtKind::Loop(node) => emit_stmt_loop(m, node)?,
         ast::StmtKind::FuncDecl(node) => emit_stmt_func(m, node)?,
         ast::StmtKind::StmtExpr(node) => {
-            let _ = eval_expr(m, node.inner(), node.inner_span(), NO_REG)?;
+            let value = eval_expr(m, node.inner(), node.inner_span())?;
+            free_value(m, value);
         }
     }
 
@@ -1047,9 +1303,12 @@ fn emit_stmt<'a>(m: &mut State<'a>, stmt: Node<'a, Stmt>) -> Result<()> {
 fn emit_stmt_var<'a>(m: &mut State<'a>, var: Node<'a, ast::Var>) -> Result<()> {
     let (redeclaration, dst) = match m.resolve_in_scope(var.name().get()) {
         Some(Symbol::Local { reg, .. }) => (true, *reg),
-        _ => (false, m.reg(var.name_span())?),
+        _ => (false, fresh_var(m, var.name_span())?),
     };
-    emit_expr_into(m, var.value(), var.value_span(), dst)?;
+
+    let value = eval_expr_reuse(m, var.value(), var.value_span(), dst)?;
+    value_force_reg(m, value, dst)?;
+
     if !redeclaration {
         m.declare_local(var.name().get(), dst, var.name_span());
     }
@@ -1103,11 +1362,11 @@ fn emit_stmt_func<'a>(m: &mut State<'a>, func: Node<'a, ast::FuncDecl>) -> Resul
     Ok(())
 }
 
-fn eval_expr<'a>(
+fn eval_expr_maybe_reuse<'a>(
     m: &mut State<'a>,
-    expr: Node<'a, Expr>,
+    expr: Node<'a, ast::Expr>,
     span: Span,
-    dst: MaybeReg,
+    dst: Option<Reg>,
 ) -> Result<Value<'a>> {
     match expr.kind() {
         ast::ExprKind::Return(node) => eval_expr_return(m, node, span, dst),
@@ -1139,31 +1398,36 @@ fn eval_expr<'a>(
     }
 }
 
-fn emit_expr_into<'a>(m: &mut State<'a>, expr: Node<'a, Expr>, span: Span, dst: Reg) -> Result<()> {
-    let val = eval_expr(m, expr, span, Some(dst).into())?;
-    emit_value_into(m, val, dst)
+fn eval_expr<'a>(m: &mut State<'a>, expr: Node<'a, ast::Expr>, span: Span) -> Result<Value<'a>> {
+    eval_expr_maybe_reuse(m, expr, span, None)
+}
+
+fn eval_expr_reuse<'a>(
+    m: &mut State<'a>,
+    expr: Node<'a, ast::Expr>,
+    span: Span,
+    dst: Reg,
+) -> Result<Value<'a>> {
+    eval_expr_maybe_reuse(m, expr, span, Some(dst))
 }
 
 fn eval_expr_return<'a>(
     m: &mut State<'a>,
     node: Node<'a, ast::Return>,
     span: Span,
-    dst: MaybeReg,
+    _dst: Option<Reg>,
 ) -> Result<Value<'a>> {
-    // return always places value into register 0
-    let _ = dst;
-    let dst = R0;
-
+    // TODO: `ret src` instruction
     if let Some(value) = node.value().as_option() {
-        let value = eval_expr(m, value, node.value_span(), Some(dst).into())?;
-        emit_value_into(m, value, dst)?;
+        let value = eval_expr_reuse(m, value, node.value_span(), R0)?;
+        value_force_reg(m, value, R0)?;
     } else {
-        emit_value_into(m, Value::nil(span), dst)?;
+        value_force_reg(m, Value::nil(span), R0)?;
     }
 
     m.emit(asm::ret(), span);
 
-    Ok(NOTHING)
+    Ok(Value::nil(span))
 }
 
 const PLACEHOLDER: Imm24s = unsafe { Imm24s::new_unchecked(i24::ZERO) };
@@ -1172,7 +1436,7 @@ fn eval_expr_break<'a>(
     m: &mut State<'a>,
     brk: Node<'a, ast::Break>,
     span: Span,
-    dst: MaybeReg,
+    dst: Option<Reg>,
 ) -> Result<Value<'a>> {
     let f = f!(m);
     let Some(mut loop_) = f.loop_.take() else {
@@ -1186,14 +1450,14 @@ fn eval_expr_break<'a>(
 
     f.loop_ = Some(loop_);
 
-    Ok(NOTHING)
+    Ok(Value::nil(span))
 }
 
 fn eval_expr_continue<'a>(
     m: &mut State<'a>,
     brk: Node<'a, ast::Continue>,
     span: Span,
-    dst: MaybeReg,
+    dst: Option<Reg>,
 ) -> Result<Value<'a>> {
     let Some(loop_) = f!(m).loop_.take() else {
         return error("cannot use `continue` outside of loop", span).into();
@@ -1207,7 +1471,7 @@ fn eval_expr_continue<'a>(
 
     f!(m).loop_ = Some(loop_);
 
-    Ok(NOTHING)
+    Ok(Value::nil(span))
 }
 
 enum If<'a> {
@@ -1215,16 +1479,20 @@ enum If<'a> {
     Multi(Node<'a, ast::IfMulti>),
 }
 
+// TODO: is there any way to tell if the `expr_if` is top-level,
+// and its value is unused?
+// Right now we emit useless `lnil` for every branch with a body
+// which has no tail.
+//
+// Maybe make statements returning "nothing" yield a `Value::Nothing`,
+// which _actually_ evaluates to nothing...?
 fn eval_expr_if<'a>(
     m: &mut State<'a>,
     node: If<'a>,
     span: Span,
-    dst: MaybeReg,
+    dst: Option<Reg>,
 ) -> Result<Value<'a>> {
-    let (dst, free) = match dst.inner() {
-        Some(reg) => (reg, false),
-        None => (m.reg(span)?, true),
-    };
+    let out = maybe_reuse_reg(m, span, dst)?;
 
     let mut exit = ForwardLabel::new(m.buf);
 
@@ -1238,7 +1506,7 @@ fn eval_expr_if<'a>(
             };
 
             // if the condition is true, execute `body`. otherwise, `jmp` to `tail`.
-            emit_if_cond(m, node.cond(), node.cond_span(), dst, &mut targets)?;
+            emit_if_cond(m, node.cond(), node.cond_span(), out, &mut targets)?;
             let pos = f!(m).code.len();
             m.emit(asm::jmp(PLACEHOLDER), node.cond_span());
             targets.next.add_target(pos);
@@ -1246,10 +1514,8 @@ fn eval_expr_if<'a>(
             targets.body.bind(f!(m))?;
 
             m.begin_scope();
-            let value = emit_stmt_list_with_tail_eval(m, node.body(), Some(dst).into())?;
-            if !free {
-                emit_value_into(m, value, dst)?;
-            }
+            let value = eval_block(m, node.body(), Some(out))?;
+            value_force_reg(m, value, out)?;
             m.end_scope();
 
             // if `tail` exists and we execute `body`, we should skip `tail`.
@@ -1262,8 +1528,8 @@ fn eval_expr_if<'a>(
             targets.next.bind(f!(m))?;
 
             if let Some(tail) = node.tail().as_option() {
-                let value = eval_expr_block(m, tail, node.tail_span(), Some(dst).into())?;
-                emit_value_into(m, value, dst)?;
+                let value = eval_expr_block(m, tail, node.tail_span(), Some(out))?;
+                value_force_reg(m, value, out)?;
             }
 
             if node.tail().is_some() {
@@ -1280,7 +1546,7 @@ fn eval_expr_if<'a>(
                 };
 
                 // if the condition is true, execute `body`. otherwise, `jmp` to `tail`.
-                emit_if_cond(m, branch.cond(), branch.cond_span(), dst, &mut targets)?;
+                emit_if_cond(m, branch.cond(), branch.cond_span(), out, &mut targets)?;
                 let pos = f!(m).code.len();
                 m.emit(asm::jmp(PLACEHOLDER), branch.cond_span());
                 targets.next.add_target(pos);
@@ -1288,10 +1554,8 @@ fn eval_expr_if<'a>(
                 targets.body.bind(f!(m))?;
 
                 m.begin_scope();
-                let value = emit_stmt_list_with_tail_eval(m, branch.body(), Some(dst).into())?;
-                if !free {
-                    emit_value_into(m, value, dst)?;
-                }
+                let value = eval_block(m, branch.body(), Some(out))?;
+                value_force_reg(m, value, out)?;
                 m.end_scope();
 
                 let has_next = branches.peek().is_some() || node.tail().is_some();
@@ -1305,19 +1569,15 @@ fn eval_expr_if<'a>(
             }
 
             if let Some(tail) = node.tail().as_option() {
-                let value = eval_expr_block(m, tail, node.tail_span(), Some(dst).into())?;
-                emit_value_into(m, value, dst)?;
+                let value = eval_expr_block(m, tail, node.tail_span(), Some(out))?;
+                value_force_reg(m, value, out)?;
             }
 
             exit.bind(f!(m))?;
         }
     }
 
-    if free {
-        m.rfree(dst);
-    }
-
-    Ok(Value::dynamic(dst, span))
+    Ok(Value::dynamic(out, span))
 }
 
 struct BranchTargets<'a> {
@@ -1409,20 +1669,16 @@ fn emit_if_cond_inner<'a>(
             _ => unreachable!(),
         },
 
+        // TODO(opt): handle lhs/rhs constant:
+        // if `lhs` is constant, move it to `rhs`
+        // if `rhs` is constant, try to emit specialized literal variants of eq
+        // (?) const-eval if both are constant
         ast::ExprKind::Infix(node) if node.op().is_comparison() => {
-            let lhs_reg = dst;
-            let rhs_reg = m.reg(node.rhs_span())?;
+            let lhs = eval_expr_reuse(m, node.lhs(), node.lhs_span(), dst)?;
+            let rhs = eval_expr(m, node.rhs(), node.rhs_span())?;
 
-            // TODO(opt): handle lhs/rhs constant:
-            // if `lhs` is constant, move it to `rhs`
-            // if `rhs` is constant, try to emit specialized literal variants of eq
-            // (?) const-eval if both are constant
-
-            let lhs = eval_expr(m, node.lhs(), node.lhs_span(), Some(lhs_reg).into())?;
-            let lhs = emit_value(m, lhs, lhs_reg)?;
-
-            let rhs = eval_expr(m, node.rhs(), node.rhs_span(), Some(rhs_reg).into())?;
-            let rhs = emit_value(m, rhs, rhs_reg)?;
+            let lhs = value_to_reg_reuse(m, lhs, dst)?;
+            let rhs = value_to_reg(m, rhs)?;
 
             let inst = match (*node.op(), negated) {
                 (Op::Eq, false) | (Op::Ne, true) => asm::iseq(lhs, rhs),
@@ -1435,7 +1691,10 @@ fn emit_if_cond_inner<'a>(
             };
             m.emit(inst, span);
 
-            m.rfree(rhs_reg);
+            free_reg(m, rhs);
+            if lhs != dst {
+                free_reg(m, lhs);
+            }
 
             Ok(())
         }
@@ -1458,16 +1717,16 @@ fn emit_if_cond_generic<'a>(
 ) -> Result<()> {
     // we don't know what `node` holds, so we have to emit it into `dst`
     // and then test it.
-    let value = eval_expr(m, node, span, Some(dst).into())?;
-    let test_reg = emit_value(m, value, dst)?;
+    let value = eval_expr_reuse(m, node, span, dst)?;
+    let value = value_to_reg_reuse(m, value, dst)?;
 
     // values will be coerced to `bool` by `isfalse`/`istrue`.
     let inst = if negated {
         // we want to skip the `jmp` if the value is _falsey_.
-        asm::isfalse(test_reg)
+        asm::isfalse(value)
     } else {
         // we want to skip the `jmp` if the value is _truthy_.
-        asm::istrue(test_reg)
+        asm::istrue(value)
     };
 
     m.emit(inst, span);
@@ -1481,10 +1740,10 @@ fn eval_expr_block<'a>(
     m: &mut State<'a>,
     block: Node<'a, ast::Block>,
     span: Span,
-    dst: MaybeReg,
+    dst: Option<Reg>,
 ) -> Result<Value<'a>> {
     m.begin_scope();
-    let dst = emit_stmt_list_with_tail_eval(m, block.body(), dst)?;
+    let dst = eval_block(m, block.body(), dst)?;
     m.end_scope();
     Ok(dst)
 }
@@ -1493,7 +1752,7 @@ fn eval_expr_get_var<'a>(
     m: &mut State<'a>,
     get: Node<'a, ast::GetVar>,
     span: Span,
-    dst: MaybeReg,
+    dst: Option<Reg>,
 ) -> Result<Value<'a>> {
     // variable must exist at this point
     match m
@@ -1511,7 +1770,7 @@ fn eval_expr_set_var<'a>(
     m: &mut State<'a>,
     set: Node<'a, ast::SetVar>,
     span: Span,
-    dst: MaybeReg,
+    dst: Option<Reg>,
 ) -> Result<Value<'a>> {
     let _ = dst;
 
@@ -1522,7 +1781,7 @@ fn eval_expr_set_var<'a>(
     {
         // when adding other symbols, remember to error out here,
         // only local variables may be assigned to
-        Symbol::Local { reg: dst, .. } => *dst,
+        Symbol::Local { reg, .. } => *reg,
         Symbol::Function { .. } => return error("cannot assign to function", span).into(),
     };
 
@@ -1532,8 +1791,9 @@ fn eval_expr_set_var<'a>(
         fn(Reg, Reg, Lit8) -> Instruction,
     ) = match *set.op() {
         ast::AssignOp::None => {
-            emit_expr_into(m, set.value(), span, dst)?;
-            return Ok(NOTHING);
+            let value = eval_expr_reuse(m, set.value(), set.value_span(), dst)?;
+            value_force_reg(m, value, dst)?;
+            return Ok(Value::nil(span));
         }
         ast::AssignOp::Add => (asm::addvv, asm::addvn),
         ast::AssignOp::Sub => (asm::subvv, asm::subvn),
@@ -1541,23 +1801,24 @@ fn eval_expr_set_var<'a>(
         ast::AssignOp::Div => (asm::divvv, asm::divvn),
     };
 
-    let rhs_reg = m.reg(set.value_span())?;
-    let rhs = eval_expr(m, set.value(), set.value_span(), Some(rhs_reg).into())?;
-
-    let inst = match materialize_value(m, rhs, rhs_reg)? {
-        RegOrConst::Reg(rhs) => vv(dst, dst, rhs),
-        RegOrConst::Const(rhs) => vn(dst, dst, rhs),
+    let value = eval_expr(m, set.value(), set.value_span())?;
+    let value = value_to_operand(m, value)?;
+    let inst = match value {
+        Operand::Reg(rhs) => vv(dst, dst, rhs),
+        Operand::Const(rhs) => vn(dst, dst, rhs),
     };
     m.emit(inst, span);
 
-    Ok(NOTHING)
+    free_operand(m, value);
+
+    Ok(Value::nil(span))
 }
 
 fn eval_expr_get_field<'a>(
     m: &mut State<'a>,
     node: Node<'a, ast::GetField>,
     span: Span,
-    dst: MaybeReg,
+    dst: Option<Reg>,
 ) -> Result<Value<'a>> {
     todo!()
 }
@@ -1566,7 +1827,7 @@ fn eval_expr_set_field<'a>(
     m: &mut State<'a>,
     node: Node<'a, ast::SetField>,
     span: Span,
-    dst: MaybeReg,
+    dst: Option<Reg>,
 ) -> Result<Value<'a>> {
     todo!()
 }
@@ -1575,139 +1836,98 @@ fn eval_expr_get_index<'a>(
     m: &mut State<'a>,
     node: Node<'a, ast::GetIndex>,
     span: Span,
-    dst: MaybeReg,
+    dst: Option<Reg>,
 ) -> Result<Value<'a>> {
-    let (dst, free) = match dst.inner() {
-        Some(dst) => (dst, false),
-        None => (m.reg(node.parent_span())?, true),
-    };
-    let key_reg = m.reg(span)?;
+    let out = maybe_reuse_reg(m, span, dst)?;
 
-    let parent = eval_expr(m, node.parent(), node.parent_span(), Some(dst).into())?;
-    let parent = emit_value(m, parent, dst)?;
-    let key = eval_expr(m, node.key(), node.key_span(), Some(key_reg).into())?;
+    let parent = eval_expr_reuse(m, node.parent(), node.parent_span(), out)?;
+    let parent = value_to_reg_reuse(m, parent, out)?;
 
+    let key = eval_expr(m, node.key(), node.key_span())?;
     let key = match key.kind {
-        ValueKind::Int(idx) => materialize_int(m, idx, node.key_span(), key_reg)?,
-        _ => RegOrConst::Reg(emit_value(m, key, key_reg)?),
+        ValueKind::Int(idx) => int_to_operand(m, idx, node.key_span(), None)?,
+        _ => Operand::Reg(value_to_reg(m, key)?),
     };
 
-    use RegOrConst as R;
     match key {
-        R::Reg(idx) => m.emit(asm::lidx(dst, parent, idx), span),
-        R::Const(idx) => m.emit(asm::lidxn(dst, parent, idx), span),
+        Operand::Reg(idx) => m.emit(asm::lidx(out, parent, idx), span),
+        Operand::Const(idx) => m.emit(asm::lidxn(out, parent, idx), span),
     }
 
-    m.rfree(key_reg);
-    if free {
-        m.rfree(dst);
-    }
+    free_operand(m, key);
+    free_reg(m, parent);
 
-    Ok(Value::dynamic(dst, span))
+    Ok(Value::dynamic(out, span))
 }
 
 fn eval_expr_set_index<'a>(
     m: &mut State<'a>,
     node: Node<'a, ast::SetIndex>,
     span: Span,
-    dst: MaybeReg,
+    dst: Option<Reg>,
 ) -> Result<Value<'a>> {
-    todo!()
+    // expr in statement position, result is always unused
+    let _ = dst;
+
+    let parent = eval_expr(m, node.base().parent(), node.base().parent_span())?;
+    let parent = value_to_reg(m, parent)?;
+
+    let key = eval_expr(m, node.base().key(), node.base().key_span())?;
+    let key = match key.kind {
+        ValueKind::Int(idx) => int_to_operand(m, idx, node.base().key_span(), None)?,
+        _ => Operand::Reg(value_to_reg(m, key)?),
+    };
+
+    let value = eval_expr(m, node.value(), node.value_span())?;
+    let value = value_to_reg(m, value)?;
+
+    match key {
+        Operand::Reg(idx) => m.emit(asm::sidx(parent, idx, value), span),
+        Operand::Const(idx) => m.emit(asm::sidxn(parent, idx, value), span),
+    }
+
+    free_reg(m, value);
+    free_operand(m, key);
+    free_reg(m, parent);
+
+    Ok(Value::nil(span))
 }
 
+// TODO: specialize "method" calls (get prop -> call in a single instruction)
 fn eval_expr_call<'a>(
     m: &mut State<'a>,
     call: Node<'a, ast::Call>,
     span: Span,
-    dst: MaybeReg,
+    dst: Option<Reg>,
 ) -> Result<Value<'a>> {
-    enum Base {
-        NeedsMov { base: Reg, to: Reg },
-        InPlace(Reg),
-        Unused(Reg),
-    }
-
-    impl Base {
-        /// register to write to
-        fn dst(&self) -> Reg {
-            match self {
-                Self::NeedsMov { base, to } => *base,
-                Self::InPlace(reg) => *reg,
-                Self::Unused(reg) => *reg,
-            }
+    // `out+1` is start of args, `out` and args must be contiguous
+    // maximum number of args is 100, so they always fit within `u8`
+    let nargs = call.args().len() as u8;
+    let (out, args) = match dst {
+        // We can use `dst` directly:
+        // - If `dst` is top of stack, meaning argument registers can be
+        //   allocated contiguously after `dst`
+        // - If the call has no arguments, so we don't need to allocate
+        //   any argument registers.
+        Some(dst) if is_at_top(m, dst) || nargs == 0 => {
+            // Yes; allocate registers for args right above `dst`, if there are any.
+            let args = fresh_reg_range(m, span, nargs)?;
+            (dst, args)
         }
-
-        /// register where return value is placed
-        fn out(&self) -> Reg {
-            match self {
-                Base::NeedsMov { base, to } => *to,
-                Base::InPlace(reg) => *reg,
-                Base::Unused(reg) => *reg,
-            }
-        }
-    }
-
-    // prepare registers
-    let (base, args, reset) = if call.args().is_empty() {
-        match dst.inner() {
-            // argument-less call; can be used directly no matter where it is
-            Some(reg) => (Base::InPlace(reg), RegRange::empty(), None),
-
-            // argument-less call with unused value, so we didn't receive
-            // a register. allocate for callee/ret
-            None => {
-                let reset = f!(m).ra.current;
-                (
-                    Base::Unused(m.reg(call.callee_span())?),
-                    RegRange::empty(),
-                    Some(reset),
-                )
-            }
-        }
-    } else {
-        match dst.inner() {
-            // NOTE: num of args is `1..=100`.
-            Some(base) => {
-                if f!(m).ra.is_at_top(base) {
-                    // can be used directly; allocate args above it.
-                    let reset = f!(m).ra.current;
-                    let args = m.reg_n(call.args().len() as u8, span)?;
-                    (Base::InPlace(base), args, Some(reset))
-                } else {
-                    // cannot be used directly. we have to allocate including dst,
-                    // and then emit a mov after the call.
-                    let reset = f!(m).ra.current;
-                    (
-                        Base::NeedsMov {
-                            base: m.reg(span)?,
-                            to: base,
-                        },
-                        m.reg_n(call.args().len() as u8, span)?,
-                        Some(reset),
-                    )
-                }
-            }
-
-            None => {
-                // unused value. allocate for callee/ret and args
-                let reset = f!(m).ra.current;
-                (
-                    Base::Unused(m.reg(span)?),
-                    m.reg_n(call.args().len() as u8, span)?,
-                    Some(reset),
-                )
-            }
+        Some(..) | None => {
+            // No; allocate our own `dst` and args contiguously
+            let out = fresh_reg(m, span)?;
+            let args = fresh_reg_range(m, span, nargs)?;
+            (out, args)
         }
     };
 
-    // TODO: specialize "method" calls (get prop -> call in a single instruction)
-    // ast::ExprKind::GetField(node) => todo!(),
     if let ast::ExprKind::GetVar(node) = call.callee().kind()
         && let Some(Symbol::Function { id, arity, .. }) = m.resolve(node.name().get())
     {
-        // calling a function declaration directly - this is definitely a function
-        // we can check arity right here and then the VM doesn't have to type check
-        // OR arity check anymore
+        // Fastcall optimization: If the symbol is syntactically a function, then
+        // - check arity now, and
+        // - call the function by ID, avoiding arity/type checking
 
         let id = *id;
         let arity = *arity;
@@ -1720,35 +1940,30 @@ fn eval_expr_call<'a>(
             .into();
         }
 
-        for ((reg, value), span) in args.into_iter().zip(call.args()).zip(call.args_spans()) {
-            emit_expr_into(m, value, *span, reg)?;
+        for ((reg, value), &span) in args.into_iter().zip(call.args()).zip(call.args_spans()) {
+            let value = eval_expr_reuse(m, value, span, reg)?;
+            value_force_reg(m, value, reg)?;
         }
 
-        m.emit(asm::fastcall(base.dst(), id), span);
+        m.emit(asm::fastcall(out, id), span);
     } else {
         // maybe callable? only VM can know for sure
 
         let nargs = call.args().len() as u8;
-        emit_expr_into(m, call.callee(), call.callee_span(), base.dst())?;
-        for ((reg, value), span) in args.into_iter().zip(call.args()).zip(call.args_spans()) {
-            emit_expr_into(m, value, *span, reg)?;
+        let callee = eval_expr_reuse(m, call.callee(), call.callee_span(), out)?;
+        value_force_reg(m, callee, out)?;
+
+        for ((reg, value), &span) in args.into_iter().zip(call.args()).zip(call.args_spans()) {
+            let value = eval_expr_reuse(m, value, span, reg)?;
+            value_force_reg(m, value, reg)?;
         }
 
-        m.emit(
-            asm::call(base.dst(), unsafe { Imm8::new_unchecked(nargs) }),
-            span,
-        );
+        m.emit(asm::call(out, unsafe { Imm8::new_unchecked(nargs) }), span);
     }
 
-    if let Base::NeedsMov { base, to } = &base {
-        m.emit(asm::mov(*to, *base), span);
-    }
+    free_reg_range(m, args);
 
-    if let Some(reset) = reset {
-        f!(m).ra.reset_to(reset);
-    }
-
-    Ok(Value::dynamic(base.out(), span))
+    Ok(Value::dynamic(out, span))
 }
 
 trait ExprInfo {
@@ -1793,7 +2008,7 @@ fn eval_expr_infix<'a>(
     m: &mut State<'a>,
     node: Node<'a, ast::Infix>,
     span: Span,
-    dst: MaybeReg,
+    dst: Option<Reg>,
 ) -> Result<Value<'a>> {
     if node.op().is_logical() {
         return eval_expr_infix_logical(m, node, span, dst);
@@ -1803,118 +2018,40 @@ fn eval_expr_infix<'a>(
         return eval_expr_infix_comparison(m, node, span, dst);
     }
 
-    // TODO: hack `lhs` register for calls
-    // 1. if `lhs` is a call with args
-    // 2. if `dst` is not at the top of the stack
-    // Then allocate a separate register for `lhs` first
-    // This should remove a whole `mov`.
+    let dst = maybe_reuse_reg(m, span, dst)?;
 
-    // in case the return value is unused, we should still
-    // evaluate the entire expression. for that we need an
-    // output register.
-    let (dst, free) = match dst.inner() {
-        Some(dst) => (dst, false),
-        None => (m.reg(node.lhs_span())?, true),
-    };
-
-    // HACK: if `dst` is not at the top of the stack, then an expression
-    // requiring contiguous registers will not be able to use `dst` directly,
-    // and will instead have to allocate its own `dst` register and emit a
-    // `mov` to it.
-    // For `infix`, we don't actually need the lhs to be in the `dst` register,
-    // we have separate `dst` and `lhs` registers in the `add` instruction.
-    // It's just a convenient place to put it.
-    let lhs_reg = if !free && node.lhs().needs_contiguous_registers() && !f!(m).ra.is_at_top(dst) {
-        m.reg(node.lhs_span())?
-    } else {
-        dst
-    };
-
-    let lhs = eval_expr(m, node.lhs(), node.lhs_span(), Some(lhs_reg).into())?;
-    let rhs_reg = m.reg(node.rhs_span())?;
-    let rhs = eval_expr(m, node.rhs(), node.rhs_span(), Some(rhs_reg).into())?;
+    let lhs = eval_expr_reuse(m, node.lhs(), node.lhs_span(), dst)?;
+    let rhs = eval_expr(m, node.rhs(), node.rhs_span())?;
 
     let result = if lhs.is_const() && rhs.is_const() {
-        // both sides are constants, return a constant.
-        use ast::InfixOp as Op;
-        let (iop, fop, desc): (
-            fn(i64, i64) -> Result<i64, &'static str>,
-            fn(f64n, f64n) -> f64n,
-            &'static str,
-        ) = match *node.op() {
-            Op::Add => (|a, b| Ok(a + b), |a, b| a + b, "add"),
-            Op::Sub => (|a, b| Ok(a - b), |a, b| a - b, "subtract"),
-            Op::Mul => (|a, b| Ok(a * b), |a, b| a * b, "multiply"),
-            Op::Div => (
-                |a: i64, b: i64| {
-                    if b == 0 {
-                        Err("evaluation would fail: cannot divide by zero")
-                    } else {
-                        Ok(a / b)
-                    }
-                },
-                |a, b| a / b,
-                "divide",
-            ),
-            op => unreachable!("ICE: invalid op in emit_infix: {op:?}"),
-        };
-
-        use ValueKind as V;
-        match (lhs.kind, rhs.kind) {
-            (V::Int(lhs), V::Int(rhs)) => {
-                Value::int(iop(lhs, rhs).map_err(|err| error(err, span))?, span)
-            }
-            (V::Float(lhs), V::Float(rhs)) => Value::float(fop(lhs, rhs), span),
-            (V::Float(lhs), V::Int(rhs)) => Value::float(fop(lhs, f64n::new(rhs as f64)), span),
-            (V::Int(lhs), V::Float(rhs)) => Value::float(fop(f64n::new(lhs as f64), rhs), span),
-            _ => {
-                return error(
-                    format!(
-                        "evaluation would fail with a type mismatch: cannot {desc} {} and {}",
-                        lhs.type_name(),
-                        rhs.type_name()
-                    ),
-                    span,
-                )
-                .into();
-            }
-        }
+        const_eval_expr_infix(*node.op(), lhs, rhs, span)?
     } else {
-        // One or both sides are runtime-known.
-        //
-        // If a value is runtime-known, it exists in some register.
-        //
-        // If `eval_expr` returns a constant, it will not have used the
-        // register, so we can still use it for the literal.
+        let lhs = value_to_operand_reuse(m, lhs, dst)?;
+        let rhs = value_to_operand(m, rhs)?;
 
-        let lhs = materialize_value(m, lhs, lhs_reg)?;
-        let rhs = materialize_value(m, rhs, rhs_reg)?;
-
-        use RegOrConst as R;
         let instruction = match *node.op() {
-            // TODO: other ops
             ast::InfixOp::Add => match (lhs, rhs) {
-                (R::Reg(lhs), R::Reg(rhs)) => asm::addvv(dst, lhs, rhs),
-                (R::Reg(lhs), R::Const(rhs)) => asm::addvn(dst, lhs, rhs),
-                (R::Const(lhs), R::Reg(rhs)) => asm::addnv(dst, lhs, rhs),
+                (Operand::Reg(lhs), Operand::Reg(rhs)) => asm::addvv(dst, lhs, rhs),
+                (Operand::Reg(lhs), Operand::Const(rhs)) => asm::addvn(dst, lhs, rhs),
+                (Operand::Const(lhs), Operand::Reg(rhs)) => asm::addnv(dst, lhs, rhs),
                 _ => unreachable!("ICE: const/const in non-const path"),
             },
             ast::InfixOp::Sub => match (lhs, rhs) {
-                (R::Reg(lhs), R::Reg(rhs)) => asm::subvv(dst, lhs, rhs),
-                (R::Reg(lhs), R::Const(rhs)) => asm::subvn(dst, lhs, rhs),
-                (R::Const(lhs), R::Reg(rhs)) => asm::subnv(dst, lhs, rhs),
+                (Operand::Reg(lhs), Operand::Reg(rhs)) => asm::subvv(dst, lhs, rhs),
+                (Operand::Reg(lhs), Operand::Const(rhs)) => asm::subvn(dst, lhs, rhs),
+                (Operand::Const(lhs), Operand::Reg(rhs)) => asm::subnv(dst, lhs, rhs),
                 _ => unreachable!("ICE: const/const in non-const path"),
             },
             ast::InfixOp::Mul => match (lhs, rhs) {
-                (R::Reg(lhs), R::Reg(rhs)) => asm::mulvv(dst, lhs, rhs),
-                (R::Reg(lhs), R::Const(rhs)) => asm::mulvn(dst, lhs, rhs),
-                (R::Const(lhs), R::Reg(rhs)) => asm::mulnv(dst, lhs, rhs),
+                (Operand::Reg(lhs), Operand::Reg(rhs)) => asm::mulvv(dst, lhs, rhs),
+                (Operand::Reg(lhs), Operand::Const(rhs)) => asm::mulvn(dst, lhs, rhs),
+                (Operand::Const(lhs), Operand::Reg(rhs)) => asm::mulnv(dst, lhs, rhs),
                 _ => unreachable!("ICE: const/const in non-const path"),
             },
             ast::InfixOp::Div => match (lhs, rhs) {
-                (R::Reg(lhs), R::Reg(rhs)) => asm::divvv(dst, lhs, rhs),
-                (R::Reg(lhs), R::Const(rhs)) => asm::divvn(dst, lhs, rhs),
-                (R::Const(lhs), R::Reg(rhs)) => asm::divnv(dst, lhs, rhs),
+                (Operand::Reg(lhs), Operand::Reg(rhs)) => asm::divvv(dst, lhs, rhs),
+                (Operand::Reg(lhs), Operand::Const(rhs)) => asm::divvn(dst, lhs, rhs),
+                (Operand::Const(lhs), Operand::Reg(rhs)) => asm::divnv(dst, lhs, rhs),
                 _ => unreachable!("ICE: const/const in non-const path"),
             },
             op => unreachable!("ICE: invalid op in emit_infix: {op:?}"),
@@ -1922,22 +2059,74 @@ fn eval_expr_infix<'a>(
 
         m.emit(instruction, span);
 
+        free_operand(m, rhs);
+        if lhs != dst {
+            free_operand(m, lhs);
+        }
+
         Value::dynamic(dst, span)
     };
-
-    m.rfree(rhs_reg);
-    if free {
-        m.rfree(dst);
-    }
 
     Ok(result)
 }
 
+fn const_eval_expr_infix<'a>(
+    op: ast::InfixOp,
+    lhs: Value<'a>,
+    rhs: Value<'a>,
+    span: Span,
+) -> Result<Value<'a>> {
+    // both sides are constants, return a constant.
+    use ast::InfixOp as Op;
+    let (iop, fop, desc): (
+        fn(i64, i64) -> Result<i64, &'static str>,
+        fn(f64n, f64n) -> f64n,
+        &'static str,
+    ) = match op {
+        Op::Add => (|a, b| Ok(a + b), |a, b| a + b, "add"),
+        Op::Sub => (|a, b| Ok(a - b), |a, b| a - b, "subtract"),
+        Op::Mul => (|a, b| Ok(a * b), |a, b| a * b, "multiply"),
+        Op::Div => (
+            |a: i64, b: i64| {
+                if b == 0 {
+                    Err("evaluation would fail: cannot divide by zero")
+                } else {
+                    Ok(a / b)
+                }
+            },
+            |a, b| a / b,
+            "divide",
+        ),
+        op => unreachable!("ICE: invalid op in emit_infix: {op:?}"),
+    };
+
+    use ValueKind as V;
+    let v = match (lhs.kind, rhs.kind) {
+        (V::Int(lhs), V::Int(rhs)) => {
+            Value::int(iop(lhs, rhs).map_err(|err| error(err, span))?, span)
+        }
+        (V::Float(lhs), V::Float(rhs)) => Value::float(fop(lhs, rhs), span),
+        (V::Float(lhs), V::Int(rhs)) => Value::float(fop(lhs, f64n::new(rhs as f64)), span),
+        (V::Int(lhs), V::Float(rhs)) => Value::float(fop(f64n::new(lhs as f64), rhs), span),
+        _ => {
+            return error(
+                format!(
+                    "evaluation would fail with a type mismatch: cannot {desc} {} and {}",
+                    lhs.type_name(),
+                    rhs.type_name()
+                ),
+                span,
+            )
+            .into();
+        }
+    };
+    Ok(v)
+}
 fn eval_expr_infix_logical<'a>(
     m: &mut State<'a>,
     node: Node<'a, ast::Infix>,
     span: Span,
-    dst: MaybeReg,
+    dst: Option<Reg>,
 ) -> Result<Value<'a>> {
     todo!()
 }
@@ -1946,7 +2135,7 @@ fn eval_expr_infix_comparison<'a>(
     m: &mut State<'a>,
     node: Node<'a, ast::Infix>,
     span: Span,
-    dst: MaybeReg,
+    dst: Option<Reg>,
 ) -> Result<Value<'a>> {
     todo!()
 }
@@ -1955,7 +2144,7 @@ fn eval_expr_prefix<'a>(
     m: &mut State<'a>,
     node: Node<'a, ast::Prefix>,
     span: Span,
-    dst: MaybeReg,
+    dst: Option<Reg>,
 ) -> Result<Value<'a>> {
     todo!()
 }
@@ -1964,42 +2153,35 @@ fn eval_expr_array<'a>(
     m: &mut State<'a>,
     node: Node<'a, ast::Array>,
     span: Span,
-    dst: MaybeReg,
+    dst: Option<Reg>,
 ) -> Result<Value<'a>> {
     // TODO: constant array?
 
-    let (dst, free) = match dst.inner() {
-        Some(reg) => (reg, false),
-        None => (m.reg(span)?, true),
-    };
+    let dst = maybe_reuse_reg(m, span, dst)?;
 
     // TODO: actual length doesn't matter. WHY would you write 64k constants into an array...
     let cap = node.items().len().min(u16::MAX as usize) as u16;
     let cap = unsafe { Imm16::new_unchecked(cap) };
     m.emit(asm::larr(dst, cap), span);
 
-    let tmp = m.reg(span)?;
+    let tmp = fresh_reg(m, span)?;
     for (idx, (item, &span)) in node
         .items()
         .into_iter()
         .zip(node.items_spans().iter())
         .enumerate()
     {
-        emit_expr_into(m, item, span, tmp)?;
+        let value = eval_expr_reuse(m, item, span, tmp)?;
+        let value = value_to_reg_reuse(m, value, tmp)?;
 
-        let idx_reg = m.reg(span)?;
-        let idx = materialize_value(m, Value::int(idx as i64, span), idx_reg)?;
+        let idx = value_to_operand(m, Value::int(idx as i64, span))?;
         match idx {
-            RegOrConst::Reg(idx) => m.emit(asm::sidx(dst, idx, tmp), span),
-            RegOrConst::Const(idx) => m.emit(asm::sidxn(dst, idx, tmp), span),
+            Operand::Reg(idx) => m.emit(asm::sidx(dst, idx, value), span),
+            Operand::Const(idx) => m.emit(asm::sidxn(dst, idx, value), span),
         }
-        m.rfree(idx_reg);
+        free_operand(m, idx);
     }
-    m.rfree(tmp);
-
-    if free {
-        m.rfree(dst);
-    }
+    free_reg(m, tmp);
 
     Ok(Value::dynamic(dst, span))
 }
@@ -2052,60 +2234,8 @@ fn eval_expr_nil<'a>(m: &mut State<'a>, nil: Node<'a, ast::Nil>, span: Span) -> 
     Value::nil(span)
 }
 
-/// Emits `value` and ensures it is placed in `dst`.
-///
-/// For variables, this may emit a `mov`.
-fn emit_value_into<'a>(m: &mut State<'a>, value: Value<'a>, dst: Reg) -> Result<()> {
-    let reg = emit_value(m, value, dst)?;
-    if reg.get() != dst.get() {
-        m.emit(asm::mov(dst, reg), value.span);
-    }
-
-    Ok(())
-}
-
-/// Emits `value`.
-///
-/// For variables, this ignores `dst` and returns the variable's register.
-fn emit_value<'a>(m: &mut State<'a>, value: Value<'a>, dst: Reg) -> Result<Reg> {
-    match value.kind {
-        ValueKind::Nil => {
-            m.emit(asm::lnil(dst), value.span);
-            Ok(dst)
-        }
-        ValueKind::Bool(v) => {
-            match v {
-                true => m.emit(asm::ltrue(dst), value.span),
-                false => m.emit(asm::lfalse(dst), value.span),
-            };
-            Ok(dst)
-        }
-        ValueKind::Int(v) => {
-            // TODO(clean): dedup
-            if v <= i16::MAX as i64 {
-                let v = unsafe { Imm16s::new_unchecked(v as i16) };
-                m.emit(asm::lsmi(dst, v), value.span);
-            } else {
-                let id = f!(m).literals.i64(v, value.span)?;
-                m.emit(asm::lint(dst, id), value.span);
-            }
-            Ok(dst)
-        }
-        ValueKind::Float(v) => {
-            let id = f!(m).literals.f64(v, value.span)?;
-            m.emit(asm::lnum(dst, id), value.span);
-            Ok(dst)
-        }
-        ValueKind::Str(v) => {
-            let id = f!(m).literals.str(v, value.span)?;
-            m.emit(asm::lstr(dst, id), value.span);
-            Ok(dst)
-        }
-        ValueKind::Dynamic(reg) => Ok(reg),
-    }
-}
-
-enum RegOrConst {
+#[derive(Debug, Clone, Copy)]
+enum Operand {
     /// The value exists in this register.
     Reg(Reg),
 
@@ -2113,62 +2243,194 @@ enum RegOrConst {
     Const(Lit8),
 }
 
-fn materialize_int<'a>(m: &mut State<'a>, value: i64, span: Span, dst: Reg) -> Result<RegOrConst> {
-    use RegOrConst as R;
+impl PartialEq<Reg> for Operand {
+    fn eq(&self, other: &Reg) -> bool {
+        match self {
+            Self::Reg(this) => this != other,
+            Self::Const(_) => false,
+        }
+    }
+}
 
+impl PartialEq<Reg> for Reg {
+    fn eq(&self, other: &Reg) -> bool {
+        self.get() == other.get()
+    }
+}
+
+impl Eq for Reg {}
+
+fn nil_to_operand<'a>(m: &mut State<'a>, span: Span, dst: Option<Reg>) -> Result<Operand> {
+    // `nil` is never stored in the literal pool, because it is a singleton,
+    // so always emit into a register.
+    nil_to_reg(m, span, dst).map(Operand::Reg)
+}
+
+fn nil_to_reg<'a>(m: &mut State<'a>, span: Span, dst: Option<Reg>) -> Result<Reg> {
+    let dst = maybe_reuse_reg(m, span, dst)?;
+    m.emit(asm::lnil(dst), span);
+    Ok(dst)
+}
+
+fn bool_to_operand<'a>(
+    m: &mut State<'a>,
+    value: bool,
+    span: Span,
+    dst: Option<Reg>,
+) -> Result<Operand> {
+    bool_to_reg(m, value, span, dst).map(Operand::Reg)
+}
+
+fn bool_to_reg<'a>(m: &mut State<'a>, value: bool, span: Span, dst: Option<Reg>) -> Result<Reg> {
+    let dst = maybe_reuse_reg(m, span, dst)?;
+    match value {
+        true => m.emit(asm::ltrue(dst), span),
+        false => m.emit(asm::lfalse(dst), span),
+    }
+    Ok(dst)
+}
+
+fn int_to_operand<'a>(
+    m: &mut State<'a>,
+    value: i64,
+    span: Span,
+    dst: Option<Reg>,
+) -> Result<Operand> {
     if f!(m).literals.is_next_id_8bit() {
         // emit it as a literal, use it as operand
         let id = f!(m).literals.i64(value, span)?;
-        Ok(R::Const(unsafe { Lit8::new_unchecked(id.get() as u8) }))
+        Ok(Operand::Const(unsafe {
+            Lit8::new_unchecked(id.get() as u8)
+        }))
     } else {
-        // TODO(clean): DEDUP
-        // emit it as a load, use the register
-        if value <= i16::MAX as i64 {
-            let v = unsafe { Imm16s::new_unchecked(value as i16) };
-            m.emit(asm::lsmi(dst, v), span);
-        } else {
-            let id = f!(m).literals.i64(value, span)?;
-            m.emit(asm::lint(dst, id), span);
-        }
-        Ok(R::Reg(dst))
+        int_to_reg(m, value, span, dst).map(Operand::Reg)
     }
 }
 
-fn materialize_float<'a>(
+fn int_to_reg<'a>(m: &mut State<'a>, value: i64, span: Span, dst: Option<Reg>) -> Result<Reg> {
+    let dst = maybe_reuse_reg(m, span, dst)?;
+    // emit it as a load, use the register
+    if value <= i16::MAX as i64 {
+        let v = unsafe { Imm16s::new_unchecked(value as i16) };
+        m.emit(asm::lsmi(dst, v), span);
+    } else {
+        let id = f!(m).literals.i64(value, span)?;
+        m.emit(asm::lint(dst, id), span);
+    }
+    Ok(dst)
+}
+
+fn float_to_operand<'a>(
     m: &mut State<'a>,
     value: f64n,
     span: Span,
-    dst: Reg,
-) -> Result<RegOrConst> {
-    use RegOrConst as R;
-
+    dst: Option<Reg>,
+) -> Result<Operand> {
     if f!(m).literals.is_next_id_8bit() {
         // emit it as a literal, use it as operand
         let id = f!(m).literals.f64(value, span)?;
-        Ok(R::Const(unsafe { Lit8::new_unchecked(id.get() as u8) }))
+        Ok(Operand::Const(unsafe {
+            Lit8::new_unchecked(id.get() as u8)
+        }))
     } else {
-        // TODO(clean): dedup
-        // emit it as a load, use the register
-        let id = f!(m).literals.f64(value, span)?;
-        m.emit(asm::lnum(dst, id), span);
-        Ok(R::Reg(dst))
+        float_to_reg(m, value, span, dst).map(Operand::Reg)
     }
 }
 
-/// Materialize `value` for use in emit.
-fn materialize_value<'a>(m: &mut State<'a>, value: Value<'a>, dst: Reg) -> Result<RegOrConst> {
-    use RegOrConst as R;
-    use ValueKind as V;
+fn float_to_reg<'a>(m: &mut State<'a>, value: f64n, span: Span, dst: Option<Reg>) -> Result<Reg> {
+    let dst = maybe_reuse_reg(m, span, dst)?;
+    let id = f!(m).literals.f64(value, span)?;
+    m.emit(asm::lnum(dst, id), span);
+    Ok(dst)
+}
 
+fn str_to_operand<'a>(
+    m: &mut State<'a>,
+    value: &'a str,
+    span: Span,
+    dst: Option<Reg>,
+) -> Result<Operand> {
+    if f!(m).literals.is_next_id_8bit() {
+        let id = f!(m).literals.str(value, span)?;
+        Ok(Operand::Const(unsafe {
+            Lit8::new_unchecked(id.get() as u8)
+        }))
+    } else {
+        str_to_reg(m, value, span, dst).map(Operand::Reg)
+    }
+}
+
+fn str_to_reg<'a>(m: &mut State<'a>, value: &'a str, span: Span, dst: Option<Reg>) -> Result<Reg> {
+    let dst = maybe_reuse_reg(m, span, dst)?;
+    let id = f!(m).literals.str(value, span)?;
+    m.emit(asm::lstr(dst, id), span);
+    Ok(dst)
+}
+
+fn value_to_operand_maybe_reuse<'a>(
+    m: &mut State<'a>,
+    value: Value<'a>,
+    dst: Option<Reg>,
+) -> Result<Operand> {
     match value.kind {
         // already materialized
-        V::Dynamic(reg) => Ok(R::Reg(reg)),
+        ValueKind::Dynamic(reg) => Ok(Operand::Reg(reg)),
 
-        V::Int(inner) => materialize_int(m, inner, value.span, dst),
-        V::Float(inner) => materialize_float(m, inner, value.span, dst),
-
-        _ => todo!(),
+        ValueKind::Nil => nil_to_operand(m, value.span, dst),
+        ValueKind::Bool(inner) => bool_to_operand(m, inner, value.span, dst),
+        ValueKind::Int(inner) => int_to_operand(m, inner, value.span, dst),
+        ValueKind::Float(inner) => float_to_operand(m, inner, value.span, dst),
+        ValueKind::Str(inner) => str_to_operand(m, inner, value.span, dst),
     }
+}
+
+/// Materialize `value` into a register or literal for use in emit.
+fn value_to_operand<'a>(m: &mut State<'a>, value: Value<'a>) -> Result<Operand> {
+    value_to_operand_maybe_reuse(m, value, None)
+}
+
+/// Materialize `value` into a register or literal for use in emit, emitting into `dst` if possible.
+fn value_to_operand_reuse<'a>(m: &mut State<'a>, value: Value<'a>, dst: Reg) -> Result<Operand> {
+    value_to_operand_maybe_reuse(m, value, Some(dst))
+}
+
+fn value_to_reg_maybe_reuse<'a>(
+    m: &mut State<'a>,
+    value: Value<'a>,
+    dst: Option<Reg>,
+) -> Result<Reg> {
+    match value.kind {
+        // already materialized
+        ValueKind::Dynamic(reg) => Ok(reg),
+
+        ValueKind::Nil => nil_to_reg(m, value.span, dst),
+        ValueKind::Bool(inner) => bool_to_reg(m, inner, value.span, dst),
+        ValueKind::Int(inner) => int_to_reg(m, inner, value.span, dst),
+        ValueKind::Float(inner) => float_to_reg(m, inner, value.span, dst),
+        ValueKind::Str(inner) => str_to_reg(m, inner, value.span, dst),
+    }
+}
+
+/// Materialize `value` into a register for use in emit.
+fn value_to_reg<'a>(m: &mut State<'a>, value: Value<'a>) -> Result<Reg> {
+    value_to_reg_maybe_reuse(m, value, None)
+}
+
+/// Materialize `value` into a register for use in emit, emitting into `dst` if possible.
+fn value_to_reg_reuse<'a>(m: &mut State<'a>, value: Value<'a>, dst: Reg) -> Result<Reg> {
+    value_to_reg_maybe_reuse(m, value, Some(dst))
+}
+
+/// Materialize `value` into `dst`.
+///
+/// This function guarantees the value will be present in `dst` instead of
+/// some other register.
+fn value_force_reg<'a>(m: &mut State<'a>, value: Value<'a>, dst: Reg) -> Result<()> {
+    let src = value_to_reg_reuse(m, value, dst)?;
+    if src != dst {
+        m.emit(asm::mov(dst, src), value.span);
+    }
+    Ok(())
 }
 
 #[cfg(test)]

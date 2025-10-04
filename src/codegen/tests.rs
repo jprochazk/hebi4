@@ -34,3 +34,14 @@ fn emitter(path: &Path) {
         }
     }
 }
+
+// NOTE: leave this here, it's handy for debugging:
+// 1. uncomment this test
+// 2. filter for it (`cargo test -- _temp`),
+// 3. set a breakpoint somewhere in codegen
+
+// #[test]
+// fn _temp() {
+//     emitter(std::path::Path::new("tests/inputs/run/arithmetic_add.hi"));
+//     panic!();
+// }

@@ -13,7 +13,7 @@ OK
 
 .fn fib
   params 1
-  stack 6
+  stack 5
   .locals
     n = r1
   .code

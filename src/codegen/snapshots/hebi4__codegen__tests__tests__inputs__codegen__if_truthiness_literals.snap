@@ -9,38 +9,44 @@ OK
   .code
    0  lsmi r1, 1
    1  istrue r1
-   2  jmp 3   ; to 5
+   2  jmp 4   ; to 6
    3  lsmi r0, 1
    4  ret
-   5  lsmi r1, 0
-   6  istrue r1
-   7  jmp 3   ; to 10
-   8  lsmi r0, 2
-   9  ret
-  10  lstr r1, l0   ; l0="hello"
-  11  istrue r1
-  12  jmp 3   ; to 15
-  13  lsmi r0, 3
-  14  ret
-  15  lstr r1, l1   ; l1=""
-  16  istrue r1
-  17  jmp 3   ; to 20
-  18  lsmi r0, 4
-  19  ret
-  20  ltrue r1
-  21  istrue r1
-  22  jmp 3   ; to 25
-  23  lsmi r0, 5
-  24  ret
-  25  lfalse r1
-  26  istrue r1
-  27  jmp 3   ; to 30
-  28  lsmi r0, 6
-  29  ret
-  30  lnil r0
-  31  istrue r0
+   5  lnil r1
+   6  lsmi r1, 0
+   7  istrue r1
+   8  jmp 4   ; to 12
+   9  lsmi r0, 2
+  10  ret
+  11  lnil r1
+  12  lstr r1, l0   ; l0="hello"
+  13  istrue r1
+  14  jmp 4   ; to 18
+  15  lsmi r0, 3
+  16  ret
+  17  lnil r1
+  18  lstr r1, l1   ; l1=""
+  19  istrue r1
+  20  jmp 4   ; to 24
+  21  lsmi r0, 4
+  22  ret
+  23  lnil r1
+  24  ltrue r1
+  25  istrue r1
+  26  jmp 4   ; to 30
+  27  lsmi r0, 5
+  28  ret
+  29  lnil r1
+  30  lfalse r1
+  31  istrue r1
   32  jmp 4   ; to 36
-  33  lsmi r0, 7
+  33  lsmi r0, 6
   34  ret
-  35  lnil r0
-  36  ret
+  35  lnil r1
+  36  lnil r0
+  37  istrue r0
+  38  jmp 4   ; to 42
+  39  lsmi r0, 7
+  40  ret
+  41  lnil r0
+  42  ret

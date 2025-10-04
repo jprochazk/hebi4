@@ -285,7 +285,7 @@ pub type OpaqueOp = Op!(fn(RawInstruction, Jt, Sp, Lp, Ip, Ctx) -> Control);
 
 macro_rules! declare_operand_type {
     ($name:ident, $ty:ident, $fmt:literal) => {
-        #[derive(Clone, Copy)]
+        #[derive(Debug, Clone, Copy)]
         #[repr(transparent)]
         #[must_use = "unused operand"]
         pub struct $name($ty);

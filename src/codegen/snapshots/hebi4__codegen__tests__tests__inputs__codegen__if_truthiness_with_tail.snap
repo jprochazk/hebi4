@@ -13,10 +13,11 @@ OK
    0  lsmi r1, 1
    1  lsmi r2, 0
    2  istrue r1
-   3  jmp 3   ; to 6
+   3  jmp 4   ; to 7
    4  lsmi r2, 10
-   5  jmp 3   ; to 8
-   6  lsmi r2, 20
-   7  lnil r3
-   8  mov r0, r2
-   9  ret
+   5  lnil r3
+   6  jmp 3   ; to 9
+   7  lsmi r2, 20
+   8  lnil r3
+   9  mov r0, r2
+  10  ret

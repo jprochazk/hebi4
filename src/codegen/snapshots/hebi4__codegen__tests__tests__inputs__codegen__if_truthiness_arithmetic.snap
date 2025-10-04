@@ -5,7 +5,7 @@ expression: snapshot
 OK
 .fn @main
   params 0
-  stack 5
+  stack 4
   .locals
     a = r1
     b = r2
@@ -14,18 +14,20 @@ OK
    1  lsmi r2, 3
    2  add r3, r1, r2
    3  istrue r3
-   4  jmp 3   ; to 7
+   4  jmp 4   ; to 8
    5  lsmi r0, 1
    6  ret
-   7  sub r3, r1, 5
-   8  istrue r3
-   9  jmp 3   ; to 12
-  10  lsmi r0, 2
-  11  ret
-  12  mul r0, r1, 0
-  13  istrue r0
-  14  jmp 4   ; to 18
-  15  lsmi r0, 3
-  16  ret
-  17  lnil r0
+   7  lnil r3
+   8  sub r3, r1, 5
+   9  istrue r3
+  10  jmp 4   ; to 14
+  11  lsmi r0, 2
+  12  ret
+  13  lnil r3
+  14  mul r0, r1, 0
+  15  istrue r0
+  16  jmp 4   ; to 20
+  17  lsmi r0, 3
   18  ret
+  19  lnil r0
+  20  ret

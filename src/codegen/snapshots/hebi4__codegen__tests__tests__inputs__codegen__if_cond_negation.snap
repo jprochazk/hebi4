@@ -5,7 +5,7 @@ expression: snapshot
 OK
 .fn @main
   params 0
-  stack 5
+  stack 4
   .locals
     a = r1
     b = r2
@@ -13,16 +13,21 @@ OK
    0  lsmi r1, 0
    1  lsmi r2, 1
    2  isge r1, r2
-   3  jmp 1   ; to 4
-   4  isle r1, r2
-   5  jmp 1   ; to 6
-   6  isgt r1, r2
-   7  jmp 1   ; to 8
-   8  islt r1, r2
-   9  jmp 1   ; to 10
-  10  isne r1, r2
-  11  jmp 1   ; to 12
-  12  iseq r1, r2
-  13  jmp 2   ; to 15
-  14  lnil r0
-  15  ret
+   3  jmp 2   ; to 5
+   4  lnil r3
+   5  isle r1, r2
+   6  jmp 2   ; to 8
+   7  lnil r3
+   8  isgt r1, r2
+   9  jmp 2   ; to 11
+  10  lnil r3
+  11  islt r1, r2
+  12  jmp 2   ; to 14
+  13  lnil r3
+  14  isne r1, r2
+  15  jmp 2   ; to 17
+  16  lnil r3
+  17  iseq r1, r2
+  18  jmp 2   ; to 20
+  19  lnil r0
+  20  ret

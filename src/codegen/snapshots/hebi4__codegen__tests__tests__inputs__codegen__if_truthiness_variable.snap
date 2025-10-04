@@ -15,16 +15,18 @@ OK
    1  lsmi r2, 0
    2  lnil r3
    3  istrue r1
-   4  jmp 3   ; to 7
+   4  jmp 4   ; to 8
    5  lsmi r0, 1
    6  ret
-   7  istrue r2
-   8  jmp 3   ; to 11
-   9  lsmi r0, 2
-  10  ret
-  11  istrue r3
-  12  jmp 4   ; to 16
-  13  lsmi r0, 3
-  14  ret
-  15  lnil r0
+   7  lnil r4
+   8  istrue r2
+   9  jmp 4   ; to 13
+  10  lsmi r0, 2
+  11  ret
+  12  lnil r4
+  13  istrue r3
+  14  jmp 4   ; to 18
+  15  lsmi r0, 3
   16  ret
+  17  lnil r0
+  18  ret

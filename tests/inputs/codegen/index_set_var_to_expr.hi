@@ -1,0 +1,5 @@
+var a = [0]
+var i = 0
+var v = 1
+a[i] = v + v
+
