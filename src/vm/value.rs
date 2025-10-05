@@ -108,15 +108,19 @@ const _: () = {
     assert_bit_equality!(ValueRaw::Float(100.0), Literal::Float(100.0));
 };
 
+// TODO: intern all strings?
 #[repr(align(16))]
 pub struct String {
+    hash: u64,
     inner: std::string::String,
 }
 
 impl String {
+    #[inline(never)]
     pub(crate) fn alloc(heap: &Heap, s: &str) -> Gc<Self> {
         heap.alloc_no_gc(|ptr| unsafe {
             (*ptr).write(Self {
+                hash: heap.string_hasher().hash_str(s),
                 inner: s.to_owned(),
             });
         })
@@ -143,6 +147,17 @@ unsafe impl Trace for String {
     }
 }
 
+#[derive(Default)]
+pub(crate) struct StringHasher(FxBuildHasher);
+
+impl StringHasher {
+    pub fn hash_str(&self, key: &str) -> u64 {
+        let state = &mut self.0.build_hasher();
+        key.hash(state);
+        state.finish()
+    }
+}
+
 #[repr(align(16))]
 pub struct List {
     items: Vec<ValueRaw>,
@@ -150,7 +165,7 @@ pub struct List {
 
 impl List {
     #[inline(never)]
-    pub(crate) fn alloc(heap: &Heap, capacity: usize) -> Gc<Self> {
+    pub fn alloc(heap: &Heap, capacity: usize) -> Gc<Self> {
         heap.alloc_no_gc(|ptr| unsafe {
             (*ptr).write(Self {
                 items: Vec::with_capacity(capacity),
@@ -160,7 +175,7 @@ impl List {
 
     /// Allocate a `List` initialized to `len` `nil`s.
     #[inline(never)]
-    pub(crate) fn new(heap: &Heap, len: usize) -> Gc<Self> {
+    pub fn alloc_zeroed(heap: &Heap, len: usize) -> Gc<Self> {
         heap.alloc_no_gc(|ptr| unsafe {
             let mut items = Vec::with_capacity(len);
             {
@@ -263,6 +278,8 @@ impl<'a> Iterator for ListIter<'a> {
     }
 }
 
+impl<'a> std::iter::FusedIterator for ListIter<'a> {}
+
 #[derive(Debug, Clone)]
 pub struct IndexOutOfBounds(usize);
 
@@ -308,11 +325,12 @@ impl<'a> RefMut<'a, List> {
 
     /// Set `self[index]` to `value`.
     ///
-    /// Assumes that `value` is alive.
+    /// Assumes that `value` is alive, and that `index` is a valid index.
     ///
     /// ## Safety
     ///
     /// - `value` must still be alive.
+    /// - `index` must be in bounds.
     #[inline]
     pub unsafe fn set_raw_unchecked(&mut self, index: usize, value: ValueRaw) {
         debug_assert!(index < self.items.len());
@@ -352,23 +370,17 @@ struct Opaque(u32);
 pub struct Table {
     map: HashMap<Opaque, (), ()>,
     kv: Vec<(Gc<String>, ValueRaw)>,
-    hasher: FxBuildHasher,
-}
-
-#[inline]
-fn hash_str(hasher: &impl BuildHasher, key: &str) -> u64 {
-    let state = &mut hasher.build_hasher();
-    key.hash(state);
-    state.finish()
+    hash: StringHasher,
 }
 
 impl Table {
+    #[inline(never)]
     pub fn alloc(heap: &Heap, capacity: usize) -> Gc<Self> {
         heap.alloc_no_gc(|ptr| unsafe {
             (*ptr).write(Self {
                 map: HashMap::with_capacity_and_hasher(capacity, ()),
                 kv: Vec::with_capacity(capacity),
-                hasher: FxBuildHasher::default(),
+                hash: StringHasher::default(),
             });
         })
     }
@@ -404,7 +416,7 @@ impl<'a> Ref<'a, Table> {
     {
         let this: &Table = &*self;
         let key = key.as_str();
-        let hash = hash_str(&this.hasher, key);
+        let hash = this.hash.hash_str(key);
         let entry = this.map.raw_entry().from_hash(hash, |&Opaque(index)| {
             // SAFETY: `index` is guaranteed to be valid
             let (stored_key, _) = unsafe { this.kv.get_unchecked(index as usize) };
@@ -438,6 +450,30 @@ impl<'a> Ref<'a, Table> {
     }
 
     #[inline]
+    pub fn entry(&self, index: usize) -> Option<(Ref<'a, String>, ValueRef<'a>)> {
+        let this: &Table = &*self;
+
+        let Some((k, v)) = this.kv.get(index) else {
+            return None;
+        };
+
+        // SAFETY: transitively rooted
+        let k = unsafe { k.as_ref() };
+        let v = match v {
+            ValueRaw::Nil => ValueRef::Nil,
+            ValueRaw::Bool(v) => ValueRef::Bool(*v),
+            ValueRaw::Int(v) => ValueRef::Int(*v),
+            ValueRaw::Float(v) => ValueRef::Float(*v),
+            ValueRaw::String(gc) => ValueRef::String(unsafe { gc.as_ref() }),
+            ValueRaw::List(gc) => ValueRef::List(unsafe { gc.as_ref() }),
+            ValueRaw::Table(gc) => ValueRef::Table(unsafe { gc.as_ref() }),
+            ValueRaw::UData(gc) => ValueRef::UData(unsafe { gc.as_ref() }),
+        };
+
+        Some((k, v))
+    }
+
+    #[inline]
     pub fn len(&self) -> usize {
         self.kv.len()
     }
@@ -446,15 +482,46 @@ impl<'a> Ref<'a, Table> {
     pub fn capacity(&self) -> usize {
         self.kv.capacity()
     }
+
+    #[inline]
+    pub fn entries(&self) -> TableEntries<'a> {
+        TableEntries {
+            table: *self,
+            index: 0,
+        }
+    }
+}
+
+impl<'a> IntoIterator for Ref<'a, Table> {
+    type Item = (Ref<'a, String>, ValueRef<'a>);
+
+    type IntoIter = TableEntries<'a>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.entries()
+    }
 }
 
 impl RefMut<'_, Table> {
-    #[inline]
+    /// `self[key] = value`
+    #[inline(never)]
     pub fn insert(&mut self, key: &Root<'_, String>, value: ValueRoot<'_>) {
-        let this: &mut Table = &mut *self;
-        let key = unsafe { key.as_ptr().as_ref() };
+        unsafe { self.insert_raw(key.as_ptr(), value.raw()) }
+    }
 
-        let hash = hash_str(&this.hasher, key.as_str());
+    /// `self[key] = value`
+    ///
+    /// Assumes that `key` and `value` are alive.
+    ///
+    /// ## Safety
+    ///
+    /// - `key` and `value` must be alive
+    #[inline(never)]
+    pub unsafe fn insert_raw(&mut self, key: Gc<String>, value: ValueRaw) {
+        let this: &mut Table = &mut *self;
+        let key = unsafe { key.as_ref() };
+
+        let hash = this.hash.hash_str(key.as_str());
         let entry = this.map.raw_entry_mut().from_hash(hash, |&Opaque(index)| {
             // SAFETY: `index` is guaranteed to be valid
             let (stored_key, _) = unsafe { this.kv.get_unchecked(index as usize) };
@@ -472,25 +539,53 @@ impl RefMut<'_, Table> {
                 // SAFETY: `index` is guaranteed to be valid
                 let (k, v) = unsafe { this.kv.get_unchecked_mut(index) };
                 *k = key.as_ptr();
-                *v = value.raw();
+                *v = value;
             }
             RawEntryMut::Vacant(entry) => {
                 let index = this.kv.len() as u32;
                 // NOTE: the newly stored key is rooted at least for the duration
                 // of this call to `insert`, proven by being passed in as `Ref`
-                this.kv.push((key.as_ptr(), value.raw()));
+                this.kv.push((key.as_ptr(), value));
                 entry.insert_with_hasher(hash, Opaque(index), (), |&Opaque(index)| {
                     // SAFETY: `index` is guaranteed to be valid, because we just pushed it into `kv`
                     let (stored_key, _) = unsafe { this.kv.get_unchecked(index as usize) };
                     // SAFETY: we're accessing the key which is still rooted by caller
                     let stored_key = unsafe { stored_key.as_ref() };
 
-                    hash_str(&this.hasher, stored_key.as_str())
+                    this.hash.hash_str(stored_key.as_str())
                 });
             }
         }
     }
 }
+
+pub struct TableEntries<'a> {
+    table: Ref<'a, Table>,
+    index: usize,
+}
+
+impl<'a> Iterator for TableEntries<'a> {
+    type Item = (Ref<'a, String>, ValueRef<'a>);
+
+    #[inline]
+    fn next(&mut self) -> Option<Self::Item> {
+        match self.table.entry(self.index) {
+            Some(entry) => {
+                self.index += 1;
+
+                Some(entry)
+            }
+
+            None => {
+                // fused iterator
+                self.index = usize::MAX;
+                None
+            }
+        }
+    }
+}
+
+impl<'a> std::iter::FusedIterator for TableEntries<'a> {}
 
 unsafe impl Trace for Table {
     const KIND: ObjectKind = ObjectKind::Table;

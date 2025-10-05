@@ -127,14 +127,10 @@ impl<'a> std::fmt::Display for DisasmFunc<'a> {
                     let v = lit[id.zx()].str().unwrap();
                     writeln!(f, "lstr {dst}, {id}   ; {id}={v:?}")?
                 }
-                I::Lcli { dst, id } => {
-                    todo!()
-                }
-                I::Lfni { dst, id } => {
-                    todo!()
-                }
-                I::Larr { dst, cap } => writeln!(f, "larr {dst}, {cap}")?,
-                I::Lobj { dst, cap } => writeln!(f, "lobj {dst}, {cap}")?,
+                I::Lclosure { dst, id } => writeln!(f, "lclosure {dst}, {id}")?,
+                I::Lfunc { dst, id } => writeln!(f, "lfunc {dst}, {id}")?,
+                I::Llist { dst, cap } => writeln!(f, "llist {dst}, {cap}")?,
+                I::Ltable { dst, cap } => writeln!(f, "ltable {dst}, {cap}")?,
                 I::Jmp { rel } => writeln!(f, "jmp {rel}   ; to {}", (i as isize) + rel.sz())?,
                 I::Istrue { v, _b, _c } => writeln!(f, "istrue {v}")?,
                 I::Istruec { dst, v, _c } => writeln!(f, "istruec {dst}, {v}")?,

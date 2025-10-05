@@ -5,11 +5,11 @@ expression: snapshot
 OK
 .fn @main
   params 0
-  stack 3
+  stack 2
   .locals
     i = r1
   .code
   0  lsmi r1, 0
-  1  larr r0, 0
+  1  llist r0, 0
   2  lidx r0, r0, r1
   3  ret

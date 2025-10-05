@@ -5,21 +5,25 @@ expression: snapshot
 OK
 Root(
     [
-        Var(
-            Ident(
-                "empty",
-            ),
-            Object(
+        StmtExpr(
+            CallTable(
+                GetVar(
+                    Ident(
+                        "empty",
+                    ),
+                ),
                 [],
             ),
         ),
-        Var(
-            Ident(
-                "single_arg",
-            ),
-            Object(
+        StmtExpr(
+            CallTable(
+                GetVar(
+                    Ident(
+                        "single_arg",
+                    ),
+                ),
                 [
-                    ObjectEntry(
+                    TableEntry(
                         Str(
                             "a",
                         ),
@@ -32,13 +36,15 @@ Root(
                 ],
             ),
         ),
-        Var(
-            Ident(
-                "single_arg_tc",
-            ),
-            Object(
+        StmtExpr(
+            CallTable(
+                GetVar(
+                    Ident(
+                        "single_arg_tc",
+                    ),
+                ),
                 [
-                    ObjectEntry(
+                    TableEntry(
                         Str(
                             "a",
                         ),
@@ -51,13 +57,15 @@ Root(
                 ],
             ),
         ),
-        Var(
-            Ident(
-                "multi_arg",
-            ),
-            Object(
+        StmtExpr(
+            CallTable(
+                GetVar(
+                    Ident(
+                        "multi_arg",
+                    ),
+                ),
                 [
-                    ObjectEntry(
+                    TableEntry(
                         Str(
                             "a",
                         ),
@@ -65,7 +73,7 @@ Root(
                             0,
                         ),
                     ),
-                    ObjectEntry(
+                    TableEntry(
                         Str(
                             "b",
                         ),
@@ -76,13 +84,15 @@ Root(
                 ],
             ),
         ),
-        Var(
-            Ident(
-                "multi_arg_tc",
-            ),
-            Object(
+        StmtExpr(
+            CallTable(
+                GetVar(
+                    Ident(
+                        "multi_arg_tc",
+                    ),
+                ),
                 [
-                    ObjectEntry(
+                    TableEntry(
                         Str(
                             "a",
                         ),
@@ -90,7 +100,7 @@ Root(
                             0,
                         ),
                     ),
-                    ObjectEntry(
+                    TableEntry(
                         Str(
                             "b",
                         ),
@@ -101,13 +111,15 @@ Root(
                 ],
             ),
         ),
-        Var(
-            Ident(
-                "single_arg_inline",
-            ),
-            Object(
+        StmtExpr(
+            CallTable(
+                GetVar(
+                    Ident(
+                        "single_arg_inline",
+                    ),
+                ),
                 [
-                    ObjectEntry(
+                    TableEntry(
                         Str(
                             "a",
                         ),
@@ -120,13 +132,15 @@ Root(
                 ],
             ),
         ),
-        Var(
-            Ident(
-                "single_arg_inline_tc",
-            ),
-            Object(
+        StmtExpr(
+            CallTable(
+                GetVar(
+                    Ident(
+                        "single_arg_inline_tc",
+                    ),
+                ),
                 [
-                    ObjectEntry(
+                    TableEntry(
                         Str(
                             "a",
                         ),
@@ -139,13 +153,15 @@ Root(
                 ],
             ),
         ),
-        Var(
-            Ident(
-                "multi_arg_mixed",
-            ),
-            Object(
+        StmtExpr(
+            CallTable(
+                GetVar(
+                    Ident(
+                        "multi_arg_mixed",
+                    ),
+                ),
                 [
-                    ObjectEntry(
+                    TableEntry(
                         Str(
                             "a",
                         ),
@@ -153,7 +169,7 @@ Root(
                             0,
                         ),
                     ),
-                    ObjectEntry(
+                    TableEntry(
                         Str(
                             "b",
                         ),
@@ -166,13 +182,15 @@ Root(
                 ],
             ),
         ),
-        Var(
-            Ident(
-                "multi_arg_mixed_tc",
-            ),
-            Object(
+        StmtExpr(
+            CallTable(
+                GetVar(
+                    Ident(
+                        "multi_arg_mixed_tc",
+                    ),
+                ),
                 [
-                    ObjectEntry(
+                    TableEntry(
                         Str(
                             "a",
                         ),
@@ -180,7 +198,7 @@ Root(
                             0,
                         ),
                     ),
-                    ObjectEntry(
+                    TableEntry(
                         Str(
                             "b",
                         ),
@@ -193,13 +211,15 @@ Root(
                 ],
             ),
         ),
-        Var(
-            Ident(
-                "multi_arg_mixed2",
-            ),
-            Object(
+        StmtExpr(
+            CallTable(
+                GetVar(
+                    Ident(
+                        "multi_arg_mixed2",
+                    ),
+                ),
                 [
-                    ObjectEntry(
+                    TableEntry(
                         Str(
                             "a",
                         ),
@@ -209,7 +229,7 @@ Root(
                             ),
                         ),
                     ),
-                    ObjectEntry(
+                    TableEntry(
                         Str(
                             "b",
                         ),
@@ -220,13 +240,15 @@ Root(
                 ],
             ),
         ),
-        Var(
-            Ident(
-                "multi_arg_mixed2_tc",
-            ),
-            Object(
+        StmtExpr(
+            CallTable(
+                GetVar(
+                    Ident(
+                        "multi_arg_mixed2_tc",
+                    ),
+                ),
                 [
-                    ObjectEntry(
+                    TableEntry(
                         Str(
                             "a",
                         ),
@@ -236,7 +258,7 @@ Root(
                             ),
                         ),
                     ),
-                    ObjectEntry(
+                    TableEntry(
                         Str(
                             "b",
                         ),
@@ -247,13 +269,15 @@ Root(
                 ],
             ),
         ),
-        Var(
-            Ident(
-                "string_key",
-            ),
-            Object(
+        StmtExpr(
+            CallTable(
+                GetVar(
+                    Ident(
+                        "string_key",
+                    ),
+                ),
                 [
-                    ObjectEntry(
+                    TableEntry(
                         Str(
                             "a",
                         ),
@@ -264,13 +288,15 @@ Root(
                 ],
             ),
         ),
-        Var(
-            Ident(
-                "string_key_tc",
-            ),
-            Object(
+        StmtExpr(
+            CallTable(
+                GetVar(
+                    Ident(
+                        "string_key_tc",
+                    ),
+                ),
                 [
-                    ObjectEntry(
+                    TableEntry(
                         Str(
                             "a",
                         ),
@@ -281,13 +307,15 @@ Root(
                 ],
             ),
         ),
-        Var(
-            Ident(
-                "string_key_multi",
-            ),
-            Object(
+        StmtExpr(
+            CallTable(
+                GetVar(
+                    Ident(
+                        "string_key_multi",
+                    ),
+                ),
                 [
-                    ObjectEntry(
+                    TableEntry(
                         Str(
                             "a",
                         ),
@@ -295,7 +323,7 @@ Root(
                             0,
                         ),
                     ),
-                    ObjectEntry(
+                    TableEntry(
                         Str(
                             "b",
                         ),
@@ -306,13 +334,15 @@ Root(
                 ],
             ),
         ),
-        Var(
-            Ident(
-                "string_key_multi_tc",
-            ),
-            Object(
+        StmtExpr(
+            CallTable(
+                GetVar(
+                    Ident(
+                        "string_key_multi_tc",
+                    ),
+                ),
                 [
-                    ObjectEntry(
+                    TableEntry(
                         Str(
                             "a",
                         ),
@@ -320,7 +350,7 @@ Root(
                             0,
                         ),
                     ),
-                    ObjectEntry(
+                    TableEntry(
                         Str(
                             "b",
                         ),

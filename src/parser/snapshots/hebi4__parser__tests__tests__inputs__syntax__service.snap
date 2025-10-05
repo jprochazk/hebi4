@@ -107,9 +107,9 @@ Root(
                                                 Str(
                                                     "Hello, {name}!",
                                                 ),
-                                                Object(
+                                                Table(
                                                     [
-                                                        ObjectEntry(
+                                                        TableEntry(
                                                             Str(
                                                                 "name",
                                                             ),

@@ -9,7 +9,7 @@ Root(
             Ident(
                 "empty",
             ),
-            Array(
+            List(
                 [],
             ),
         ),
@@ -17,7 +17,7 @@ Root(
             Ident(
                 "single",
             ),
-            Array(
+            List(
                 [
                     Int32(
                         0,
@@ -29,7 +29,7 @@ Root(
             Ident(
                 "single_tc",
             ),
-            Array(
+            List(
                 [
                     Int32(
                         0,
@@ -41,7 +41,7 @@ Root(
             Ident(
                 "multi",
             ),
-            Array(
+            List(
                 [
                     Int32(
                         0,
@@ -59,7 +59,7 @@ Root(
             Ident(
                 "multi_tc",
             ),
-            Array(
+            List(
                 [
                     Int32(
                         0,

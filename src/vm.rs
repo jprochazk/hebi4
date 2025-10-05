@@ -55,7 +55,7 @@ pub mod value;
 use array::{DynArray, DynStack};
 use beef::lean::Cow;
 use gc::Heap;
-use value::List;
+use value::{List, String, Table, thin::ThinStr};
 
 use std::{marker::PhantomData, ptr::null, sync::Arc};
 
@@ -330,6 +330,17 @@ impl Lp {
         debug_assert!(matches!(&*v, Literal::Float(..)));
         v.cast::<u64>().add(1).cast::<f64>().read()
     }
+
+    #[inline(always)]
+    pub unsafe fn str_unchecked(self, r: impl LpIdx) -> *const ThinStr {
+        let v = self._at(r.idx());
+
+        // we're doing this instead of matching to avoid a call to `Literal::drop`.
+        // TODO: use some kind of `offset_of` thing instead?
+
+        debug_assert!(matches!(&*v, Literal::String(..)));
+        v.cast::<u64>().add(1).cast::<ThinStr>()
+    }
 }
 
 impl Jt {
@@ -512,6 +523,8 @@ pub enum VmError {
     NotAList,
     InvalidArrayIndex,
     IndexOutOfBounds,
+    NotATable,
+    InvalidTableKey,
 }
 
 impl VmError {
@@ -526,6 +539,8 @@ impl VmError {
             Self::NotAList => error("not a list", span),
             Self::InvalidArrayIndex => error("value is not a valid array index", span),
             Self::IndexOutOfBounds => error("index out of bounds", span),
+            Self::NotATable => error("not a table", span),
+            Self::InvalidTableKey => error("value is not a valid table key", span),
         }
     }
 
@@ -538,7 +553,9 @@ impl VmError {
             | Self::CmpTypeError
             | Self::NotAList
             | Self::InvalidArrayIndex
-            | Self::IndexOutOfBounds => false,
+            | Self::IndexOutOfBounds
+            | Self::NotATable
+            | Self::InvalidTableKey => false,
         }
     }
 }
@@ -574,10 +591,10 @@ static JT: JumpTable = jump_table! {
     lint,
     lnum,
     lstr,
-    lcli,
-    lfni,
-    larr,
-    lobj,
+    lclosure,
+    lfunc,
+    llist,
+    ltable,
     jmp,
     istrue,
     istruec,
@@ -743,18 +760,18 @@ unsafe fn lidxn(args: Lidxn, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Contro
 
 #[inline(always)]
 unsafe fn sidx(args: Sidx, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control {
+    let target = *sp.at(args.target);
     let idx = *sp.at(args.idx);
-    let list = *sp.at(args.target);
     let src = *sp.at(args.src);
+
+    let ValueRaw::List(list) = target else {
+        return not_a_list_error(ip, ctx);
+    };
 
     let ValueRaw::Int(idx) = idx else {
         return invalid_array_index_error(ip, ctx);
     };
     let idx = idx as usize;
-
-    let ValueRaw::List(list) = list else {
-        return not_a_list_error(ip, ctx);
-    };
 
     // UNROOTED: reachable through the stack
     let len = list.as_ref().len();
@@ -815,12 +832,53 @@ unsafe fn lkeyc(args: Lkeyc, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Contro
 
 #[inline(always)]
 unsafe fn skey(args: Skey, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control {
-    todo!()
+    let target = *sp.at(args.target);
+    let key = *sp.at(args.key);
+    let src = *sp.at(args.src);
+
+    let ValueRaw::Table(table) = target else {
+        return not_a_table_error(ip, ctx);
+    };
+
+    let ValueRaw::String(key) = key else {
+        return invalid_table_key_error(ip, ctx);
+    };
+
+    // UNROOTED: reachable through the stack
+    table.as_mut().insert_raw(key, src);
+
+    dispatch_next(jt, sp, lp, ip, ctx)
+}
+
+#[cold]
+unsafe fn not_a_table_error(ip: Ip, ctx: Ctx) -> Control {
+    vm_exit!(ctx, ip, NotATable);
+}
+
+#[cold]
+unsafe fn invalid_table_key_error(ip: Ip, ctx: Ctx) -> Control {
+    vm_exit!(ctx, ip, InvalidTableKey);
 }
 
 #[inline(always)]
 unsafe fn skeyc(args: Skeyc, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control {
-    todo!()
+    let target = *sp.at(args.target);
+    let key = lp.str_unchecked(args.key);
+    let src = *sp.at(args.src);
+
+    let ValueRaw::Table(table) = target else {
+        return not_a_table_error(ip, ctx);
+    };
+
+    let heap = ctx.heap();
+    // TODO: this is awful. we're allocating _every single time_
+    // someone inserts with a const key.
+    let key = String::alloc(&*heap, (*key).as_str());
+
+    // UNROOTED: reachable through the stack
+    table.as_mut().insert_raw(key, src);
+
+    dispatch_next(jt, sp, lp, ip, ctx)
 }
 
 #[inline(always)]
@@ -871,24 +929,24 @@ unsafe fn lfalse(args: Lfalse, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Cont
 }
 
 #[inline(always)]
-unsafe fn lcli(args: Lcli, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control {
+unsafe fn lclosure(args: Lclosure, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control {
     todo!()
 }
 
 #[inline(always)]
-unsafe fn lfni(args: Lfni, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control {
+unsafe fn lfunc(args: Lfunc, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control {
     todo!()
 }
 
 #[inline(always)]
-unsafe fn larr(args: Larr, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control {
+unsafe fn llist(args: Llist, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control {
     ctx.maybe_gc();
 
     let len = args.cap.zx();
 
     // UNROOTED: immediately written to the stack
     let heap = ctx.heap();
-    let list = List::new(&*heap, len);
+    let list = List::alloc_zeroed(&*heap, len);
 
     *sp.at(args.dst) = ValueRaw::List(list);
 
@@ -896,8 +954,18 @@ unsafe fn larr(args: Larr, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control 
 }
 
 #[inline(always)]
-unsafe fn lobj(args: Lobj, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control {
-    todo!()
+unsafe fn ltable(args: Ltable, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control {
+    ctx.maybe_gc();
+
+    let len = args.cap.zx();
+
+    // UNROOTED: immediately written to the stack
+    let heap = ctx.heap();
+    let table = Table::alloc(&*heap, len);
+
+    *sp.at(args.dst) = ValueRaw::Table(table);
+
+    dispatch_next(jt, sp, lp, ip, ctx)
 }
 
 #[inline(always)]
@@ -1717,7 +1785,28 @@ impl<'gc> Runtime<'gc> {
                         Ok(())
                     }
                     ValueRaw::Table(v) => {
-                        todo!()
+                        let table = unsafe { v.as_ref() };
+
+                        write!(f, "{{")?;
+                        let mut comma = false;
+                        for (key, value) in table {
+                            if comma {
+                                write!(f, ", ")?;
+                            }
+                            write!(
+                                f,
+                                "{}={}",
+                                key.as_str(),
+                                ValueFormatter {
+                                    this: self.this,
+                                    value: value.raw(),
+                                }
+                            )?;
+                            comma = true;
+                        }
+                        write!(f, "}}")?;
+
+                        Ok(())
                     }
                     ValueRaw::UData(v) => {
                         todo!()

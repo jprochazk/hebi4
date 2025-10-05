@@ -611,7 +611,7 @@ fn parse_expr_postfix(p: &mut State, buf: &Bump) -> Result<Spanned<Expr>> {
     while !p.end() {
         match p.kind() {
             t!["("] => expr = parse_expr_call(p, buf, expr)?,
-            t!["{"] => expr = parse_expr_call_object(p, buf, expr)?,
+            t!["{"] => expr = parse_expr_call_table(p, buf, expr)?,
             t!["["] => expr = parse_expr_index(p, buf, expr)?,
             t![.] => expr = parse_expr_field(p, buf, expr)?,
             _ => break,
@@ -637,20 +637,20 @@ fn parse_expr_call(p: &mut State, buf: &Bump, callee: Spanned<Expr>) -> Result<S
     Ok(p.close(node, Call { callee, args }).map_into())
 }
 
-fn parse_expr_call_object(
+fn parse_expr_call_table(
     p: &mut State,
     buf: &Bump,
     callee: Spanned<Expr>,
 ) -> Result<Spanned<Expr>> {
     let node = p.open();
 
-    let args = bracketed_list(p, buf, Brackets::Curly, parse_object_entry)?;
+    let args = bracketed_list(p, buf, Brackets::Curly, parse_table_entry)?;
     let args = args.as_slice();
 
-    Ok(p.close(node, CallObject { callee, args }).map_into())
+    Ok(p.close(node, CallTable { callee, args }).map_into())
 }
 
-fn parse_object_entry(p: &mut State, buf: &Bump) -> Result<Spanned<ast::ObjectEntry>> {
+fn parse_table_entry(p: &mut State, buf: &Bump) -> Result<Spanned<ast::TableEntry>> {
     let node = p.open();
 
     let (key, value) = match p.kind() {
@@ -686,7 +686,7 @@ fn parse_object_entry(p: &mut State, buf: &Bump) -> Result<Spanned<ast::ObjectEn
         _ => return error("unexpected token", p.span()).into(),
     };
 
-    Ok(p.close(node, ObjectEntry { key, value }))
+    Ok(p.close(node, TableEntry { key, value }))
 }
 
 fn str_from_lexeme_span(p: &mut State, lexeme: &str, span: Span) -> Spanned<ast::Str> {
@@ -728,8 +728,8 @@ fn parse_expr_field(p: &mut State, buf: &Bump, parent: Spanned<Expr>) -> Result<
 
 fn parse_expr_primary(p: &mut State, buf: &Bump) -> Result<Spanned<Expr>> {
     match p.kind() {
-        t!["["] => parse_expr_array(p, buf),
-        t!["{"] => parse_expr_object(p, buf),
+        t!["["] => parse_expr_list(p, buf),
+        t!["{"] => parse_expr_table(p, buf),
         t![int] => parse_expr_int(p, buf),
         t![float] => parse_expr_float(p, buf),
         t![true] | t![false] => parse_expr_bool(p, buf),
@@ -741,22 +741,22 @@ fn parse_expr_primary(p: &mut State, buf: &Bump) -> Result<Spanned<Expr>> {
     }
 }
 
-fn parse_expr_array(p: &mut State, buf: &Bump) -> Result<Spanned<Expr>> {
+fn parse_expr_list(p: &mut State, buf: &Bump) -> Result<Spanned<Expr>> {
     let node = p.open();
 
     let items = bracketed_list(p, buf, Brackets::Brace, parse_expr)?;
     let items = items.as_slice();
 
-    Ok(p.close(node, Array { items }).map_into())
+    Ok(p.close(node, List { items }).map_into())
 }
 
-fn parse_expr_object(p: &mut State, buf: &Bump) -> Result<Spanned<Expr>> {
+fn parse_expr_table(p: &mut State, buf: &Bump) -> Result<Spanned<Expr>> {
     let node = p.open();
 
-    let entries = bracketed_list(p, buf, Brackets::Curly, parse_object_entry)?;
+    let entries = bracketed_list(p, buf, Brackets::Curly, parse_table_entry)?;
     let entries = entries.as_slice();
 
-    Ok(p.close(node, Object { entries }).map_into())
+    Ok(p.close(node, Table { entries }).map_into())
 }
 
 fn parse_expr_int(p: &mut State, _: &Bump) -> Result<Spanned<Expr>> {

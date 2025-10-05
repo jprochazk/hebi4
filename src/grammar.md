@@ -237,15 +237,15 @@ expr_suffix =
 
 suffix =
     suffix_call
-    suffix_call_object
+    suffix_call_table
     suffix_index
     suffix_field
 
 suffix_call =
     "(" expr,* ")"
 
-suffix_call_object =
-    "{" object_entry,* "}"
+suffix_call_table =
+    "{" table_entry,* "}"
 
 suffix_index =
     "[" expr "]"
@@ -267,8 +267,8 @@ expr_group =
     "(" expr ")"
 
 expr_primary =
-    expr_array
-    expr_object
+    expr_list
+    expr_table
     expr_number
     expr_bool
     expr_string
@@ -276,19 +276,19 @@ expr_primary =
     expr_use
     expr_group
 
-expr_array =
+expr_list =
     "[" expr,* "]"
 
-expr_object =
-    "{" object_entry,* "}"
+expr_table =
+    "{" table_entry,* "}"
 ```
 
-object entries are key-value pairs separated by an equals sign.
+table entries are key-value pairs separated by an equals sign.
 a key may be either an identifier or a string. numeric keys are not allowed.
-one entry in an object may be a standalone identifier,
+one entry in an table may be a standalone identifier,
 which is shorthand for `IDENT = IDENT`.
 ```
-object_entry =
+table_entry =
     IDENT "=" expr
     expr_use
     expr_string "=" expr

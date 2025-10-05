@@ -1,0 +1,6 @@
+---
+source: src/vm/tests.rs
+expression: snapshot
+---
+OK
+{a=1, b=2, c=3}

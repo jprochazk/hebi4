@@ -1,0 +1,17 @@
+---
+source: src/codegen/tests.rs
+expression: snapshot
+---
+OK
+.fn @main
+  params 0
+  stack 2
+  .code
+  0  llist r0, 3
+  1  lsmi r1, 0
+  2  sidxn r0, 0, r1
+  3  lsmi r1, 1
+  4  sidxn r0, 1, r1
+  5  lsmi r1, 2
+  6  sidxn r0, 2, r1
+  7  ret

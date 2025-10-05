@@ -85,7 +85,7 @@ lstr dst:reg id:lit;
  *
  * `id` holds a ClosureInfo.
  */
-lcli dst:reg id:lit;
+lclosure dst:reg id:lit;
 
 /*
  * Load function by `id` into register `dst`.
@@ -95,18 +95,18 @@ lcli dst:reg id:lit;
  * This implies no captures, but the resulting object
  * is still a `Closure`.
  */
-lfni dst:reg id:lit;
+lfunc dst:reg id:lit;
 
-# TODO: constant arrays/objects don't need to use stack space at all
+# TODO: constant lists/tables don't need to use stack space at all
 /*
- * Allocate an array with `capacity` into register `dst`.
+ * Allocate a list with `capacity` into register `dst`.
  */
-larr dst:reg cap:imm16;
+llist dst:reg cap:imm16;
 
 /*
  * Allocate an object with `capacity` into register `dst`.
  */
-lobj dst:reg cap:imm16;
+ltable dst:reg cap:imm16;
 
 # In hebi4's VM, there is only one `jmp` instruction with
 # a signed offset (stored as u24 with a bias).

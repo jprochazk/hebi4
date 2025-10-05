@@ -87,7 +87,7 @@ use std::{
     ptr::null_mut,
 };
 
-use super::value::ValueRaw;
+use super::value::{StringHasher, ValueRaw};
 
 // # Heap
 
@@ -102,6 +102,8 @@ pub struct Heap {
 
     stats: HeapStats,
 
+    string_hasher: StringHasher,
+
     #[cfg(debug_assertions)]
     heap_id: HeapId,
 }
@@ -113,6 +115,7 @@ impl Heap {
             roots: UnsafeCell::new(Box::new(RootList::default())),
             head: Cell::new(null_mut()),
             stats: HeapStats::default(),
+            string_hasher: StringHasher::default(),
 
             #[cfg(debug_assertions)]
             heap_id: HeapId::new(),
@@ -188,6 +191,11 @@ impl Heap {
     #[inline]
     pub fn id(&self) -> HeapId {
         self.heap_id
+    }
+
+    #[inline]
+    pub(crate) fn string_hasher(&self) -> &StringHasher {
+        &self.string_hasher
     }
 }
 

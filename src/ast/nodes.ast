@@ -85,9 +85,9 @@ expr call {
     args: [expr],
 };
 
-expr call_object {
+expr call_table {
     callee: expr,
-    args: [object_entry],
+    args: [table_entry],
 };
 
 expr infix(op: InfixOp as u24) {
@@ -99,15 +99,15 @@ expr prefix(op: PrefixOp as u24) {
     rhs: expr,
 };
 
-expr array {
+expr list {
     items: [expr],
 };
 
-expr object {
-    entries: [object_entry],
+expr table {
+    entries: [table_entry],
 };
 
-data object_entry {
+data table_entry {
     key: str,
     value: expr,
 };

@@ -1257,11 +1257,11 @@ fn eval_expr_maybe_reuse<'a>(
         ast::ExprKind::GetIndex(node) => eval_expr_get_index(m, node, span, dst),
         ast::ExprKind::SetIndex(node) => eval_expr_set_index(m, node, span, dst),
         ast::ExprKind::Call(node) => eval_expr_call(m, node, span, dst),
-        ast::ExprKind::CallObject(node) => todo!(),
+        ast::ExprKind::CallTable(node) => todo!(),
         ast::ExprKind::Infix(node) => eval_expr_infix(m, node, span, dst),
         ast::ExprKind::Prefix(node) => eval_expr_prefix(m, node, span, dst),
-        ast::ExprKind::Array(node) => eval_expr_array(m, node, span, dst),
-        ast::ExprKind::Object(node) => todo!(),
+        ast::ExprKind::List(node) => eval_expr_list(m, node, span, dst),
+        ast::ExprKind::Table(node) => eval_expr_table(m, node, span, dst),
         ast::ExprKind::Int32(node) => Ok(eval_expr_int(m, IntExpr::I32(node), span)),
         ast::ExprKind::Int64(node) => Ok(eval_expr_int(m, IntExpr::I64(node), span)),
         ast::ExprKind::Float32(node) => Ok(eval_expr_float(m, FloatExpr::F32(node), span)),
@@ -1848,7 +1848,7 @@ impl ExprInfo for Node<'_, ast::Expr> {
     fn needs_contiguous_registers(&self) -> bool {
         match self.kind() {
             ast::ExprKind::Call(node) => !node.args().is_empty(),
-            ast::ExprKind::CallObject(node) => !node.args().is_empty(),
+            ast::ExprKind::CallTable(node) => !node.args().is_empty(),
 
             ast::ExprKind::Return(..)
             | ast::ExprKind::Break(..)
@@ -1865,8 +1865,8 @@ impl ExprInfo for Node<'_, ast::Expr> {
             | ast::ExprKind::SetIndex(..)
             | ast::ExprKind::Infix(..)
             | ast::ExprKind::Prefix(..)
-            | ast::ExprKind::Array(..)
-            | ast::ExprKind::Object(..)
+            | ast::ExprKind::List(..)
+            | ast::ExprKind::Table(..)
             | ast::ExprKind::Int32(..)
             | ast::ExprKind::Int64(..)
             | ast::ExprKind::Float32(..)
@@ -2023,39 +2023,71 @@ fn eval_expr_prefix<'a>(
     todo!()
 }
 
-fn eval_expr_array<'a>(
+fn eval_expr_list<'a>(
     m: &mut State<'a>,
-    node: Node<'a, ast::Array>,
+    node: Node<'a, ast::List>,
     span: Span,
     dst: Option<Reg>,
 ) -> Result<Value<'a>> {
-    // TODO: constant array?
+    // TODO: constant array
 
     let dst = maybe_reuse_reg(m, span, dst)?;
 
-    // TODO: actual length doesn't matter. WHY would you write 64k constants into an array...
     let cap = node.items().len().min(u16::MAX as usize) as u16;
     let cap = unsafe { Imm16::new_unchecked(cap) };
-    m.emit(asm::larr(dst, cap), span);
+    m.emit(asm::llist(dst, cap), span);
 
-    let tmp = fresh_reg(m, span)?;
     for (idx, (item, &span)) in node
         .items()
         .into_iter()
         .zip(node.items_spans().iter())
         .enumerate()
     {
-        let value = eval_expr_reuse(m, item, span, tmp)?;
-        let value = value_to_reg_reuse(m, value, tmp)?;
+        let value = eval_expr(m, item, span)?;
+        let value = value_to_reg(m, value)?;
 
         let idx = value_to_operand(m, Value::int(idx as i64, span))?;
         match idx {
             Operand::Reg(idx) => m.emit(asm::sidx(dst, idx, value), span),
             Operand::Const(idx) => m.emit(asm::sidxn(dst, idx, value), span),
         }
+
         free_operand(m, idx);
+        free_reg(m, value);
     }
-    free_reg(m, tmp);
+
+    Ok(Value::dynamic(dst, span))
+}
+
+fn eval_expr_table<'a>(
+    m: &mut State<'a>,
+    node: Node<'a, ast::Table>,
+    span: Span,
+    dst: Option<Reg>,
+) -> Result<Value<'a>> {
+    // TODO: constant object
+
+    let dst = maybe_reuse_reg(m, span, dst)?;
+
+    let cap = node.entries().len().min(u16::MAX as usize) as u16;
+    let cap = unsafe { Imm16::new_unchecked(cap) };
+    m.emit(asm::ltable(dst, cap), span);
+
+    for (entry, &span) in node.entries().into_iter().zip(node.entries_spans().iter()) {
+        let key = entry.key().get();
+
+        let value = eval_expr(m, entry.value(), entry.value_span())?;
+        let value = value_to_reg(m, value)?;
+
+        let key = value_to_operand(m, Value::str(key, entry.key_span()))?;
+        match key {
+            Operand::Reg(key) => m.emit(asm::skey(dst, key, value), span),
+            Operand::Const(key) => m.emit(asm::skeyc(dst, key, value), span),
+        }
+
+        free_operand(m, key);
+        free_reg(m, value);
+    }
 
     Ok(Value::dynamic(dst, span))
 }

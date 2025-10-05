@@ -7,11 +7,11 @@ OK
   params 0
   stack 2
   .code
-  0  larr r0, 3
+  0  ltable r0, 3
   1  lsmi r1, 0
-  2  sidxn r0, 0, r1
+  2  skeyc r0, a, r1
   3  lsmi r1, 1
-  4  sidxn r0, 1, r1
+  4  skeyc r0, b, r1
   5  lsmi r1, 2
-  6  sidxn r0, 2, r1
+  6  skeyc r0, c, r1
   7  ret
