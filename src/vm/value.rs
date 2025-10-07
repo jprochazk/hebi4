@@ -7,6 +7,21 @@ use crate::vm::gc::Gc;
 
 use super::gc::{Heap, ObjectKind, Ref, RefMut, Root, Trace, Tracer, ValueRef, ValueRoot};
 
+// TODO: string allocation strategy
+//
+// Pass a handle to the GC into the compiler, so it can intern GC'd strings.
+// That _does_ mean you can't arbitrary move the module around, across threads,
+// etc., and to move it as such you'd have to serialize it first.
+//
+// Alternatively, canonicalize at "module load" time, as in have a separate
+// step where the module is given to a VM instance, which then moves interned
+// strings onto the GC heap, resulting in a "loaded" or "runtime" module.
+// That's then what's actually passed around in all the places.
+// Note that functions have back-pointers to their modules, which complicates
+// things.
+//
+// Tradeoffs...
+
 pub mod thin;
 
 // NOTE: `Value` must be bit-compatible with `Literal`,
@@ -48,7 +63,7 @@ pub enum ValueRaw {
     String(Gc<String>),
     List(Gc<List>),
     Table(Gc<Table>),
-    UData(Gc<UData>),
+    UserData(Gc<UserData>),
 }
 
 impl ValueRaw {
@@ -69,7 +84,7 @@ impl ValueRaw {
             ValueRaw::String(gc) => true,
             ValueRaw::List(gc) => true,
             ValueRaw::Table(gc) => true,
-            ValueRaw::UData(gc) => true,
+            ValueRaw::UserData(gc) => true,
         }
     }
 
@@ -83,7 +98,7 @@ impl ValueRaw {
             ValueRaw::String(gc) => "str",
             ValueRaw::List(gc) => "list",
             ValueRaw::Table(gc) => "table",
-            ValueRaw::UData(gc) => "udata",
+            ValueRaw::UserData(gc) => "udata",
         }
     }
 }
@@ -226,7 +241,7 @@ impl<'a> Ref<'a, List> {
             ValueRaw::String(gc) => ValueRef::String(unsafe { gc.as_ref() }),
             ValueRaw::List(gc) => ValueRef::List(unsafe { gc.as_ref() }),
             ValueRaw::Table(gc) => ValueRef::Table(unsafe { gc.as_ref() }),
-            ValueRaw::UData(gc) => ValueRef::UData(unsafe { gc.as_ref() }),
+            ValueRaw::UserData(gc) => ValueRef::UserData(unsafe { gc.as_ref() }),
         };
 
         Some(v)
@@ -443,7 +458,7 @@ impl<'a> Ref<'a, Table> {
             ValueRaw::String(gc) => ValueRef::String(unsafe { gc.as_ref() }),
             ValueRaw::List(gc) => ValueRef::List(unsafe { gc.as_ref() }),
             ValueRaw::Table(gc) => ValueRef::Table(unsafe { gc.as_ref() }),
-            ValueRaw::UData(gc) => ValueRef::UData(unsafe { gc.as_ref() }),
+            ValueRaw::UserData(gc) => ValueRef::UserData(unsafe { gc.as_ref() }),
         };
 
         Some(v)
@@ -467,7 +482,7 @@ impl<'a> Ref<'a, Table> {
             ValueRaw::String(gc) => ValueRef::String(unsafe { gc.as_ref() }),
             ValueRaw::List(gc) => ValueRef::List(unsafe { gc.as_ref() }),
             ValueRaw::Table(gc) => ValueRef::Table(unsafe { gc.as_ref() }),
-            ValueRaw::UData(gc) => ValueRef::UData(unsafe { gc.as_ref() }),
+            ValueRaw::UserData(gc) => ValueRef::UserData(unsafe { gc.as_ref() }),
         };
 
         Some((k, v))
@@ -610,12 +625,12 @@ unsafe impl Trace for Closure {
     }
 }
 
-pub struct UData {
+pub struct UserData {
     // TODO
 }
 
-unsafe impl Trace for UData {
-    const KIND: ObjectKind = ObjectKind::UData;
+unsafe impl Trace for UserData {
+    const KIND: ObjectKind = ObjectKind::UserData;
 
     unsafe fn trace(&self, tracer: &Tracer) {
         _ = tracer;

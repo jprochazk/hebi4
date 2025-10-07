@@ -43,7 +43,7 @@ unsafe fn mark(heap: &mut Heap, external_roots: &dyn ExternalRoots) {
             }
         }
 
-        trace!(String, List, Table, Closure, UData);
+        trace!(String, List, Table, Closure, UserData);
     });
 }
 
@@ -87,7 +87,7 @@ unsafe fn sweep(heap: &mut Heap) {
                 }
             }
 
-            let size = free!(String, List, Table, Closure, UData);
+            let size = free!(String, List, Table, Closure, UserData);
 
             freed_bytes += size;
         }
@@ -116,7 +116,7 @@ pub(crate) unsafe fn free_all(heap: &mut Heap) {
                 }
             }
 
-        let size = free!(String, List, Table, Closure, UData);
+        let size = free!(String, List, Table, Closure, UserData);
         freed_bytes += size;
 
         iter = next;

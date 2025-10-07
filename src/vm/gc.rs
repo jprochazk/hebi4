@@ -52,7 +52,7 @@
 //!   - String, List, Table, Closure
 //!   - Stored on heap, GC header type tag supports a subset of these directly
 //!     - Tracing these is cheap, only a `match obj.tag` + static dispatch
-//! - UData
+//! - UserData
 //!   - Rust `struct`, wrapped in GC-managed allocation
 //!   - May expose getters, setters, methods (?)
 //!   - These cannot be traced, meaning no `Trace` derive
@@ -392,7 +392,7 @@ pub enum ObjectKind {
     List = 1,
     Table = 2,
     Closure = 3,
-    UData = 4,
+    UserData = 4,
 }
 
 #[derive(Clone, Copy)]
@@ -523,7 +523,7 @@ impl Tracer {
             ValueRaw::String(ptr) => self.visit(ptr),
             ValueRaw::List(ptr) => self.visit(ptr),
             ValueRaw::Table(ptr) => self.visit(ptr),
-            ValueRaw::UData(ptr) => self.visit(ptr),
+            ValueRaw::UserData(ptr) => self.visit(ptr),
             ValueRaw::Nil | ValueRaw::Bool(_) | ValueRaw::Int(_) | ValueRaw::Float(_) => {}
         }
     }
@@ -875,7 +875,7 @@ pub enum ValueRoot<'a> {
     String(Root<'a, super::value::String>),
     List(Root<'a, super::value::List>),
     Table(Root<'a, super::value::Table>),
-    UData(Root<'a, super::value::UData>),
+    UserData(Root<'a, super::value::UserData>),
 }
 
 impl<'a> ValueRoot<'a> {
@@ -889,7 +889,7 @@ impl<'a> ValueRoot<'a> {
             ValueRoot::String(v) => ValueRaw::String(v.as_ptr()),
             ValueRoot::List(v) => ValueRaw::List(v.as_ptr()),
             ValueRoot::Table(v) => ValueRaw::Table(v.as_ptr()),
-            ValueRoot::UData(v) => ValueRaw::UData(v.as_ptr()),
+            ValueRoot::UserData(v) => ValueRaw::UserData(v.as_ptr()),
         }
     }
 }
@@ -904,7 +904,7 @@ pub enum ValueRef<'a> {
     String(Ref<'a, super::value::String>),
     List(Ref<'a, super::value::List>),
     Table(Ref<'a, super::value::Table>),
-    UData(Ref<'a, super::value::UData>),
+    UserData(Ref<'a, super::value::UserData>),
 }
 
 impl<'a> ValueRef<'a> {
@@ -918,7 +918,7 @@ impl<'a> ValueRef<'a> {
             ValueRef::String(v) => ValueRaw::String(v.as_ptr()),
             ValueRef::List(v) => ValueRaw::List(v.as_ptr()),
             ValueRef::Table(v) => ValueRaw::Table(v.as_ptr()),
-            ValueRef::UData(v) => ValueRaw::UData(v.as_ptr()),
+            ValueRef::UserData(v) => ValueRaw::UserData(v.as_ptr()),
         }
     }
 }
@@ -933,7 +933,7 @@ impl<'a> ValueRef<'a> {
 //     String(RefMut<'a, super::value::String>),
 //     List(RefMut<'a, super::value::List>),
 //     Table(RefMut<'a, super::value::Table>),
-//     UData(RefMut<'a, super::value::UData>),
+//     UserData(RefMut<'a, super::value::UData>),
 // }
 
 /// Create a root on the stack.
