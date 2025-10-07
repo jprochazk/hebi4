@@ -5,7 +5,7 @@ use rustc_hash::FxBuildHasher;
 
 use crate::vm::gc::Gc;
 
-use super::gc::{Heap, ObjectKind, Ref, RefMut, Root, Trace, Tracer, ValueRef, ValueRoot};
+use super::gc::{Heap, Ref, RefMut, Root, Trace, Tracer, ValueRef, ValueRoot};
 
 // TODO: string allocation strategy
 //
@@ -155,8 +155,9 @@ impl Ref<'_, String> {
 }
 
 unsafe impl Trace for String {
-    const KIND: ObjectKind = ObjectKind::String;
+    vtable!(String);
 
+    #[inline]
     unsafe fn trace(&self, tracer: &Tracer) {
         _ = tracer;
     }
@@ -207,8 +208,9 @@ impl List {
 }
 
 unsafe impl Trace for List {
-    const KIND: ObjectKind = ObjectKind::List;
+    vtable!(List);
 
+    #[inline]
     unsafe fn trace(&self, tracer: &Tracer) {
         for item in &self.items {
             tracer.visit_value(*item);
@@ -603,8 +605,9 @@ impl<'a> Iterator for TableEntries<'a> {
 impl<'a> std::iter::FusedIterator for TableEntries<'a> {}
 
 unsafe impl Trace for Table {
-    const KIND: ObjectKind = ObjectKind::Table;
+    vtable!(Table);
 
+    #[inline]
     unsafe fn trace(&self, tracer: &Tracer) {
         for (key, value) in &self.kv {
             tracer.visit(*key);
@@ -618,8 +621,9 @@ pub struct Closure {
 }
 
 unsafe impl Trace for Closure {
-    const KIND: ObjectKind = ObjectKind::Closure;
+    vtable!(Closure);
 
+    #[inline]
     unsafe fn trace(&self, tracer: &Tracer) {
         todo!()
     }
@@ -630,8 +634,9 @@ pub struct UserData {
 }
 
 unsafe impl Trace for UserData {
-    const KIND: ObjectKind = ObjectKind::UserData;
+    vtable!(UserData);
 
+    #[inline]
     unsafe fn trace(&self, tracer: &Tracer) {
         _ = tracer;
     }

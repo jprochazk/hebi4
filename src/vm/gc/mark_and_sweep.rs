@@ -1,5 +1,4 @@
 use super::*;
-use crate::vm::value::*;
 
 // Stop-the-world, mark and sweep GC.
 pub(crate) fn collect(heap: &mut Heap, external_roots: &dyn ExternalRoots) {
@@ -33,17 +32,9 @@ unsafe fn mark(heap: &mut Heap, external_roots: &dyn ExternalRoots) {
         }
         ptr.set_mark(true);
 
-        macro_rules! trace {
-            ($($ty:ident),*) => {
-                match ptr.kind() {
-                    $(ObjectKind::$ty => {
-                        ptr.cast::<$ty>().trace(&tracer)
-                    })*
-                }
-            }
+        unsafe {
+            (ptr.vt().trace)(ptr.get_raw(), &tracer);
         }
-
-        trace!(String, List, Table, Closure, UserData);
     });
 }
 
@@ -63,7 +54,7 @@ unsafe fn sweep(heap: &mut Heap) {
     let mut freed_bytes = 0usize;
 
     while !iter.is_null() {
-        let (next, kind, marked) = (*iter).into_parts();
+        let (next, vt, marked) = (*iter).into_parts();
 
         if marked {
             // unmark
@@ -76,20 +67,9 @@ unsafe fn sweep(heap: &mut Heap) {
                 None => heap.head.set(next),
             }
 
-            macro_rules! free {
-                ($($ty:ident),*) => {
-                    match kind {
-                        $(ObjectKind::$ty => {
-                            let _ = Box::from_raw(iter.cast::<GcBox<$ty>>());
-                            core::mem::size_of::<$ty>()
-                        })*
-                    }
-                }
+            unsafe {
+                freed_bytes += (vt.free)(iter.cast::<()>());
             }
-
-            let size = free!(String, List, Table, Closure, UserData);
-
-            freed_bytes += size;
         }
 
         iter = next;
@@ -103,21 +83,11 @@ pub(crate) unsafe fn free_all(heap: &mut Heap) {
     let mut freed_bytes = 0usize;
 
     while !iter.is_null() {
-        let (next, kind, marked) = (*iter).into_parts();
+        let (next, vt, marked) = (*iter).into_parts();
 
-        macro_rules! free {
-                ($($ty:ident),*) => {
-                    match kind {
-                        $(ObjectKind::$ty => {
-                            let _ = Box::from_raw(iter.cast::<GcBox<$ty>>());
-                            core::mem::size_of::<$ty>()
-                        })*
-                    }
-                }
-            }
-
-        let size = free!(String, List, Table, Closure, UserData);
-        freed_bytes += size;
+        unsafe {
+            freed_bytes += (vt.free)(iter.cast::<()>());
+        }
 
         iter = next;
     }

@@ -138,7 +138,7 @@ impl Heap {
 
         unsafe {
             let header = ptr.cast::<MaybeUninit<GcHeader>>();
-            (*header).write(GcHeader::new(T::KIND, self.head.get()));
+            (*header).write(GcHeader::new(T::vtable(), self.head.get()));
 
             let value_ptr = ptr
                 .cast::<u8>()
@@ -315,10 +315,10 @@ impl<T: Sized + 'static> Gc<T> {
     }
 
     #[inline]
-    unsafe fn kind(self) -> ObjectKind {
+    unsafe fn vt(self) -> &'static GcVtable {
         let header = &raw mut (*self.ptr).header;
         let header = UnsafeCell::raw_get(header);
-        header.read().kind()
+        header.read().vt()
     }
 
     #[inline]
@@ -385,14 +385,66 @@ impl<T: Trace + Sized + 'static> Gc<T> {
     }
 }
 
+/// Trace object's interior references
+type TraceFn = unsafe fn(*const (), *const Tracer);
+
+/// Drop and free the object
+type FreeFn = unsafe fn(*mut ()) -> usize;
+
+#[repr(C, align(16))]
+pub(crate) struct GcVtable {
+    pub trace: TraceFn,
+    pub free: FreeFn,
+    pub type_name: &'static str,
+}
+
+macro_rules! generate_vtable_for {
+    ($T:ty) => {
+        $crate::vm::gc::GcVtable {
+            trace: {
+                unsafe fn _trace_shim(this: *const (), tracer: *const Tracer) {
+                    <$T as $crate::vm::gc::Trace>::trace(&*this.cast::<$T>(), &*tracer);
+                }
+
+                _trace_shim
+            },
+            free: {
+                unsafe fn _free_shim(this: *mut ()) -> usize {
+                    let _ = Box::from_raw(this.cast::<$crate::vm::gc::GcBox<$T>>());
+                    ::core::mem::size_of::<$T>()
+                }
+
+                _free_shim
+            },
+            type_name: stringify!($T),
+        }
+    };
+}
+
 #[derive(Clone, Copy)]
-#[repr(u8)]
-pub enum ObjectKind {
-    String = 0,
-    List = 1,
-    Table = 2,
-    Closure = 3,
-    UserData = 4,
+#[repr(transparent)]
+struct TaggedVt(*const GcVtable);
+
+impl TaggedVt {
+    fn new(ptr: *const GcVtable) -> Self {
+        Self(ptr)
+    }
+
+    /// Only uses first bit of `tag`.
+    fn tagged(self, tag: usize) -> Self {
+        let tag = tag as usize;
+        Self(self.0.map_addr(|addr| (addr & !1) | (tag & 1)))
+    }
+
+    /// Get the tag bit.
+    fn tag(self) -> usize {
+        self.0.addr() & 1
+    }
+
+    /// Get the vtable ptr.
+    fn vt(self) -> *const GcVtable {
+        self.0.map_addr(|addr| addr & !1)
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -402,33 +454,31 @@ struct GcHeader {
     /// Objects are linked into it during allocation, and unlinked during the sweep phase of GC
     /// after being freed.
     next: *mut GcHeader,
-    kind: ObjectKind,
-    marked: bool,
+    tagged_vt: TaggedVt,
 }
 
 impl GcHeader {
     #[inline]
-    fn new(kind: ObjectKind, next: *mut GcHeader) -> Self {
+    fn new(vtable: &'static GcVtable, next: *mut GcHeader) -> Self {
         Self {
             next,
-            kind,
-            marked: false,
+            tagged_vt: TaggedVt::new(vtable),
         }
     }
 
     #[inline]
-    fn into_parts(self) -> (*mut GcHeader, ObjectKind, bool) {
-        (self.next(), self.kind(), self.marked())
+    fn into_parts(self) -> (*mut GcHeader, &'static GcVtable, bool) {
+        (self.next(), self.vt(), self.marked())
     }
 
     #[inline]
     fn marked(self) -> bool {
-        self.marked
+        self.tagged_vt.tag() == 1
     }
 
     #[inline]
-    fn kind(self) -> ObjectKind {
-        self.kind
+    fn vt(self) -> &'static GcVtable {
+        unsafe { &*self.tagged_vt.vt() }
     }
 
     #[inline]
@@ -438,7 +488,7 @@ impl GcHeader {
 
     #[inline]
     unsafe fn set_mark(this: *mut GcHeader, v: bool) {
-        (*this).marked = v;
+        (*this).tagged_vt = (*this).tagged_vt.tagged(v as usize);
     }
 
     #[inline]
@@ -456,7 +506,7 @@ const _: () = {
 
 // Think very carefully about changing the repr of this!
 #[repr(C, align(8))]
-struct GcBox<T: Sized + 'static> {
+pub(crate) struct GcBox<T: Sized + 'static> {
     header: UnsafeCell<GcHeader>,
     value: UnsafeCell<T>,
 }
@@ -490,14 +540,24 @@ pub(crate) trait ExternalRoots: 'static {
 ///
 /// All interior pointers must be marked.
 ///
-/// `KIND` must refer to the `ObjectKind` variant corresponding to the type of `Self`.
+/// `vtable` must correctly refer to a vtable of `Self`.
 pub(crate) unsafe trait Trace: Sized + 'static {
-    const KIND: ObjectKind;
+    fn vtable() -> &'static GcVtable;
 
     /// ## Safety
     ///
     /// All interior pointers must be marked.
     unsafe fn trace(&self, tracer: &Tracer);
+}
+
+macro_rules! vtable {
+    ($T:ty) => {
+        fn vtable() -> &'static $crate::vm::gc::GcVtable {
+            static VT: $crate::vm::gc::GcVtable = generate_vtable_for!($T);
+
+            &VT
+        }
+    };
 }
 
 /// A type which knows how to mark GC-managed objects.
