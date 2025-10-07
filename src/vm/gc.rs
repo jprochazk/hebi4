@@ -82,9 +82,10 @@ use std::{
     cell::{Cell, UnsafeCell},
     marker::{PhantomData, PhantomPinned},
     mem::MaybeUninit,
+    num::NonZeroUsize,
     ops::{Deref, DerefMut},
     pin::Pin,
-    ptr::null_mut,
+    ptr::{NonNull, null_mut},
 };
 
 use super::value::{StringHasher, ValueRaw};
@@ -421,29 +422,58 @@ macro_rules! generate_vtable_for {
     };
 }
 
+/// Tagged virtual table.
+///
+/// `GcVtable` is aligned to 16 bytes, so it has 4 free bits,
+/// and we use the first one as the mark bit.
 #[derive(Clone, Copy)]
 #[repr(transparent)]
-struct TaggedVt(*const GcVtable);
+struct TaggedVt(NonNull<GcVtable>);
+
+const _: () = assert!(TaggedVt::ALIGN >= 16 && TaggedVt::ALIGN.is_power_of_two());
 
 impl TaggedVt {
-    fn new(ptr: *const GcVtable) -> Self {
-        Self(ptr)
+    const ALIGN: usize = core::mem::align_of::<GcVtable>();
+    const MASK: usize = Self::ALIGN - 1;
+
+    #[inline]
+    fn new(ptr: &'static GcVtable) -> Self {
+        let ptr = ptr as *const GcVtable as *mut GcVtable;
+        // SAFETY: pointer comes from a `&'static` ref.
+        Self(unsafe { NonNull::new_unchecked(ptr) })
     }
 
-    /// Only uses first bit of `tag`.
-    fn tagged(self, tag: usize) -> Self {
-        let tag = tag as usize;
-        Self(self.0.map_addr(|addr| (addr & !1) | (tag & 1)))
+    /// Only uses first `Self::ALIGN` bits of `tag`.
+    #[inline]
+    fn with_tag(self, tag: usize) -> Self {
+        let tag = tag & Self::MASK;
+        Self(self.0.map_addr(
+            #[inline]
+            |addr| {
+                let addr = (addr.get() & !Self::MASK) | tag;
+                // SAFETY: guaranteed to still be non-zero, as the original address is non-zero.
+                unsafe { NonZeroUsize::new_unchecked(addr) }
+            },
+        ))
     }
 
-    /// Get the tag bit.
+    /// Get the first `Self::ALIGN` bits.
+    #[inline]
     fn tag(self) -> usize {
-        self.0.addr() & 1
+        self.0.addr().get() & Self::MASK
     }
 
     /// Get the vtable ptr.
-    fn vt(self) -> *const GcVtable {
-        self.0.map_addr(|addr| addr & !1)
+    #[inline]
+    fn vt(self) -> &'static GcVtable {
+        let ptr = self.0.map_addr(|addr| {
+            let addr = addr.get() & !Self::MASK;
+            // SAFETY: guaranteed to still be non-zero, as the original address is non-zero.
+            unsafe { NonZeroUsize::new_unchecked(addr) }
+        });
+
+        // SAFETY: pointer comes from a `&'static` ref.
+        unsafe { ptr.as_ref() }
     }
 }
 
@@ -478,7 +508,7 @@ impl GcHeader {
 
     #[inline]
     fn vt(self) -> &'static GcVtable {
-        unsafe { &*self.tagged_vt.vt() }
+        self.tagged_vt.vt()
     }
 
     #[inline]
@@ -488,7 +518,7 @@ impl GcHeader {
 
     #[inline]
     unsafe fn set_mark(this: *mut GcHeader, v: bool) {
-        (*this).tagged_vt = (*this).tagged_vt.tagged(v as usize);
+        (*this).tagged_vt = (*this).tagged_vt.with_tag(v as usize);
     }
 
     #[inline]
