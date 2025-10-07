@@ -386,16 +386,14 @@ impl<T: Trace + Sized + 'static> Gc<T> {
     }
 }
 
-/// Trace object's interior references
-type TraceFn = unsafe fn(*const (), *const Tracer);
-
-/// Drop and free the object
-type FreeFn = unsafe fn(*mut ()) -> usize;
-
 #[repr(C, align(16))]
 pub(crate) struct GcVtable {
-    pub trace: TraceFn,
-    pub free: FreeFn,
+    /// Trace object's interior references
+    pub trace: unsafe fn(*const (), *const Tracer),
+
+    /// Drop and free the object
+    pub free: unsafe fn(*mut ()) -> usize,
+
     pub type_name: &'static str,
 }
 
@@ -403,19 +401,19 @@ macro_rules! generate_vtable_for {
     ($T:ty) => {
         $crate::vm::gc::GcVtable {
             trace: {
-                unsafe fn _trace_shim(this: *const (), tracer: *const Tracer) {
+                unsafe fn _trace(this: *const (), tracer: *const Tracer) {
                     <$T as $crate::vm::gc::Trace>::trace(&*this.cast::<$T>(), &*tracer);
                 }
 
-                _trace_shim
+                _trace
             },
             free: {
-                unsafe fn _free_shim(this: *mut ()) -> usize {
+                unsafe fn _free(this: *mut ()) -> usize {
                     let _ = Box::from_raw(this.cast::<$crate::vm::gc::GcBox<$T>>());
                     ::core::mem::size_of::<$T>()
                 }
 
-                _free_shim
+                _free
             },
             type_name: stringify!($T),
         }
@@ -814,14 +812,14 @@ impl<'a, T: Trace> Root<'a, T> {
         unsafe { self.place.ptr.as_ref() }
     }
 
+    // NOTE:
+    // - Mutable access requires borrowing the entire heap
+    // - No objects implement `Clone` or `Copy`
+    // - Object constructors return `Gc` pointers, so are never held on the stack
+    //
+    // Therefore it is impossible for the object to be moved out of in safe code.
+    //
     /// Dereference the rooted pointer. Grants unique mutable access to the object.
-    ///
-    /// NOTE:
-    /// - Mutable access requires borrowing the entire heap
-    /// - No objects implement `Clone` or `Copy`
-    /// - Object constructors return `Gc` pointers, so are never held on the stack
-    ///
-    /// Therefore it is impossible for the object to be moved out of in safe code.
     #[inline]
     pub fn as_mut<'v>(&self, heap: &'v mut Heap) -> RefMut<'v, T> {
         #[cfg(debug_assertions)]
@@ -853,8 +851,6 @@ impl<'a, T: Trace> Root<'a, T> {
         this
     }
 }
-
-// TODO: don't at all implement `deref` for `Ref` and `RefMut`, it shouldn't be necessary.
 
 /// A shared reference to a GC-managed `T`.
 ///
