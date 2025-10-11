@@ -346,7 +346,7 @@ impl Lp {
 impl Jt {
     #[inline(always)]
     pub unsafe fn at(self, inst: RawInstruction) -> OpaqueOp {
-        self.0.offset(inst.tag as isize).read()
+        self.0.offset(inst.tag()).read()
     }
 }
 

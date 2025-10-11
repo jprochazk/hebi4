@@ -27,10 +27,14 @@ pub struct Sp(pub(crate) *mut ValueRaw);
 pub struct Ip(pub(crate) *const RawInstruction);
 
 #[derive(Clone, Copy)]
-#[repr(C, align(4))]
-pub struct RawInstruction {
-    pub(crate) tag: u8,
-    pub(crate) payload: [u8; 3],
+#[repr(transparent)]
+pub struct RawInstruction(u32);
+
+impl RawInstruction {
+    #[inline]
+    pub fn tag(self) -> isize {
+        (self.0 & 0xFF) as isize
+    }
 }
 
 #[derive(Clone, Copy)]
