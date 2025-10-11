@@ -1,4 +1,6 @@
 [alias]
 review = "insta test --test-runner nextest --review --unreferenced delete"
-codegen = "run --release --quiet -p xtask codegen"
-ub = "run --release --quiet -p xtask miri"
+x = "run --release --quiet -p xtask"
+codegen = "x codegen"
+ub = "x miri"
+check-tco = "x check-tco"

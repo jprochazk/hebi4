@@ -1,11 +1,15 @@
 use std::ffi::OsStr;
 
+mod check_tco;
+use check_tco::check_tco;
+
 fn main() {
     let args = std::env::args().skip(1).collect::<Vec<_>>();
 
     match args[0].as_str() {
         "codegen" => codegen(),
         "miri" => miri(&args[1..]),
+        "check-tco" => check_tco(),
         _ => help(),
     }
 }
@@ -49,13 +53,13 @@ fn cmd(cmd: impl AsRef<str>) -> std::process::Command {
 
     let mut cmd = std::process::Command::new(cmd);
     cmd.args(args);
-    cmd.stdout(std::io::stdout());
-    cmd.stderr(std::io::stderr());
     cmd
 }
 
 trait CommandExt {
     fn run(self);
+    fn output(self) -> Vec<u8>;
+    fn output_utf8(self) -> String;
     fn with_envs<I, K, V>(self, envs: I) -> Self
     where
         I: IntoIterator<Item = (K, V)>,
@@ -69,6 +73,8 @@ trait CommandExt {
 
 impl CommandExt for std::process::Command {
     fn run(mut self) {
+        self.stdout(std::io::stdout());
+        self.stderr(std::io::stderr());
         let status = self
             .spawn()
             .expect("failed to spawn cmd")
@@ -78,6 +84,24 @@ impl CommandExt for std::process::Command {
             eprintln!("command exited with non-zero exit code");
             std::process::exit(1);
         }
+    }
+
+    fn output(mut self) -> Vec<u8> {
+        let output = std::process::Command::output(&mut self).expect("failed to run command");
+        if !output.status.success() {
+            eprintln!("command exited with non-zero exit code");
+            if let Ok(err) = String::from_utf8(output.stderr) {
+                eprintln!("{err}");
+            } else {
+                eprintln!("(stderr was not valid utf-8)");
+            }
+            std::process::exit(1);
+        }
+        output.stdout
+    }
+
+    fn output_utf8(self) -> String {
+        String::from_utf8(self.output()).expect("invalid utf-8 output")
     }
 
     fn with_envs<I, K, V>(mut self, envs: I) -> Self

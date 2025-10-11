@@ -1489,7 +1489,7 @@ unsafe fn stop(args: Stop, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control 
 ///
 /// new call frame's stack overlaps with the current frame's stack
 /// example: assuming 3 args, with ret at r6:
-/// ```ignore
+/// ```text,ignore
 ///   frame N:   [ 0 1 2 3 4 5 6 7 8 9 ]
 ///                            ^ ^
 ///                            | args

@@ -779,9 +779,6 @@ fn parse_expr_int(p: &mut State, _: &Bump) -> Result<Spanned<Expr>> {
     }
 }
 
-// TODO: strip underscores from int, then parse
-//       ...or maybe just parse manually
-
 #[derive(Debug, Clone)]
 pub enum IntParseError {
     InvalidDigit,
@@ -816,11 +813,11 @@ fn i64_from_str_with_underscores(s: &str) -> Result<i64, IntParseError> {
     //       the number of digits, and that seems not worth it.
     while let [char, rest @ ..] = digits {
         let char = *char;
+        digits = rest;
 
         // NOTE: valid placement of `_` is checked by tokenizer,
         //       here we just ignore them
         if char == b'_' {
-            digits = rest;
             continue;
         }
 
@@ -838,7 +835,6 @@ fn i64_from_str_with_underscores(s: &str) -> Result<i64, IntParseError> {
             Some(v) => v,
             None => return Err(IntParseError::Overflow),
         };
-        digits = rest;
     }
 
     Ok(result)
