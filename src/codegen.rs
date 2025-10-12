@@ -118,7 +118,7 @@ use crate::{
 };
 use bumpalo::{Bump, collections::Vec, vec};
 use hashbrown::HashMap;
-use opcodes::{FnId, Imm8, Imm16, Imm16s, Imm24s, Instruction, Lit, Lit8, Reg, asm, i24};
+use opcodes::{FnId, Imm8, Imm16, Imm16s, Imm24s, Insn, Lit, Lit8, Opcode, Reg, asm, i24};
 use std::borrow::Cow;
 
 use crate::{
@@ -255,7 +255,7 @@ struct FunctionState<'a> {
     name: Cow<'a, str>,
     scopes: Vec<'a, Scope<'a>>,
     ra: RegAlloc,
-    code: Vec<'a, Instruction>,
+    code: Vec<'a, Insn>,
     literals: Literals<'a>,
     loop_: Option<Loop<'a>>,
 
@@ -687,11 +687,11 @@ impl<'a> ForwardLabel<'a> {
                 .map_err(|_| error("jump offset out of bounds for i24", span))?;
 
             let span = f.dbg.spans[target];
-            let ins = &mut f.code[target];
-            let Instruction::Jmp { rel } = ins else {
+            let insn = &mut f.code[target];
+            let Opcode::Jmp = insn.op() else {
                 return error("invalid label referree", span).into();
             };
-            *rel = unsafe { Imm24s::new_unchecked(offset) }
+            *insn = asm::jmp(unsafe { Imm24s::new_unchecked(offset) });
         }
 
         Ok(())
@@ -722,11 +722,11 @@ impl BasicForwardLabel {
             .map_err(|_| error("jump offset out of bounds for i24", span))?;
 
         let span = f.dbg.spans[target];
-        let ins = &mut f.code[target];
-        let Instruction::Jmp { rel } = ins else {
+        let insn = &mut f.code[target];
+        let Opcode::Jmp = insn.op() else {
             return error("invalid label referree", span).into();
         };
-        *rel = unsafe { Imm24s::new_unchecked(offset) };
+        *insn = asm::jmp(unsafe { Imm24s::new_unchecked(offset) });
 
         Ok(())
     }
@@ -842,7 +842,7 @@ impl<'a> FunctionState<'a> {
         None
     }
 
-    fn emit(&mut self, inst: Instruction, span: Span) {
+    fn emit(&mut self, inst: Insn, span: Span) {
         self.code.push(inst);
         self.dbg.spans.push(span);
         // TODO(opt): peep-opt
@@ -888,7 +888,7 @@ impl<'a> State<'a> {
         None
     }
 
-    fn emit(&mut self, inst: Instruction, span: Span) {
+    fn emit(&mut self, inst: Insn, span: Span) {
         f!(self).emit(inst, span)
     }
 
@@ -1660,10 +1660,7 @@ fn eval_expr_set_var<'a>(
     };
 
     // lhs is always a register, so we only evaluate rhs, and emit either `vv` or `vn`.
-    let (vv, vn): (
-        fn(Reg, Reg, Reg) -> Instruction,
-        fn(Reg, Reg, Lit8) -> Instruction,
-    ) = match *set.op() {
+    let (vv, vn): (fn(Reg, Reg, Reg) -> Insn, fn(Reg, Reg, Lit8) -> Insn) = match *set.op() {
         ast::AssignOp::None => {
             let value = eval_expr_reuse(m, set.value(), set.value_span(), dst)?;
             value_force_reg(m, value, dst)?;

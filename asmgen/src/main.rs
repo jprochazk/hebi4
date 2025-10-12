@@ -141,6 +141,57 @@ enum Operands<'a> {
     },
 }
 
+#[allow(non_camel_case_types)]
+#[derive(Debug, Clone, Copy)]
+enum InsnMode {
+    abc,
+    aB,
+    aS,
+    A,
+    S,
+}
+
+impl InsnMode {
+    fn len(self) -> usize {
+        match self {
+            InsnMode::abc => 3,
+            InsnMode::aB | InsnMode::aS => 2,
+            InsnMode::A | InsnMode::S => 1,
+        }
+    }
+}
+
+impl std::fmt::Display for InsnMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Debug::fmt(self, f)
+    }
+}
+
+impl Instruction<'_> {
+    fn mode(&self) -> InsnMode {
+        match self.operands {
+            Operands::None => InsnMode::abc,
+            Operands::A8 { .. } => InsnMode::abc,
+            Operands::A24 { a } => {
+                if a.ty.is_signed() {
+                    InsnMode::S
+                } else {
+                    InsnMode::A
+                }
+            }
+            Operands::A8B8 { .. } => InsnMode::abc,
+            Operands::A8B16 { b, .. } => {
+                if b.ty.is_signed() {
+                    InsnMode::aS
+                } else {
+                    InsnMode::aB
+                }
+            }
+            Operands::A8B8C8 { .. } => InsnMode::abc,
+        }
+    }
+}
+
 impl Operands<'_> {
     fn fields(&self, r#pub: bool) -> String {
         let vis = if r#pub { "pub " } else { "" };
@@ -164,7 +215,7 @@ impl Operands<'_> {
         }
     }
 
-    fn count(&self) -> u8 {
+    fn count(&self) -> usize {
         match self {
             Operands::None => 0,
             Operands::A8 { a: _ } => 1,
@@ -173,6 +224,72 @@ impl Operands<'_> {
             Operands::A8B16 { a: _, b: _ } => 2,
             Operands::A8B8C8 { a: _, b: _, c: _ } => 3,
         }
+    }
+
+    fn iter(&self) -> OperandsIter<'_> {
+        OperandsIter {
+            operands: self,
+            index: 0,
+        }
+    }
+}
+
+#[derive(Clone)]
+struct OperandsIter<'a> {
+    operands: &'a Operands<'a>,
+    index: usize,
+}
+
+impl<'a> Iterator for OperandsIter<'a> {
+    type Item = (OperandMode, Operand<'a>);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        use OperandMode as M;
+        let result = match self.operands {
+            Operands::None => None,
+            Operands::A8 { a } => match self.index {
+                0 => Some((M::a, *a)),
+                _ => None,
+            },
+            Operands::A24 { a } => match self.index {
+                0 => Some((M::A, *a)),
+                _ => None,
+            },
+            Operands::A8B8 { a, b } => match self.index {
+                0 => Some((M::a, *a)),
+                1 => Some((M::b, *b)),
+                _ => None,
+            },
+            Operands::A8B16 { a, b } => match self.index {
+                0 => Some((M::a, *a)),
+                1 => Some((M::B, *b)),
+                _ => None,
+            },
+            Operands::A8B8C8 { a, b, c } => match self.index {
+                0 => Some((M::a, *a)),
+                1 => Some((M::b, *b)),
+                2 => Some((M::c, *c)),
+                _ => None,
+            },
+        };
+        self.index += 1;
+        result
+    }
+}
+
+#[allow(non_camel_case_types)]
+#[derive(Debug, Clone, Copy)]
+enum OperandMode {
+    a,
+    b,
+    c,
+    B,
+    A,
+}
+
+impl std::fmt::Display for OperandMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Debug::fmt(self, f)
     }
 }
 
@@ -267,6 +384,21 @@ impl OperandType {
             OperandType::Imm16s => "i16",
             OperandType::Imm24 => "u24",
             OperandType::Imm24s => "i24",
+        }
+    }
+
+    fn is_signed(&self) -> bool {
+        match self {
+            OperandType::Reg
+            | OperandType::Mvar
+            | OperandType::Cap
+            | OperandType::Lit
+            | OperandType::Lit8
+            | OperandType::FnId
+            | OperandType::Imm8
+            | OperandType::Imm16
+            | OperandType::Imm24 => false,
+            OperandType::Imm16s | OperandType::Imm24s => true,
         }
     }
 }
@@ -471,25 +603,66 @@ fn emit_instruction_enum(o: &mut String, is: &Instructions) {
         "
         #[derive(Clone, Copy)]
         #[repr(u8, align(4))]
-        pub enum Instruction {{
-        {instructions}
+        pub enum DecodedInsn {{
+            {variants}
         }}
 
-        // assert compatibility with `u32`
-        const _: () = assert!(std::mem::size_of::<Instruction>() == std::mem::size_of::<u32>());
-        const _: () = assert!(std::mem::align_of::<Instruction>() == std::mem::align_of::<u32>());
-
+        impl Insn {{
+            #[inline]
+            pub fn into_enum(self) -> DecodedInsn {{
+                match self.op() {{
+                    {arms}
+                }}
+            }}
+        }}
         ",
-        instructions = is
+        variants = is
             .flat
             .iter()
             .map(|i| {
                 let name = i.type_name();
                 let opcode = i.opcode;
-                let fields = i.operands.fields(false);
-                format!("    {name} {{ {fields} }} = {opcode},")
+                let fields = i
+                    .operands
+                    .iter()
+                    .map(|(_, Operand { name, ty })| format!("{name}: {ty}"))
+                    .join(",");
+                format!("{name} {{ {fields} }} = {opcode}")
             })
-            .join("\n")
+            .join(",\n"),
+        arms = is
+            .flat
+            .iter()
+            .map(|i| {
+                let name = i.type_name();
+                let fields = i
+                    .operands
+                    .iter()
+                    .map(|(_, Operand { name: o, .. })| format!("{o}: {name}(self).{o}()"))
+                    .join(",");
+                format!("Opcode::{name} => DecodedInsn::{name} {{ {fields} }}")
+            })
+            .join(",\n"),
+    );
+
+    ml!(
+        o,
+        "
+        #[derive(Clone, Copy)]
+        #[repr(u8)]
+        pub enum Opcode {{
+            {variants}
+        }}
+        ",
+        variants = is
+            .flat
+            .iter()
+            .map(|i| {
+                let name = i.type_name();
+                let opcode = i.opcode;
+                format!("    {name} = {opcode},")
+            })
+            .join("\n"),
     );
 }
 
@@ -500,47 +673,33 @@ fn emit_operand_structs(o: &mut String, is: &Instructions) {
             "
             #[doc = \"{doc}\"]
             #[derive(Clone, Copy)]
-            #[repr(C, align(4))]
-            pub struct {name} {{
-            _op: u8,
-            {fields}
-            }}
+            #[repr(transparent)]
+            pub struct {name}(Insn);
 
             ",
             doc = i.docs.trim(),
             name = i.type_name(),
-            fields = i.operands.fields(true),
         );
 
-        // assert on field stability
+        let fields = i
+            .operands
+            .iter()
+            .map(|(mode, Operand { name, ty })| {
+                format!("
+                    #[allow(unnecessary_transmutes)]
+                    pub fn {name}(self) -> {ty} {{ {ty}(unsafe {{ ::core::mem::transmute(self.0.{mode}()) }}) }}")
+            })
+            .join("\n");
+
         ml!(
             o,
             "
-            const _: () = assert!(std::mem::size_of::<{name}>() == std::mem::size_of::<Instruction>());
-            const _: () = assert!(std::mem::align_of::<{name}>() == std::mem::align_of::<Instruction>());
-            const _: () = assert_bit_equal(
-                &{name} {{ _op: {opcode}, {fields} }},
-                &Instruction::{name} {{ {fields} }},
-            );
+            impl {name} {{
+                {fields}
+            }}
 
             ",
             name = i.type_name(),
-            opcode = i.opcode,
-            fields = match i.operands {
-                Operands::None => format!("_a: 0x7A, _b: 0x7B, _c: 0x7C"),
-                Operands::A8 { a } => format!("{}: {}(0x7A), _b: 0x7B, _c: 0x7C", a.name, a.ty),
-                Operands::A24 { a } => format!("{}: {}({}::new(0x7A7B7C))", a.name, a.ty, a.ty.base()),
-                Operands::A8B8 { a, b } => format!(
-                    "{}: {}(0x7A), {}: {}(0x7B), _c: 0x7C",
-                    a.name, a.ty, b.name, b.ty
-                ),
-                Operands::A8B16 { a, b } =>
-                    format!("{}: {}(0x7A), {}: {}(0x7B7C)", a.name, a.ty, b.name, b.ty),
-                Operands::A8B8C8 { a, b, c } => format!(
-                    "{}: {}(0x7A), {}: {}(0x7B), {}: {}(0x7C)",
-                    a.name, a.ty, b.name, b.ty, c.name, c.ty
-                ),
-            },
         );
     }
 
@@ -569,29 +728,29 @@ fn emit_instruction_asm(o: &mut String, is: &Instructions) {
         .iter()
         .map(|i| {
             let name = i.name;
+            let ty_name = i.type_name();
             let docs = i.docs.trim();
-            let cname = i.type_name();
-            let args = match i.operands {
-                Operands::None => String::new(),
-                Operands::A8 { a } => format!("{}: {}", a.name, a.ty),
-                Operands::A24 { a } => format!("{}: {}", a.name, a.ty),
-                Operands::A8B8 { a, b } => format!("{}: {}, {}: {}", a.name, a.ty, b.name, b.ty),
-                Operands::A8B16 { a, b } => format!("{}: {}, {}: {}", a.name, a.ty, b.name, b.ty),
-                Operands::A8B8C8 { a, b, c } => format!(
-                    "{}: {}, {}: {}, {}: {},",
-                    a.name, a.ty, b.name, b.ty, c.name, c.ty
-                ),
-            };
-            let fields = match i.operands {
-                Operands::None => format!("{{ _a: 0x7F, _b: 0x7F, _c: 0x7F }}"),
-                Operands::A8 { a } => format!("{{ {}, _b: 0x7F, _c: 0x7F }}", a.name),
-                Operands::A24 { a } => format!("{{ {} }}", a.name),
-                Operands::A8B8 { a, b } => format!("{{ {}, {}, _c: 0x7F }}", a.name, b.name),
-                Operands::A8B16 { a, b } => format!("{{ {}, {} }}", a.name, b.name),
-                Operands::A8B8C8 { a, b, c } => format!("{{ {}, {}, {} }}", a.name, b.name, c.name),
-            };
+            let mode = i.mode();
+            let params = i
+                .operands
+                .iter()
+                .map(|(_, Operand { name, ty })| format!("{name}: {ty}"))
+                .join(",");
+            let mut args = i
+                .operands
+                .iter()
+                .map(|(_, Operand { name, .. })| format!("{name}.0"))
+                .collect::<Vec<_>>();
+            if args.len() != mode.len() {
+                for _ in args.len()..mode.len() {
+                    args.push("Default::default()".to_owned());
+                }
+            }
+            let args = args.join(",");
+
+
             format!(
-                "#[doc = {docs:?}] pub const fn {name}({args}) -> Instruction {{ Instruction::{cname} {fields} }}"
+                "#[doc = {docs:?}] pub fn {name}({params}) -> Insn {{ op_{mode}(Opcode::{ty_name}, {args}) }}"
             )
         })
         .join('\n');
@@ -631,7 +790,7 @@ fn emit_jump_table(o: &mut String, is: &Instructions) {
             .iter()
             .map(|i| {
                 let name = i.name;
-                format!("    pub {name}: OpaqueOp,")
+                format!("    pub {name}: OpaqueHandler,")
             })
             .join("\n")
     );

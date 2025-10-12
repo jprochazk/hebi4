@@ -5,7 +5,13 @@ struct Nop;
 
 #[repr(C)]
 pub struct JumpTable {
-    nop: Op<Nop>,
+    nop: Handler<Nop>,
+}
+
+#[derive(Clone, Copy)]
+#[repr(u8)]
+pub enum Opcode {
+    Nop = 0,
 }
 
 //file-start
@@ -24,14 +30,14 @@ pub struct Sp(pub(crate) *mut ValueRaw);
 
 #[derive(Clone, Copy)]
 #[repr(transparent)]
-pub struct Ip(pub(crate) *const RawInstruction);
+pub struct Ip(pub(crate) *const Insn);
 
 #[derive(Clone, Copy)]
 #[repr(transparent)]
-pub struct RawInstruction(u32);
+pub struct Insn(u32);
 
-impl RawInstruction {
-    #[inline]
+impl Insn {
+    #[inline(always)]
     pub fn tag(self) -> isize {
         (self.0 & 0xFF) as isize
     }
@@ -39,7 +45,7 @@ impl RawInstruction {
 
 #[derive(Clone, Copy)]
 #[repr(transparent)]
-pub struct Jt(pub(crate) *const OpaqueOp);
+pub struct Jt(pub(crate) *const OpaqueHandler);
 
 #[derive(Clone, Copy)]
 #[repr(transparent)]
@@ -51,18 +57,18 @@ pub struct Ctx(pub(crate) *mut Context);
 
 const _: () = {
     use std::mem::align_of;
-    assert!(align_of::<JumpTable>() == align_of::<[OpaqueOp; 1]>());
+    assert!(align_of::<JumpTable>() == align_of::<[OpaqueHandler; 1]>());
 };
 
 #[allow(non_camel_case_types)]
 #[derive(Clone, Copy, Hash)]
-#[repr(C, packed)]
-pub struct u24([u8; 3]);
+#[repr(transparent)]
+pub struct u24(u32);
 
 impl u24 {
-    pub const MAX: u24 = u24([255; 3]);
-    pub const MIN: u24 = u24([0; 3]);
-    pub const ZERO: u24 = u24([0; 3]);
+    pub const MAX: u24 = u24(0xFFFFFF);
+    pub const MIN: u24 = u24(0);
+    pub const ZERO: u24 = u24(0);
 
     #[inline]
     pub const fn new(v: u32) -> Self {
@@ -76,14 +82,12 @@ impl u24 {
     #[inline]
     pub const unsafe fn new_unchecked(v: u32) -> Self {
         debug_assert!(v <= Self::MAX.get());
-        let [a, b, c, _] = v.to_le_bytes();
-        Self([a, b, c])
+        Self(v)
     }
 
     #[inline]
     pub const fn get(self) -> u32 {
-        let [a, b, c] = self.0;
-        u32::from_le_bytes([a, b, c, 0])
+        self.0
     }
 
     #[inline]
@@ -130,6 +134,7 @@ impl std::fmt::Display for u24 {
 impl TryFrom<usize> for u24 {
     type Error = ();
 
+    #[inline]
     fn try_from(value: usize) -> Result<Self, Self::Error> {
         if value > u24::MAX.zx() as usize {
             return Err(());
@@ -214,6 +219,7 @@ impl std::fmt::Display for i24 {
 impl TryFrom<isize> for i24 {
     type Error = ();
 
+    #[inline]
     fn try_from(value: isize) -> Result<Self, Self::Error> {
         if value > i24::MAX.get() as isize || value < i24::MIN.get() as isize {
             return Err(());
@@ -223,8 +229,22 @@ impl TryFrom<isize> for i24 {
     }
 }
 
+impl From<u24> for i24 {
+    #[inline(always)]
+    fn from(value: u24) -> Self {
+        value.as_i24()
+    }
+}
+
+impl From<i24> for u24 {
+    #[inline(always)]
+    fn from(value: i24) -> Self {
+        value.as_u24()
+    }
+}
+
 #[cfg(not(windows))]
-macro_rules! Op {
+macro_rules! Handler {
     (
         fn ($($ty:ty),* $(,)?) -> $ret:ty
     ) => {
@@ -233,7 +253,7 @@ macro_rules! Op {
 }
 
 #[cfg(windows)]
-macro_rules! Op {
+macro_rules! Handler {
     (
         fn ($($ty:ty),* $(,)?) -> $ret:ty
     ) => {
@@ -242,7 +262,7 @@ macro_rules! Op {
 }
 
 #[cfg(not(windows))]
-macro_rules! op {
+macro_rules! handler {
     (
         unsafe extern "?" fn $name:ident($($i:ident : $ty:ty),* $(,)?) -> $ret:ty $body:block
     ) => {
@@ -251,7 +271,7 @@ macro_rules! op {
 }
 
 #[cfg(windows)]
-macro_rules! op {
+macro_rules! handler {
     (
         unsafe extern "?" fn $name:ident($($i:ident : $ty:ty),* $(,)?) -> $ret:ty $body:block
     ) => {
@@ -269,8 +289,8 @@ macro_rules! jump_table {
                 const __OP: unsafe fn(__Operands, Jt, Sp, Lp, Ip, Ctx) -> Control = $op;
 
                 {
-                    op! {
-                        unsafe extern "?" fn $op(args: RawInstruction, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control {
+                    handler! {
+                        unsafe extern "?" fn $op(args: Insn, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control {
                             let args: __Operands = core::mem::transmute(args);
                             __OP(args, jt, sp, lp, ip, ctx)
                         }
@@ -283,9 +303,9 @@ macro_rules! jump_table {
     };
 }
 
-pub type Op<Operands> = Op!(fn(Operands, Jt, Sp, Lp, Ip, Ctx) -> Control);
+pub type Handler<Operands> = Handler!(fn(Operands, Jt, Sp, Lp, Ip, Ctx) -> Control);
 
-pub type OpaqueOp = Op!(fn(RawInstruction, Jt, Sp, Lp, Ip, Ctx) -> Control);
+pub type OpaqueHandler = Handler!(fn(Insn, Jt, Sp, Lp, Ip, Ctx) -> Control);
 
 macro_rules! declare_operand_type {
     ($name:ident, $ty:ident, $fmt:literal) => {
@@ -362,10 +382,12 @@ impl ExtendEx for u24 {
 }
 
 impl ExtendEx for i24 {
+    #[inline(always)]
     fn zx(self) -> usize {
         self.get() as usize
     }
 
+    #[inline(always)]
     fn sz(self) -> isize {
         self.get() as isize
     }
@@ -401,11 +423,92 @@ declare_operand_types! {
     Imm24s(i24) = "{}",
 }
 
-const fn assert_bit_equal<A, B>(a: &A, b: &B) {
-    let a: [u32; 1] = unsafe { (a as *const A as *const [u32; 1]).read() };
-    let b: [u32; 1] = unsafe { (b as *const B as *const [u32; 1]).read() };
-    if a[0] != b[0] {
-        panic!("not bit equal");
+#[allow(non_snake_case)]
+#[inline(always)]
+fn op_abc(op: Opcode, a: u8, b: u8, c: u8) -> Insn {
+    let mut v = 0u32;
+    v |= op as u32;
+    v |= (a as u32) << 8;
+    v |= (b as u32) << 16;
+    v |= (c as u32) << 24;
+    Insn(v)
+}
+
+#[allow(non_snake_case)]
+#[inline(always)]
+fn op_aB(op: Opcode, a: u8, B: u16) -> Insn {
+    let mut v = 0u32;
+    v |= op as u32;
+    v |= (a as u32) << 8;
+    v |= (B as u32) << 16;
+    Insn(v)
+}
+
+#[allow(non_snake_case)]
+#[inline(always)]
+fn op_aS(op: Opcode, a: u8, B: i16) -> Insn {
+    let mut v = 0u32;
+    v |= op as u32;
+    v |= (a as u32) << 8;
+    v |= (B as u32) << 16;
+    Insn(v)
+}
+
+#[allow(non_snake_case)]
+#[inline(always)]
+fn op_A(op: Opcode, A: u24) -> Insn {
+    let mut v = 0u32;
+    v |= op as u32;
+    v |= (A.0) << 8;
+    Insn(v)
+}
+
+#[allow(non_snake_case)]
+#[inline(always)]
+fn op_S(op: Opcode, A: i24) -> Insn {
+    let mut v = 0u32;
+    v |= op as u32;
+    v |= (A.0.0) << 8;
+    Insn(v)
+}
+
+impl Opcode {
+    #[inline(always)]
+    fn zx(self) -> usize {
+        self as usize
+    }
+}
+
+#[allow(non_snake_case)]
+impl Insn {
+    #[inline(always)]
+    pub fn op(self) -> Opcode {
+        unsafe { ::core::mem::transmute((self.0 & 0xFF) as u8) }
+    }
+
+    #[inline(always)]
+    fn a(self) -> u8 {
+        ((self.0 >> 8) & 0xFF) as u8
+    }
+
+    #[inline(always)]
+    fn b(self) -> u8 {
+        ((self.0 >> 16) & 0xFF) as u8
+    }
+
+    #[inline(always)]
+    fn c(self) -> u8 {
+        (self.0 >> 24) as u8
+    }
+
+    #[inline(always)]
+    fn B(self) -> u16 {
+        (self.0 >> 16) as u16
+    }
+
+    #[inline(always)]
+    fn A(self) -> u24 {
+        u24((self.0 >> 8) as u32)
     }
 }
 

@@ -143,7 +143,7 @@ pub struct FuncInfo {
     nstack: u8,
 
     /// Bytecode.
-    code: Box<[Instruction]>,
+    code: Box<[Insn]>,
 
     /// Constants referenced by the function's bytecode.
     literals: Box<[Literal]>,
@@ -164,7 +164,7 @@ impl FuncInfo {
         name: impl Into<Cow<'static, str>>,
         nparams: u8,
         nstack: u8,
-        code: Vec<Instruction>,
+        code: Vec<Insn>,
         literals: Vec<Literal>,
         dbg: dbg::FuncDebugInfo,
     ) -> Self {
@@ -236,13 +236,7 @@ struct FuncInfoPtr(*const FuncInfo);
 impl FuncInfoPtr {
     #[inline]
     unsafe fn code(self) -> Ip {
-        Ip(
-            (*self.0)
-                .code
-                .as_ptr()
-                .cast::<Instruction>() // drop the length,
-                .cast::<RawInstruction>(), // _then_ cast to raw
-        )
+        Ip((*self.0).code.as_ptr())
     }
 
     #[inline]
@@ -345,7 +339,7 @@ impl Lp {
 
 impl Jt {
     #[inline(always)]
-    pub unsafe fn at(self, inst: RawInstruction) -> OpaqueOp {
+    pub unsafe fn at(self, inst: Insn) -> OpaqueHandler {
         self.0.offset(inst.tag()).read()
     }
 }
@@ -367,7 +361,7 @@ impl Ip {
     }
 
     #[inline(always)]
-    unsafe fn get(self) -> RawInstruction {
+    unsafe fn get(self) -> Insn {
         self.0.read()
     }
 }
@@ -723,7 +717,7 @@ unsafe fn nop(args: Nop, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control {
 
 #[inline(always)]
 unsafe fn mov(args: Mov, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control {
-    *sp.at(args.dst) = *sp.at(args.src);
+    *sp.at(args.dst()) = *sp.at(args.src());
 
     dispatch_next(jt, sp, lp, ip, ctx)
 }
@@ -760,9 +754,9 @@ unsafe fn lidxn(args: Lidxn, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Contro
 
 #[inline(always)]
 unsafe fn sidx(args: Sidx, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control {
-    let target = *sp.at(args.target);
-    let idx = *sp.at(args.idx);
-    let src = *sp.at(args.src);
+    let target = *sp.at(args.target());
+    let idx = *sp.at(args.idx());
+    let src = *sp.at(args.src());
 
     let ValueRaw::List(list) = target else {
         return not_a_list_error(ip, ctx);
@@ -791,9 +785,9 @@ unsafe fn invalid_array_index_error(ip: Ip, ctx: Ctx) -> Control {
 
 #[inline(always)]
 unsafe fn sidxn(args: Sidxn, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control {
-    let idx = lp.int_unchecked(args.idx) as usize;
-    let list = *sp.at(args.target);
-    let src = *sp.at(args.src);
+    let idx = lp.int_unchecked(args.idx()) as usize;
+    let list = *sp.at(args.target());
+    let src = *sp.at(args.src());
 
     let ValueRaw::List(list) = list else {
         return not_a_list_error(ip, ctx);
@@ -832,9 +826,9 @@ unsafe fn lkeyc(args: Lkeyc, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Contro
 
 #[inline(always)]
 unsafe fn skey(args: Skey, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control {
-    let target = *sp.at(args.target);
-    let key = *sp.at(args.key);
-    let src = *sp.at(args.src);
+    let target = *sp.at(args.target());
+    let key = *sp.at(args.key());
+    let src = *sp.at(args.src());
 
     let ValueRaw::Table(table) = target else {
         return not_a_table_error(ip, ctx);
@@ -862,9 +856,9 @@ unsafe fn invalid_table_key_error(ip: Ip, ctx: Ctx) -> Control {
 
 #[inline(always)]
 unsafe fn skeyc(args: Skeyc, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control {
-    let target = *sp.at(args.target);
-    let key = lp.str_unchecked(args.key);
-    let src = *sp.at(args.src);
+    let target = *sp.at(args.target());
+    let key = lp.str_unchecked(args.key());
+    let src = *sp.at(args.src());
 
     let ValueRaw::Table(table) = target else {
         return not_a_table_error(ip, ctx);
@@ -883,28 +877,28 @@ unsafe fn skeyc(args: Skeyc, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Contro
 
 #[inline(always)]
 unsafe fn lnil(args: Lnil, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control {
-    *sp.at(args.dst) = ValueRaw::Nil;
+    *sp.at(args.dst()) = ValueRaw::Nil;
 
     dispatch_next(jt, sp, lp, ip, ctx)
 }
 
 #[inline(always)]
 unsafe fn lsmi(args: Lsmi, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control {
-    *sp.at(args.dst) = ValueRaw::Int(args.v.get() as i64);
+    *sp.at(args.dst()) = ValueRaw::Int(args.v().get() as i64);
 
     dispatch_next(jt, sp, lp, ip, ctx)
 }
 
 #[inline(always)]
 unsafe fn lint(args: Lint, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control {
-    *sp.at(args.dst) = ValueRaw::Int(lp.int_unchecked(args.id));
+    *sp.at(args.dst()) = ValueRaw::Int(lp.int_unchecked(args.id()));
 
     dispatch_next(jt, sp, lp, ip, ctx)
 }
 
 #[inline(always)]
 unsafe fn lnum(args: Lnum, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control {
-    *sp.at(args.dst) = ValueRaw::Float(lp.float_unchecked(args.id));
+    *sp.at(args.dst()) = ValueRaw::Float(lp.float_unchecked(args.id()));
 
     dispatch_next(jt, sp, lp, ip, ctx)
 }
@@ -916,14 +910,14 @@ unsafe fn lstr(args: Lstr, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control 
 
 #[inline(always)]
 unsafe fn ltrue(args: Ltrue, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control {
-    *sp.at(args.dst) = ValueRaw::Bool(true);
+    *sp.at(args.dst()) = ValueRaw::Bool(true);
 
     dispatch_next(jt, sp, lp, ip, ctx)
 }
 
 #[inline(always)]
 unsafe fn lfalse(args: Lfalse, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control {
-    *sp.at(args.dst) = ValueRaw::Bool(false);
+    *sp.at(args.dst()) = ValueRaw::Bool(false);
 
     dispatch_next(jt, sp, lp, ip, ctx)
 }
@@ -942,13 +936,13 @@ unsafe fn lfunc(args: Lfunc, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Contro
 unsafe fn llist(args: Llist, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control {
     ctx.maybe_gc();
 
-    let len = args.cap.zx();
+    let len = args.cap().zx();
 
     // UNROOTED: immediately written to the stack
     let heap = ctx.heap();
     let list = List::alloc_zeroed(&*heap, len);
 
-    *sp.at(args.dst) = ValueRaw::List(list);
+    *sp.at(args.dst()) = ValueRaw::List(list);
 
     dispatch_next(jt, sp, lp, ip, ctx)
 }
@@ -957,20 +951,20 @@ unsafe fn llist(args: Llist, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Contro
 unsafe fn ltable(args: Ltable, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control {
     ctx.maybe_gc();
 
-    let len = args.cap.zx();
+    let len = args.cap().zx();
 
     // UNROOTED: immediately written to the stack
     let heap = ctx.heap();
     let table = Table::alloc(&*heap, len);
 
-    *sp.at(args.dst) = ValueRaw::Table(table);
+    *sp.at(args.dst()) = ValueRaw::Table(table);
 
     dispatch_next(jt, sp, lp, ip, ctx)
 }
 
 #[inline(always)]
 unsafe fn jmp(args: Jmp, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control {
-    let ip = ip.offset(args.rel.sz());
+    let ip = ip.offset(args.rel().sz());
 
     dispatch_current(jt, sp, lp, ip, ctx)
 }
@@ -980,7 +974,7 @@ unsafe fn istrue(args: Istrue, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Cont
     // istrue v
     // jmp offset
 
-    let v = *sp.at(args.v);
+    let v = *sp.at(args.v());
     if v.coerce_bool() {
         // skip `jmp`
         let ip = ip.offset(2);
@@ -997,10 +991,10 @@ unsafe fn istruec(args: Istruec, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Co
     // isfalsec dst, v
     // jmp offset
 
-    let v = *sp.at(args.v);
+    let v = *sp.at(args.v());
     if v.coerce_bool() {
         // set `dst` to `v`
-        *sp.at(args.dst) = v;
+        *sp.at(args.dst()) = v;
 
         // skip `jmp`
         let ip = ip.offset(2);
@@ -1017,7 +1011,7 @@ unsafe fn isfalse(args: Isfalse, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Co
     // isfalse v
     // jmp offset
 
-    let v = *sp.at(args.v);
+    let v = *sp.at(args.v());
     if !v.coerce_bool() {
         // skip `jmp`
         let ip = ip.offset(2);
@@ -1034,10 +1028,10 @@ unsafe fn isfalsec(args: Isfalsec, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> 
     // isfalsec dst, v
     // jmp offset
 
-    let v = *sp.at(args.v);
+    let v = *sp.at(args.v());
     if !v.coerce_bool() {
         // set `dst` to `v`
-        *sp.at(args.dst) = v;
+        *sp.at(args.dst()) = v;
 
         // skip `jmp`
         let ip = ip.offset(2);
@@ -1066,8 +1060,8 @@ macro_rules! try_cmp_eval {
 
 #[inline(always)]
 unsafe fn islt(args: Islt, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control {
-    let lhs = *sp.at(args.lhs);
-    let rhs = *sp.at(args.rhs);
+    let lhs = *sp.at(args.lhs());
+    let rhs = *sp.at(args.rhs());
 
     if try_cmp_eval!(lhs, rhs, ctx, ip, <) {
         let ip = ip.offset(2);
@@ -1080,8 +1074,8 @@ unsafe fn islt(args: Islt, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control 
 
 #[inline(always)]
 unsafe fn isle(args: Isle, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control {
-    let lhs = *sp.at(args.lhs);
-    let rhs = *sp.at(args.rhs);
+    let lhs = *sp.at(args.lhs());
+    let rhs = *sp.at(args.rhs());
 
     if try_cmp_eval!(lhs, rhs, ctx, ip, <=) {
         let ip = ip.offset(2);
@@ -1094,8 +1088,8 @@ unsafe fn isle(args: Isle, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control 
 
 #[inline(always)]
 unsafe fn isgt(args: Isgt, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control {
-    let lhs = *sp.at(args.lhs);
-    let rhs = *sp.at(args.rhs);
+    let lhs = *sp.at(args.lhs());
+    let rhs = *sp.at(args.rhs());
 
     if try_cmp_eval!(lhs, rhs, ctx, ip, >) {
         let ip = ip.offset(2);
@@ -1108,8 +1102,8 @@ unsafe fn isgt(args: Isgt, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control 
 
 #[inline(always)]
 unsafe fn isge(args: Isge, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control {
-    let lhs = *sp.at(args.lhs);
-    let rhs = *sp.at(args.rhs);
+    let lhs = *sp.at(args.lhs());
+    let rhs = *sp.at(args.rhs());
 
     if try_cmp_eval!(lhs, rhs, ctx, ip, >=) {
         let ip = ip.offset(2);
@@ -1122,8 +1116,8 @@ unsafe fn isge(args: Isge, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control 
 
 #[inline(always)]
 unsafe fn iseq(args: Iseq, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control {
-    let lhs = *sp.at(args.lhs);
-    let rhs = *sp.at(args.rhs);
+    let lhs = *sp.at(args.lhs());
+    let rhs = *sp.at(args.rhs());
 
     if try_cmp_eval!(lhs, rhs, ctx, ip, ==) {
         let ip = ip.offset(2);
@@ -1136,8 +1130,8 @@ unsafe fn iseq(args: Iseq, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control 
 
 #[inline(always)]
 unsafe fn isne(args: Isne, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control {
-    let lhs = *sp.at(args.lhs);
-    let rhs = *sp.at(args.rhs);
+    let lhs = *sp.at(args.lhs());
+    let rhs = *sp.at(args.rhs());
 
     if try_cmp_eval!(lhs, rhs, ctx, ip, !=) {
         let ip = ip.offset(2);
@@ -1245,9 +1239,9 @@ macro_rules! try_arith_eval {
 
 #[inline(always)]
 unsafe fn addvv(args: Addvv, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control {
-    let dst = sp.at(args.dst);
-    let lhs = *sp.at(args.lhs);
-    let rhs = *sp.at(args.rhs);
+    let dst = sp.at(args.dst());
+    let lhs = *sp.at(args.lhs());
+    let rhs = *sp.at(args.rhs());
 
     try_arith_eval!(dst, lhs, rhs, ctx, ip, +);
 
@@ -1256,9 +1250,9 @@ unsafe fn addvv(args: Addvv, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Contro
 
 #[inline(always)]
 unsafe fn addvn(args: Addvn, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control {
-    let dst = sp.at(args.dst);
-    let lhs = *sp.at(args.lhs);
-    let rhs = lp.int_or_float_unchecked(args.rhs);
+    let dst = sp.at(args.dst());
+    let lhs = *sp.at(args.lhs());
+    let rhs = lp.int_or_float_unchecked(args.rhs());
 
     try_arith_eval!(dst, lhs, rhs, ctx, ip, +);
 
@@ -1267,9 +1261,9 @@ unsafe fn addvn(args: Addvn, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Contro
 
 #[inline(always)]
 unsafe fn addnv(args: Addnv, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control {
-    let dst = sp.at(args.dst);
-    let lhs = lp.int_or_float_unchecked(args.lhs);
-    let rhs = *sp.at(args.rhs);
+    let dst = sp.at(args.dst());
+    let lhs = lp.int_or_float_unchecked(args.lhs());
+    let rhs = *sp.at(args.rhs());
 
     try_arith_eval!(dst, lhs, rhs, ctx, ip, +);
 
@@ -1278,9 +1272,9 @@ unsafe fn addnv(args: Addnv, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Contro
 
 #[inline(always)]
 unsafe fn subvv(args: Subvv, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control {
-    let dst = sp.at(args.dst);
-    let lhs = *sp.at(args.lhs);
-    let rhs = *sp.at(args.rhs);
+    let dst = sp.at(args.dst());
+    let lhs = *sp.at(args.lhs());
+    let rhs = *sp.at(args.rhs());
 
     try_arith_eval!(dst, lhs, rhs, ctx, ip, -);
 
@@ -1289,9 +1283,9 @@ unsafe fn subvv(args: Subvv, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Contro
 
 #[inline(always)]
 unsafe fn subvn(args: Subvn, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control {
-    let dst = sp.at(args.dst);
-    let lhs = *sp.at(args.lhs);
-    let rhs = lp.int_or_float_unchecked(args.rhs);
+    let dst = sp.at(args.dst());
+    let lhs = *sp.at(args.lhs());
+    let rhs = lp.int_or_float_unchecked(args.rhs());
 
     try_arith_eval!(dst, lhs, rhs, ctx, ip, -);
 
@@ -1300,9 +1294,9 @@ unsafe fn subvn(args: Subvn, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Contro
 
 #[inline(always)]
 unsafe fn subnv(args: Subnv, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control {
-    let dst = sp.at(args.dst);
-    let lhs = lp.int_or_float_unchecked(args.lhs);
-    let rhs = *sp.at(args.rhs);
+    let dst = sp.at(args.dst());
+    let lhs = lp.int_or_float_unchecked(args.lhs());
+    let rhs = *sp.at(args.rhs());
 
     try_arith_eval!(dst, lhs, rhs, ctx, ip, -);
 
@@ -1311,9 +1305,9 @@ unsafe fn subnv(args: Subnv, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Contro
 
 #[inline(always)]
 unsafe fn mulvv(args: Mulvv, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control {
-    let dst = sp.at(args.dst);
-    let lhs = *sp.at(args.lhs);
-    let rhs = *sp.at(args.rhs);
+    let dst = sp.at(args.dst());
+    let lhs = *sp.at(args.lhs());
+    let rhs = *sp.at(args.rhs());
 
     try_arith_eval!(dst, lhs, rhs, ctx, ip, *);
 
@@ -1322,9 +1316,9 @@ unsafe fn mulvv(args: Mulvv, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Contro
 
 #[inline(always)]
 unsafe fn mulvn(args: Mulvn, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control {
-    let dst = sp.at(args.dst);
-    let lhs = *sp.at(args.lhs);
-    let rhs = lp.int_or_float_unchecked(args.rhs);
+    let dst = sp.at(args.dst());
+    let lhs = *sp.at(args.lhs());
+    let rhs = lp.int_or_float_unchecked(args.rhs());
 
     try_arith_eval!(dst, lhs, rhs, ctx, ip, *);
 
@@ -1333,9 +1327,9 @@ unsafe fn mulvn(args: Mulvn, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Contro
 
 #[inline(always)]
 unsafe fn mulnv(args: Mulnv, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control {
-    let dst = sp.at(args.dst);
-    let lhs = lp.int_or_float_unchecked(args.lhs);
-    let rhs = *sp.at(args.rhs);
+    let dst = sp.at(args.dst());
+    let lhs = lp.int_or_float_unchecked(args.lhs());
+    let rhs = *sp.at(args.rhs());
 
     try_arith_eval!(dst, lhs, rhs, ctx, ip, *);
 
@@ -1392,9 +1386,9 @@ macro_rules! try_div_eval {
 
 #[inline(always)]
 unsafe fn divvv(args: Divvv, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control {
-    let dst = sp.at(args.dst);
-    let lhs = *sp.at(args.lhs);
-    let rhs = *sp.at(args.rhs);
+    let dst = sp.at(args.dst());
+    let lhs = *sp.at(args.lhs());
+    let rhs = *sp.at(args.rhs());
 
     try_div_eval!(dst, lhs, rhs, ctx, ip);
 
@@ -1403,9 +1397,9 @@ unsafe fn divvv(args: Divvv, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Contro
 
 #[inline(always)]
 unsafe fn divvn(args: Divvn, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control {
-    let dst = sp.at(args.dst);
-    let lhs = *sp.at(args.lhs);
-    let rhs = lp.int_or_float_unchecked(args.rhs);
+    let dst = sp.at(args.dst());
+    let lhs = *sp.at(args.lhs());
+    let rhs = lp.int_or_float_unchecked(args.rhs());
 
     try_div_eval!(dst, lhs, rhs, ctx, ip);
 
@@ -1414,9 +1408,9 @@ unsafe fn divvn(args: Divvn, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Contro
 
 #[inline(always)]
 unsafe fn divnv(args: Divnv, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control {
-    let dst = sp.at(args.dst);
-    let lhs = lp.int_or_float_unchecked(args.lhs);
-    let rhs = *sp.at(args.rhs);
+    let dst = sp.at(args.dst());
+    let lhs = lp.int_or_float_unchecked(args.lhs());
+    let rhs = *sp.at(args.rhs());
 
     try_div_eval!(dst, lhs, rhs, ctx, ip);
 
@@ -1425,8 +1419,8 @@ unsafe fn divnv(args: Divnv, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Contro
 
 #[inline(always)]
 unsafe fn unm(args: Unm, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control {
-    let dst = sp.at(args.dst);
-    let rhs = *sp.at(args.rhs);
+    let dst = sp.at(args.dst());
+    let rhs = *sp.at(args.rhs());
 
     use ValueRaw::*;
     match rhs {
@@ -1446,8 +1440,8 @@ unsafe fn unm(args: Unm, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control {
 
 #[inline(always)]
 unsafe fn not(args: Not, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control {
-    let dst = sp.at(args.dst);
-    let rhs = *sp.at(args.rhs);
+    let dst = sp.at(args.dst());
+    let rhs = *sp.at(args.rhs());
 
     *dst = ValueRaw::Bool(!rhs.coerce_bool());
 
@@ -1462,8 +1456,8 @@ unsafe fn call(args: Call, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control 
 
 #[inline(always)]
 unsafe fn fastcall(args: Fastcall, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control {
-    let ret = args.dst;
-    let callee = ctx.get_function_in_current_module(args.id);
+    let ret = args.dst();
+    let callee = ctx.get_function_in_current_module(args.id());
 
     let (sp, lp, ip) = do_call(callee, ret, ip, ctx);
 
