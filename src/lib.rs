@@ -33,6 +33,11 @@ mod disasm;
 pub use module::Module;
 pub use vm::{Hebi, value::ValueRaw};
 
+pub fn parse(code: &str) -> Result<ast::Ast> {
+    let tokens = token::tokenize(code);
+    parser::parse(&tokens)
+}
+
 const _: () = assert!(
     cfg!(target_endian = "little"),
     "only little-endian architectures are supported"

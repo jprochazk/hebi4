@@ -191,12 +191,16 @@ mod private {
             self.root = Some(root);
         }
 
-        pub(crate) fn root(&self) -> Node<'_, Root> {
+        pub fn root(&self) -> Node<'_, Root> {
             let root = self.root.as_ref().unwrap();
             Node {
                 ast: self,
                 node: root,
             }
+        }
+
+        pub fn nodes(&self) -> &[Packed] {
+            &self.nodes
         }
 
         pub(crate) fn intern_ident(&mut self, ident: &str) -> IdentId {
@@ -326,3 +330,9 @@ delegate_value_debug!(bool);
 delegate_value_debug!(InfixOp);
 delegate_value_debug!(PrefixOp);
 delegate_value_debug!(AssignOp);
+
+impl std::fmt::Debug for Packed {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self.kind())
+    }
+}

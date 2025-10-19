@@ -5,10 +5,26 @@ fn main() {
     let args: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
 
     match &args[..] {
-        ["-e", expr] => eval_string(expr),
+        ["-p" | "--print-ast", expr] => print_string(expr),
+        ["-e" | "--eval", expr] => eval_string(expr),
         [path] => eval_file(Path::new(path)),
         _ => help(),
     }
+}
+
+fn print_string(code: &str) {
+    let result = match hebi4::parse(code) {
+        Ok(ast) => {
+            let mut out = String::new();
+            for node in ast.root().body() {
+                use std::fmt::Write as _;
+                writeln!(&mut out, "{node:#?}").unwrap();
+            }
+            out
+        }
+        Err(err) => err.render(&code).to_string(),
+    };
+    println!("{result}");
 }
 
 fn eval_string(code: &str) {
@@ -43,7 +59,8 @@ Hebi4
 Usage: hebi4 <file|options>
 
 Options:
-  -e <string>  Evaluate a string
+  -p, --print-ast <string>  Parse `string` and pretty-print its AST
+  -e, --eval <string>       Evaluate `string`
 "
     );
 }
