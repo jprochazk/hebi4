@@ -2,16 +2,16 @@ use std::{fs::read_to_string, path::Path};
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    if args.len() != 1 {
-        return help();
-    }
+    let args: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
 
-    let path = Path::new(args[0].as_str());
-    run(&path);
+    match &args[..] {
+        ["-e", expr] => eval_string(expr),
+        [path] => eval_file(Path::new(path)),
+        _ => help(),
+    }
 }
 
-fn run(path: &Path) {
-    let code = read_to_string(path).expect("failed to read file");
+fn eval_string(code: &str) {
     let module = match hebi4::Module::compile(None, &code) {
         Ok(m) => m,
         Err(err) => {
@@ -30,6 +30,20 @@ fn run(path: &Path) {
     });
 }
 
+fn eval_file(path: &Path) {
+    let code = read_to_string(path).expect("failed to read file");
+    eval_string(&code)
+}
+
 fn help() {
-    eprintln!("Usage: hebi4 <file.hi>");
+    eprintln!(
+        "\
+Hebi4
+
+Usage: hebi4 <file|options>
+
+Options:
+  -e <string>  Evaluate a string
+"
+    );
 }
