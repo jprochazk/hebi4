@@ -1,5 +1,7 @@
-use super::{Module, Vm};
 use std::{fs::read_to_string, path::Path};
+
+use super::Hebi;
+use crate::Module;
 
 fn module(input: &str) -> Module {
     let tokens = crate::token::tokenize(&input);
@@ -9,7 +11,7 @@ fn module(input: &str) -> Module {
             panic!("{}", err.render(&input));
         }
     };
-    let module = match crate::codegen::emit(&ast) {
+    let module = match crate::codegen::emit("test".into(), &ast) {
         Ok(m) => m,
         Err(err) => panic!("{}", err.render(&input)),
     };
@@ -22,11 +24,13 @@ fn run(path: &Path) {
     let input = read_to_string(path).unwrap();
     let module = module(&input);
 
-    let mut vm = Vm::new();
+    let mut vm = Hebi::new();
     vm.with(|mut r| {
+        let loaded_module = r.load(&module);
+
         // run each code snippet twice using the same VM,
         // ensuring it has the same result.
-        let (snapshot, failure) = match r.run(&module) {
+        let (snapshot, failure) = match r.run(&loaded_module) {
             Ok(value) => (format!("OK\n{}", r.fmt(value)), false),
             Err(err) => (
                 format!(
@@ -38,7 +42,7 @@ fn run(path: &Path) {
             ),
         };
 
-        let (snapshot2, failure2) = match r.run(&module) {
+        let (snapshot2, failure2) = match r.run(&loaded_module) {
             Ok(value) => (format!("OK\n{}", r.fmt(value)), false),
             Err(err) => (
                 format!(
@@ -76,9 +80,11 @@ fn separate_modules() {
     let a = module(r#"fn f(a) do a end f(10)"#);
     let b = module(r#"100 + 200"#);
 
-    Vm::new().with(|mut r| {
+    Hebi::new().with(|mut r| {
+        let a = r.load(&a);
         let a = r.run(&a).unwrap();
         let a = r.fmt(a).to_string();
+        let b = r.load(&b);
         let b = r.run(&b).unwrap();
         let b = r.fmt(b).to_string();
 

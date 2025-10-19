@@ -12,7 +12,7 @@ fn main() {
 
 fn run(path: &Path) {
     let code = read_to_string(path).expect("failed to read file");
-    let module = match code.parse::<hebi4::Module>() {
+    let module = match hebi4::Module::compile(None, &code) {
         Ok(m) => m,
         Err(err) => {
             eprintln!("{}", err.render(&code));
@@ -21,7 +21,8 @@ fn run(path: &Path) {
     };
 
     hebi4::Hebi::new().with(|mut vm| {
-        let result = match vm.run(&module) {
+        let loaded_module = vm.load(&module);
+        let result = match vm.run(&loaded_module) {
             Ok(v) => vm.fmt(v).to_string(),
             Err(err) => err.render(&code).to_string(),
         };

@@ -20,17 +20,18 @@ mod private {
     pub trait Sealed {}
 }
 
-use super::{Context, Control, Literal, ValueRaw};
+use super::{Control, ValueRaw, VmState};
+use core::ptr::NonNull;
 
 pub trait OperandPack: private::Sealed + Sized {}
 
 #[derive(Clone, Copy)]
 #[repr(transparent)]
-pub struct Sp(pub(crate) *mut ValueRaw);
+pub struct Sp(pub(crate) NonNull<ValueRaw>);
 
 #[derive(Clone, Copy)]
 #[repr(transparent)]
-pub struct Ip(pub(crate) *const Insn);
+pub struct Ip(pub(crate) NonNull<Insn>);
 
 #[derive(Clone, Copy)]
 #[repr(transparent)]
@@ -45,15 +46,15 @@ impl Insn {
 
 #[derive(Clone, Copy)]
 #[repr(transparent)]
-pub struct Jt(pub(crate) *const OpaqueHandler);
+pub struct Jt(pub(crate) NonNull<OpaqueHandler>);
 
 #[derive(Clone, Copy)]
 #[repr(transparent)]
-pub struct Lp(pub(crate) *const Literal);
+pub struct Lp(pub(crate) NonNull<ValueRaw>);
 
 #[derive(Clone, Copy)]
 #[repr(transparent)]
-pub struct Ctx(pub(crate) *mut Context);
+pub struct Vm(pub(crate) NonNull<VmState>);
 
 const _: () = {
     use std::mem::align_of;
@@ -286,13 +287,13 @@ macro_rules! jump_table {
         JumpTable {
             $($op: {
                 type __Operands = $crate::codegen::opcodes::__operands::$op;
-                const __OP: unsafe fn(__Operands, Jt, Sp, Lp, Ip, Ctx) -> Control = $op;
+                const __OP: unsafe fn(Vm, Jt, Ip, __Operands, Sp, Lp) -> Control = $op;
 
                 {
                     handler! {
-                        unsafe extern "?" fn $op(args: Insn, jt: Jt, sp: Sp, lp: Lp, ip: Ip, ctx: Ctx) -> Control {
+                        unsafe extern "?" fn $op(vm: Vm, jt: Jt, ip: Ip, args: Insn, sp: Sp, lp: Lp) -> Control {
                             let args: __Operands = core::mem::transmute(args);
-                            __OP(args, jt, sp, lp, ip, ctx)
+                            __OP(vm, jt, ip, args, sp, lp)
                         }
                     }
 
@@ -303,9 +304,42 @@ macro_rules! jump_table {
     };
 }
 
-pub type Handler<Operands> = Handler!(fn(Operands, Jt, Sp, Lp, Ip, Ctx) -> Control);
+/*
+NOTE: Order of handler parameters matters:
+We want `Insn` in a register with high-8-bits-of-low-16-bits monikers.
 
-pub type OpaqueHandler = Handler!(fn(Insn, Jt, Sp, Lp, Ip, Ctx) -> Control);
+  abc: c:8  b:8  a:8  op:8
+  aB:       B:16 a:8  op:8
+  A:             A:16 op:8
+
+x86-64 SysV: 6 registers, and their monikers:
+
+    64   32   16   8-hi  8-lo
+  0 RDI  EDI  DI   N/A   DIL
+  1 RSI  ESI  SI   N/A   SIL
+  2 RDX  EDX  DX   DH    DL
+  3 RCX  ECX  CX   CH    CL
+  4 R8   R8D  R8W  N/A   R8B
+  5 R9   R9D  R9W  N/A   R9B
+
+So the only suitable ones are `RDX` and `RCX`, because:
+- The full instruction is in `EDX`/`ECX`,
+- `op` is `movzx <dst>,DL/CL`
+- `a` is `movzx <dst>,DH/CH`
+- `b` is `movzx <dst>,DX/CX` + `shrn <dst>,8`
+- `c` is `movzx <dst>,EDX/ECX` + `shrn <dst>,24`
+- `B` is `movzx <dst>,EDX/ECX` + `shrn <dst>,16`
+- `A` is `movxz <dst>,EDX/ECX` + `shrn <dst>,8`
+
+If we used any other registers, `a` couldn't be decoded with just a `mov`.
+
+  TODO: do the same for AArch64
+  though i'm pretty sure things are less fucked up over there
+*/
+
+pub type Handler<Operands> = Handler!(fn(Vm, Jt, Ip, Operands, Sp, Lp) -> Control);
+
+pub type OpaqueHandler = Handler!(fn(Vm, Jt, Ip, Insn, Sp, Lp) -> Control);
 
 macro_rules! declare_operand_type {
     ($name:ident, $ty:ident, $fmt:literal) => {
@@ -425,7 +459,7 @@ declare_operand_types! {
 
 #[allow(non_snake_case)]
 #[inline(always)]
-fn op_abc(op: Opcode, a: u8, b: u8, c: u8) -> Insn {
+const fn op_abc(op: Opcode, a: u8, b: u8, c: u8) -> Insn {
     let mut v = 0u32;
     v |= op as u32;
     v |= (a as u32) << 8;
@@ -436,7 +470,7 @@ fn op_abc(op: Opcode, a: u8, b: u8, c: u8) -> Insn {
 
 #[allow(non_snake_case)]
 #[inline(always)]
-fn op_aB(op: Opcode, a: u8, B: u16) -> Insn {
+const fn op_aB(op: Opcode, a: u8, B: u16) -> Insn {
     let mut v = 0u32;
     v |= op as u32;
     v |= (a as u32) << 8;
@@ -446,7 +480,7 @@ fn op_aB(op: Opcode, a: u8, B: u16) -> Insn {
 
 #[allow(non_snake_case)]
 #[inline(always)]
-fn op_aS(op: Opcode, a: u8, B: i16) -> Insn {
+const fn op_aS(op: Opcode, a: u8, B: i16) -> Insn {
     let mut v = 0u32;
     v |= op as u32;
     v |= (a as u32) << 8;
@@ -456,7 +490,7 @@ fn op_aS(op: Opcode, a: u8, B: i16) -> Insn {
 
 #[allow(non_snake_case)]
 #[inline(always)]
-fn op_A(op: Opcode, A: u24) -> Insn {
+const fn op_A(op: Opcode, A: u24) -> Insn {
     let mut v = 0u32;
     v |= op as u32;
     v |= (A.0) << 8;
@@ -465,7 +499,7 @@ fn op_A(op: Opcode, A: u24) -> Insn {
 
 #[allow(non_snake_case)]
 #[inline(always)]
-fn op_S(op: Opcode, A: i24) -> Insn {
+const fn op_S(op: Opcode, A: i24) -> Insn {
     let mut v = 0u32;
     v |= op as u32;
     v |= (A.0.0) << 8;

@@ -37,9 +37,9 @@
 
 #![allow(dead_code)]
 
+use std::{collections::BTreeMap, path::Path, str::FromStr};
+
 use heck::AsPascalCase;
-use std::path::Path;
-use std::{collections::BTreeMap, str::FromStr};
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).take(2).collect();

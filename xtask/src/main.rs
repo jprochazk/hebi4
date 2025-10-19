@@ -10,6 +10,7 @@ fn main() {
         "codegen" => codegen(),
         "miri" => miri(&args[1..]),
         "check-tco" => check_tco(),
+        "sort-imports" => sort_imports(),
         _ => help(),
     }
 }
@@ -20,10 +21,16 @@ fn codegen() {
 }
 
 fn miri(args: &[String]) {
-    let miriflags = "-Zmiri-tree-borrows -Zmiri-disable-isolation";
-    cargo("miri test")
+    // let miriflags = "-Zmiri-tree-borrows -Zmiri-disable-isolation";
+    let miriflags = "-Zmiri-disable-isolation";
+    cargo("+nightly miri test")
         .with_args(args)
         .with_envs([("MIRIFLAGS", miriflags)])
+        .run();
+}
+
+fn sort_imports() {
+    cargo("+nightly fmt -- --unstable-features --config imports_granularity=Crate,group_imports=StdExternalCrate")
         .run();
 }
 
@@ -32,7 +39,10 @@ fn help() {
 usage: cargo x <command>
 
 commands:
-    codegen    generate AST and bytecode
+    codegen       generate AST and bytecode
+    miri          run tests under miri
+    check-tco     check if tail-call optimization kicked in (linux-x64 only)
+    sort-imports  run nightly rustfmt with import config
 ";
     eprint!("{s}");
 

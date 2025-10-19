@@ -12,8 +12,8 @@ OK
     b = r3
   .code
   0  lsmi r1, 0
-  1  lnum r2, l0   ; l0=1
-  2  lnum r3, l0   ; l0=1
+  1  lnum r2, 1.0
+  2  lnum r3, 1.0
   3  add r1, r2, r3
   4  add r1, 1.0, r3
   5  add r1, r2, 1.0

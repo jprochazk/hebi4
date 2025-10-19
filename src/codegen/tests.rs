@@ -1,8 +1,7 @@
 use std::{fs::read_to_string, path::Path};
 
-use crate::{parser::parse, token::tokenize};
-
 use super::emit;
+use crate::{parser::parse, token::tokenize};
 
 #[glob_test::glob("../../tests/inputs/codegen/*.hi")]
 fn emitter(path: &Path) {
@@ -14,7 +13,7 @@ fn emitter(path: &Path) {
             panic!("{}", err.render(&input));
         }
     };
-    let (snapshot, failure) = match emit(&ast) {
+    let (snapshot, failure) = match emit("test".into(), &ast) {
         Ok(m) => (format!("OK\n{}", m.disasm(&input)), false),
         Err(err) => (format!("ERROR\n{}", err.render(&input)), true),
     };

@@ -9,7 +9,7 @@ OK
   .locals
     a = r1
   .code
-    0  lint r1, l0   ; l0=40000
+    0  lint r1, 40000
     1  add r1, r1, 40001
     2  add r1, r1, 40002
     3  add r1, r1, 40003
@@ -265,7 +265,7 @@ OK
   253  add r1, r1, 40253
   254  add r1, r1, 40254
   255  add r1, r1, 40255
-  256  lint r2, l256   ; l256=40256
+  256  lint r2, 40256
   257  add r1, r1, r2
   258  lnil r0
   259  ret

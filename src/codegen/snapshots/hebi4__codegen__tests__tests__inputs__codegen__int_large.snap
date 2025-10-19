@@ -7,5 +7,5 @@ OK
   params 0
   stack 1
   .code
-  0  lint r0, l0   ; l0=32768
+  0  lint r0, 32768
   1  ret

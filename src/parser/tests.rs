@@ -1,8 +1,7 @@
 use std::{fs::read_to_string, path::Path};
 
-use crate::token::tokenize;
-
 use super::parse;
+use crate::token::tokenize;
 
 #[glob_test::glob("../../tests/inputs/syntax/*.hi")]
 fn parser(path: &Path) {

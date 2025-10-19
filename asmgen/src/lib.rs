@@ -5,8 +5,6 @@ pub struct ValueRaw {
     pub data: u64,
 }
 
-pub struct Context {}
-
-pub struct Literal {}
+pub struct VmState {}
 
 pub enum Control {}

@@ -17,14 +17,13 @@ macro_rules! index_unchecked {
 mod iter;
 pub mod simple;
 
-pub use iter::Iter;
-
 use std::{
     hash::{BuildHasher, Hash, Hasher as _},
     ops::{Index, Range},
 };
 
 use hashbrown::{HashMap, hash_map::RawEntryMut};
+pub use iter::Iter;
 
 fn make_hash(builder: &impl BuildHasher, hashee: &(impl ?Sized + Hash)) -> u64 {
     let state = &mut builder.build_hasher();

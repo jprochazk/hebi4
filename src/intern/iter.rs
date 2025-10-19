@@ -1,7 +1,6 @@
-use {
-    super::{Interner, Span},
-    core::{iter, slice},
-};
+use core::{iter, slice};
+
+use super::{Interner, Span};
 
 /// An iterator over all interned strings from an [`Interner`].
 #[derive(Debug, Clone)]

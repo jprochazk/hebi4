@@ -99,7 +99,7 @@ pub struct Heap {
 
     /// objects are linked into a global list of all
     /// allocations, which is used during sweeping
-    head: Cell<*mut GcHeader>,
+    head: Cell<Option<NonNull<GcHeader>>>,
 
     stats: HeapStats,
 
@@ -114,7 +114,7 @@ impl Heap {
     pub(crate) fn new() -> Self {
         Self {
             roots: UnsafeCell::new(Box::new(RootList::default())),
-            head: Cell::new(null_mut()),
+            head: Cell::new(None),
             stats: HeapStats::default(),
             string_hasher: StringHasher::default(),
 
@@ -149,9 +149,10 @@ impl Heap {
         }
 
         let ptr = ptr.cast::<GcBox<T>>();
+        let ptr = unsafe { NonNull::new_unchecked(ptr) };
 
         // CAST: `GcBox` is a `repr(C)` struct with `GcHeader` as its first field
-        self.head.set(ptr.cast::<GcHeader>());
+        self.head.set(Some(ptr.cast::<GcHeader>()));
 
         self.stats.alloc(core::mem::size_of::<T>());
 
@@ -165,12 +166,15 @@ impl Heap {
             unsafe fn trace(&self, _: &Tracer) {}
         }
 
-        self.collect_with_external_roots(&NoExternalRoots);
+        unsafe { Self::collect_with_external_roots(self, NoExternalRoots) };
     }
 
     #[inline]
-    pub(crate) fn collect_with_external_roots(&mut self, external_roots: &dyn ExternalRoots) {
-        mark_and_sweep::collect(self, external_roots);
+    pub(crate) unsafe fn collect_with_external_roots(
+        this: *mut Heap,
+        external_roots: impl ExternalRoots,
+    ) {
+        mark_and_sweep::collect(this, external_roots);
     }
 
     #[inline]
@@ -268,15 +272,7 @@ impl HeapId {
 
 #[repr(C)]
 pub struct Gc<T: Sized + 'static> {
-    ptr: *mut GcBox<T>,
-}
-
-impl<T: Sized + 'static> Gc<T> {
-    pub fn null() -> Self {
-        Self {
-            ptr: core::ptr::null_mut(),
-        }
-    }
+    ptr: NonNull<GcBox<T>>,
 }
 
 impl<T: Sized + 'static> Gc<T> {
@@ -289,17 +285,15 @@ impl<T: Sized + 'static> Gc<T> {
         let offset = core::mem::offset_of!(GcBox<T>, value);
         // CAST: `GcBox` begins with
         let ptr = ptr.cast::<u8>().sub(offset).cast::<GcBox<T>>();
+        let ptr = NonNull::new_unchecked(ptr);
 
         Gc { ptr }
     }
 
-    /// Unwrap a managed pointer, returning a raw pointer to the underlying object.
-    ///
-    /// This operation is always safe, but using the resulting
-    /// pointer has the same requirements as [`Gc::get`] or [`Gc::get_mut`].
     #[inline]
-    pub(crate) fn into_raw(this: Gc<T>) -> *mut T {
-        unsafe { UnsafeCell::raw_get(&raw const (*this.ptr).value) }
+    pub(crate) unsafe fn into_raw(self) -> *mut T {
+        let ptr = unsafe { &raw const (*self.ptr.as_ptr()).value };
+        UnsafeCell::raw_get(ptr)
     }
 
     #[inline]
@@ -310,28 +304,23 @@ impl<T: Sized + 'static> Gc<T> {
     }
 
     #[inline]
-    unsafe fn get_raw(self) -> *mut T {
-        let ptr = unsafe { &raw mut (*self.ptr).value };
-        UnsafeCell::raw_get(ptr)
-    }
-
-    #[inline]
     unsafe fn vt(self) -> &'static GcVtable {
-        let header = &raw mut (*self.ptr).header;
+        let header = &raw mut (*self.ptr.as_ptr()).header;
         let header = UnsafeCell::raw_get(header);
         header.read().vt()
     }
 
     #[inline]
     unsafe fn set_mark(self, v: bool) {
-        let header = &raw mut (*self.ptr).header;
+        let header = &raw mut (*self.ptr.as_ptr()).header;
         let header = UnsafeCell::raw_get(header);
+        let header = NonNull::new_unchecked(header);
         GcHeader::set_mark(header, v);
     }
 
     #[inline]
     unsafe fn is_marked(self) -> bool {
-        let header = &raw mut (*self.ptr).header;
+        let header = &raw mut (*self.ptr.as_ptr()).header;
         let header = UnsafeCell::raw_get(header);
         header.read().marked()
     }
@@ -369,7 +358,7 @@ impl<T: Trace + Sized + 'static> Gc<T> {
     /// - No `&mut T` must exist to the object
     #[inline]
     pub(crate) unsafe fn as_rust_ref_very_unsafe<'a>(self) -> &'a T {
-        &*UnsafeCell::raw_get(&raw mut (*self.ptr).value)
+        &*UnsafeCell::raw_get(&raw mut (*self.ptr.as_ptr()).value)
     }
 
     /// ## Safety
@@ -377,12 +366,12 @@ impl<T: Trace + Sized + 'static> Gc<T> {
     /// - The resulting reference must be _unique_ for the object
     #[inline]
     pub(crate) unsafe fn as_rust_ref_mut_very_unsafe<'a>(self) -> &'a mut T {
-        &mut *UnsafeCell::raw_get(&raw mut (*self.ptr).value)
+        &mut *UnsafeCell::raw_get(&raw mut (*self.ptr.as_ptr()).value)
     }
 
     #[inline]
     unsafe fn trace(self, tracer: &Tracer) {
-        (*self.get_raw()).trace(tracer)
+        (*self.into_raw()).trace(tracer)
     }
 }
 
@@ -401,7 +390,7 @@ macro_rules! generate_vtable_for {
     ($T:ty) => {
         $crate::vm::gc::GcVtable {
             trace: {
-                unsafe fn _trace(this: *const (), tracer: *const Tracer) {
+                unsafe fn _trace(this: *const (), tracer: *const $crate::vm::gc::Tracer) {
                     <$T as $crate::vm::gc::Trace>::trace(&*this.cast::<$T>(), &*tracer);
                 }
 
@@ -481,13 +470,13 @@ struct GcHeader {
     /// Each managed object is linked into a global list of all allocated values.
     /// Objects are linked into it during allocation, and unlinked during the sweep phase of GC
     /// after being freed.
-    next: *mut GcHeader,
+    next: Option<NonNull<GcHeader>>,
     tagged_vt: TaggedVt,
 }
 
 impl GcHeader {
     #[inline]
-    fn new(vtable: &'static GcVtable, next: *mut GcHeader) -> Self {
+    fn new(vtable: &'static GcVtable, next: Option<NonNull<GcHeader>>) -> Self {
         Self {
             next,
             tagged_vt: TaggedVt::new(vtable),
@@ -495,7 +484,7 @@ impl GcHeader {
     }
 
     #[inline]
-    fn into_parts(self) -> (*mut GcHeader, &'static GcVtable, bool) {
+    fn into_parts(self) -> (Option<NonNull<GcHeader>>, &'static GcVtable, bool) {
         (self.next(), self.vt(), self.marked())
     }
 
@@ -510,17 +499,19 @@ impl GcHeader {
     }
 
     #[inline]
-    fn next(self) -> *mut GcHeader {
+    fn next(self) -> Option<NonNull<GcHeader>> {
         self.next
     }
 
     #[inline]
-    unsafe fn set_mark(this: *mut GcHeader, v: bool) {
+    unsafe fn set_mark(this: NonNull<GcHeader>, v: bool) {
+        let this = this.as_ptr();
         (*this).tagged_vt = (*this).tagged_vt.with_tag(v as usize);
     }
 
     #[inline]
-    unsafe fn set_next(this: *mut GcHeader, next: *mut GcHeader) {
+    unsafe fn set_next(this: NonNull<GcHeader>, next: Option<NonNull<GcHeader>>) {
+        let this = this.as_ptr();
         (*this).next = next;
     }
 }
@@ -601,7 +592,7 @@ impl Tracer {
                 return; // cycle
             }
             ptr.set_mark(true);
-            (*ptr.get_raw()).trace(self)
+            (*ptr.into_raw()).trace(self)
         }
     }
 
@@ -876,6 +867,18 @@ impl<'a, T: Trace + Sized + 'static> Ref<'a, T> {
         let ptr = *f(this);
         unsafe { ptr.as_ref() }
     }
+
+    #[inline]
+    pub fn map_opt<U: Trace + Sized + 'static>(
+        this: &Self,
+        f: impl for<'v> FnOnce(&'v Ref<'a, T>) -> Option<&'v Gc<U>>,
+    ) -> Option<Ref<'a, U>> {
+        let ptr = f(this);
+        match ptr {
+            Some(&ptr) => Some(unsafe { ptr.as_ref() }),
+            None => None,
+        }
+    }
 }
 
 impl<'a, T: Trace + Sized + 'static> Ref<'a, T> {
@@ -1009,6 +1012,60 @@ impl<'a> ValueRef<'a> {
     }
 }
 
+impl ValueRaw {
+    #[inline]
+    pub unsafe fn as_ref<'a>(self) -> ValueRef<'a> {
+        match self {
+            ValueRaw::Nil => ValueRef::Nil,
+            ValueRaw::Bool(v) => ValueRef::Bool(v),
+            ValueRaw::Int(v) => ValueRef::Int(v),
+            ValueRaw::Float(v) => ValueRef::Float(v),
+            ValueRaw::String(v) => ValueRef::String(v.as_ref()),
+            ValueRaw::List(v) => ValueRef::List(v.as_ref()),
+            ValueRaw::Table(v) => ValueRef::Table(v.as_ref()),
+            ValueRaw::UserData(v) => ValueRef::UserData(v.as_ref()),
+        }
+    }
+}
+
+impl<'a, T> Ref<'a, T> {
+    #[inline]
+    pub fn map_value(
+        this: &Self,
+        f: impl for<'v> FnOnce(&'v Ref<'a, T>) -> &'v ValueRaw,
+    ) -> ValueRef<'a> {
+        let value = *f(this);
+        unsafe { value.as_ref() }
+    }
+
+    #[inline]
+    pub fn map_value_opt(
+        this: &Self,
+        f: impl for<'v> FnOnce(&'v Ref<'a, T>) -> Option<&'v ValueRaw>,
+    ) -> Option<ValueRef<'a>> {
+        let value = f(this);
+        match value {
+            Some(value) => Some(unsafe { value.as_ref() }),
+            None => None,
+        }
+    }
+}
+
+impl std::fmt::Display for ValueRef<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ValueRef::Nil => write!(f, "nil"),
+            ValueRef::Bool(v) => write!(f, "{v}"),
+            ValueRef::Int(v) => write!(f, "{v}"),
+            ValueRef::Float(v) => write!(f, "{v:?}"),
+            ValueRef::String(v) => write!(f, "{v:?}"),
+            ValueRef::List(v) => write!(f, "<list>"),
+            ValueRef::Table(v) => write!(f, "<table>"),
+            ValueRef::UserData(v) => write!(f, "<userdata>"),
+        }
+    }
+}
+
 // #[repr(C, u64)]
 // pub enum ValueRefMut<'a> {
 //     Nil = 0,
@@ -1024,6 +1081,10 @@ impl<'a> ValueRef<'a> {
 
 /// Create a root on the stack.
 ///
+/// ```rust,ignore
+/// let_root_unchecked!(unsafe in heap; object = heap.alloc_no_gc(..));
+/// ```
+///
 /// Rooting a reclaimed object is undefined behavior.
 /// Inversely, _not_ rooting an allocated object is undefined behavior.
 ///
@@ -1036,9 +1097,10 @@ impl<'a> ValueRef<'a> {
 #[macro_export]
 macro_rules! let_root_unchecked {
     (unsafe in $heap:ident; $place:ident = $ptr:expr) => {
-        let mut place = unsafe { $crate::__macro::StackRoot::from_heap_ptr($heap, $ptr) };
+        let ptr = $ptr;
+        let mut place = unsafe { $crate::vm::gc::StackRoot::from_heap_ptr($heap, ptr) };
         let $place = unsafe {
-            $crate::__macro::Root::__new($heap, ::core::pin::Pin::new_unchecked(&mut place))
+            $crate::vm::gc::Root::__new($heap, ::core::pin::Pin::new_unchecked(&mut place))
         };
     };
 }

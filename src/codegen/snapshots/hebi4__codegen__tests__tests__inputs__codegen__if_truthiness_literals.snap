@@ -19,13 +19,13 @@ OK
    9  lsmi r0, 2
   10  ret
   11  lnil r1
-  12  lstr r1, l0   ; l0="hello"
+  12  lstr r1, "hello"
   13  istrue r1
   14  jmp 4   ; to 18
   15  lsmi r0, 3
   16  ret
   17  lnil r1
-  18  lstr r1, l1   ; l1=""
+  18  lstr r1, ""
   19  istrue r1
   20  jmp 4   ; to 24
   21  lsmi r0, 4

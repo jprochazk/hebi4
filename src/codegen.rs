@@ -108,22 +108,17 @@
 #[macro_use]
 pub mod opcodes;
 
-use crate::{
-    ast::{self, Node, NodeList, f64n},
-    span::Span,
-    vm::{
-        self, Context, Control, FuncInfo, Module,
-        value::{Literal, ValueRaw},
-    },
-};
+use beef::lean::Cow;
 use bumpalo::{Bump, collections::Vec, vec};
 use hashbrown::HashMap;
 use opcodes::{FnId, Imm8, Imm16, Imm16s, Imm24s, Insn, Lit, Lit8, Opcode, Reg, asm, i24};
-use std::borrow::Cow;
 
 use crate::{
-    ast::{Ast, Ident, Stmt},
+    ast::{self, Ast, Ident, Node, NodeList, Stmt, f64n},
     error::{Result, error},
+    module::{FuncDebugInfo, FuncInfo, Literal, Local, Module},
+    span::Span,
+    vm::{Control, VmState, value::ValueRaw},
 };
 
 // TODO: basic optimizations (configurable)
@@ -152,7 +147,7 @@ macro_rules! f {
 
 const NO_SPAN: Span = Span::empty();
 
-pub fn emit(ast: &Ast) -> Result<Module> {
+pub fn emit(name: Cow<'static, str>, ast: &Ast) -> Result<Module> {
     let buf = &Bump::new();
     let mut m = State {
         buf,
@@ -165,6 +160,7 @@ pub fn emit(ast: &Ast) -> Result<Module> {
         .func_table
         .reserve("@main", Span::empty())
         .expect("should not fail to reserve main");
+    assert!(main.get() == 0);
 
     let f = emit_func(
         &mut m,
@@ -178,7 +174,7 @@ pub fn emit(ast: &Ast) -> Result<Module> {
 
     m.func_table.define(main, f);
 
-    Ok(Module::new(main, m.func_table.finish()))
+    Ok(Module::new(name, main, m.func_table.finish()))
 }
 
 struct State<'a> {
@@ -276,7 +272,7 @@ impl<'a> Scope<'a> {
 
 struct FunctionDebug<'a> {
     spans: Vec<'a, Span>,
-    locals: Vec<'a, vm::dbg::Local>,
+    locals: Vec<'a, Local>,
 }
 
 struct RegAlloc {
@@ -804,7 +800,7 @@ impl<'a> FunctionState<'a> {
             span,
             reg,
         });
-        self.dbg.locals.push(vm::dbg::Local { span, reg });
+        self.dbg.locals.push(Local { span, reg });
     }
 
     fn declare_function(&mut self, name: impl Into<Cow<'a, str>>, arity: u8, span: Span, id: FnId) {
@@ -842,8 +838,8 @@ impl<'a> FunctionState<'a> {
         None
     }
 
-    fn emit(&mut self, inst: Insn, span: Span) {
-        self.code.push(inst);
+    fn emit(&mut self, insn: Insn, span: Span) {
+        self.code.push(insn);
         self.dbg.spans.push(span);
         // TODO(opt): peep-opt
     }
@@ -888,8 +884,8 @@ impl<'a> State<'a> {
         None
     }
 
-    fn emit(&mut self, inst: Insn, span: Span) {
-        f!(self).emit(inst, span)
+    fn emit(&mut self, insn: Insn, span: Span) {
+        f!(self).emit(insn, span)
     }
 
     /// Declare a function which has not yet been emitted
@@ -981,7 +977,7 @@ fn emit_func<'a>(
         f.ra.num,
         f.code.into_iter().collect(),
         f.literals.flat.into_iter().collect(),
-        crate::vm::dbg::FuncDebugInfo {
+        FuncDebugInfo {
             spans: f.dbg.spans.into_iter().collect(),
             locals: f.dbg.locals.into_iter().collect(),
         },
@@ -1554,7 +1550,7 @@ fn emit_if_cond_inner<'a>(
             let lhs = value_to_reg_reuse(m, lhs, dst)?;
             let rhs = value_to_reg(m, rhs)?;
 
-            let inst = match (*node.op(), negated) {
+            let insn = match (*node.op(), negated) {
                 (Op::Eq, false) | (Op::Ne, true) => asm::iseq(lhs, rhs),
                 (Op::Ne, false) | (Op::Eq, true) => asm::isne(lhs, rhs),
                 (Op::Gt, false) | (Op::Le, true) => asm::isgt(lhs, rhs),
@@ -1563,7 +1559,7 @@ fn emit_if_cond_inner<'a>(
                 (Op::Le, false) | (Op::Gt, true) => asm::isle(lhs, rhs),
                 _ => unreachable!(),
             };
-            m.emit(inst, span);
+            m.emit(insn, span);
 
             free_reg(m, rhs);
             if lhs != dst {
@@ -1595,7 +1591,7 @@ fn emit_if_cond_generic<'a>(
     let value = value_to_reg_reuse(m, value, dst)?;
 
     // values will be coerced to `bool` by `isfalse`/`istrue`.
-    let inst = if negated {
+    let insn = if negated {
         // we want to skip the `jmp` if the value is _falsey_.
         asm::isfalse(value)
     } else {
@@ -1603,7 +1599,7 @@ fn emit_if_cond_generic<'a>(
         asm::istrue(value)
     };
 
-    m.emit(inst, span);
+    m.emit(insn, span);
 
     // `jmp` is emitted by caller.
 
@@ -1674,11 +1670,11 @@ fn eval_expr_set_var<'a>(
 
     let value = eval_expr(m, set.value(), set.value_span())?;
     let value = value_to_operand(m, value)?;
-    let inst = match value {
+    let insn = match value {
         Operand::Reg(rhs) => vv(dst, dst, rhs),
         Operand::Const(rhs) => vn(dst, dst, rhs),
     };
-    m.emit(inst, span);
+    m.emit(insn, span);
 
     free_operand(m, value);
 

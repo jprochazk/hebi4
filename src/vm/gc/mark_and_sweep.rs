@@ -1,12 +1,10 @@
 use super::*;
 
 // Stop-the-world, mark and sweep GC.
-pub(crate) fn collect(heap: &mut Heap, external_roots: &dyn ExternalRoots) {
-    heap.stats.collect();
-    unsafe {
-        mark(heap, external_roots);
-        sweep(heap);
-    }
+pub(crate) unsafe fn collect(heap: *mut Heap, external_roots: impl ExternalRoots) {
+    (*heap).stats.collect();
+    mark(heap, external_roots);
+    sweep(heap);
 }
 
 // Mark:
@@ -18,14 +16,14 @@ pub(crate) fn collect(heap: &mut Heap, external_roots: &dyn ExternalRoots) {
 //
 // Note that we do not actually use a worklist.
 // Instead, we use depth-first recursive traversal.
-unsafe fn mark(heap: &mut Heap, external_roots: &dyn ExternalRoots) {
+unsafe fn mark(heap: *mut Heap, external_roots: impl ExternalRoots) {
     let tracer = Tracer {
         _marker: PhantomData,
     };
 
     external_roots.trace(&tracer);
 
-    RootList::iter(heap.roots(), |root| {
+    RootList::iter((*heap).roots(), |root| {
         let ptr = (*root).ptr;
         if ptr.is_marked() {
             return;
@@ -33,7 +31,7 @@ unsafe fn mark(heap: &mut Heap, external_roots: &dyn ExternalRoots) {
         ptr.set_mark(true);
 
         unsafe {
-            (ptr.vt().trace)(ptr.get_raw(), &tracer);
+            (ptr.vt().trace)(ptr.into_raw(), &tracer);
         }
     });
 }
@@ -48,49 +46,49 @@ unsafe fn mark(heap: &mut Heap, external_roots: &dyn ExternalRoots) {
 //
 // - Store the last marked object `M`.
 // - Whenever an object is freed `F`, update the header of `M` to point to `F.next`
-unsafe fn sweep(heap: &mut Heap) {
-    let mut iter = heap.head.get();
-    let mut last_marked: Option<*mut GcHeader> = None;
+unsafe fn sweep(heap: *mut Heap) {
+    let mut iter = (*heap).head.get();
+    let mut last_marked: Option<NonNull<GcHeader>> = None;
     let mut freed_bytes = 0usize;
 
-    while !iter.is_null() {
-        let (next, vt, marked) = (*iter).into_parts();
+    while let Some(object) = iter {
+        let (next, vt, marked) = (*object.as_ptr()).into_parts();
 
         if marked {
             // unmark
-            GcHeader::set_mark(iter, false);
-            last_marked = Some(iter);
+            GcHeader::set_mark(object, false);
+            last_marked = Some(object);
         } else {
             // unlink
             match last_marked {
                 Some(prev_live) => GcHeader::set_next(prev_live, next),
-                None => heap.head.set(next),
+                None => (*heap).head.set(next),
             }
 
             unsafe {
-                freed_bytes += (vt.free)(iter.cast::<()>());
+                freed_bytes += (vt.free)(object.as_ptr().cast::<()>());
             }
         }
 
         iter = next;
     }
 
-    heap.stats.free(freed_bytes);
+    (*heap).stats.free(freed_bytes);
 }
 
-pub(crate) unsafe fn free_all(heap: &mut Heap) {
-    let mut iter = heap.head.get();
+pub(crate) unsafe fn free_all(heap: *mut Heap) {
+    let mut iter = (*heap).head.get();
     let mut freed_bytes = 0usize;
 
-    while !iter.is_null() {
-        let (next, vt, marked) = (*iter).into_parts();
+    while let Some(object) = iter {
+        let (next, vt, marked) = (*object.as_ptr()).into_parts();
 
         unsafe {
-            freed_bytes += (vt.free)(iter.cast::<()>());
+            freed_bytes += (vt.free)(object.as_ptr().cast::<()>());
         }
 
         iter = next;
     }
 
-    heap.stats.free(freed_bytes);
+    (*heap).stats.free(freed_bytes);
 }

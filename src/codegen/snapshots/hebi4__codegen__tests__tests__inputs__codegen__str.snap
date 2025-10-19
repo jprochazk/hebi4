@@ -7,5 +7,5 @@ OK
   params 0
   stack 1
   .code
-  0  lstr r0, l0   ; l0="test"
+  0  lstr r0, "test"
   1  ret

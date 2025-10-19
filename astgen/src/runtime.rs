@@ -79,9 +79,9 @@ impl TryFrom<Packed> for Expr {
 mod private {
     pub trait Sealed {}
 }
-use private::Sealed;
-
 use std::marker::PhantomData;
+
+use private::Sealed;
 
 #[allow(non_camel_case_types)]
 #[derive(Clone, Copy, Hash)]

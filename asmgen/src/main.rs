@@ -743,14 +743,14 @@ fn emit_instruction_asm(o: &mut String, is: &Instructions) {
                 .collect::<Vec<_>>();
             if args.len() != mode.len() {
                 for _ in args.len()..mode.len() {
-                    args.push("Default::default()".to_owned());
+                    args.push("0".to_owned());
                 }
             }
             let args = args.join(",");
 
 
             format!(
-                "#[doc = {docs:?}] pub fn {name}({params}) -> Insn {{ op_{mode}(Opcode::{ty_name}, {args}) }}"
+                "#[doc = {docs:?}] pub const fn {name}({params}) -> Insn {{ op_{mode}(Opcode::{ty_name}, {args}) }}"
             )
         })
         .join('\n');
@@ -778,7 +778,8 @@ fn emit_jump_table(o: &mut String, is: &Instructions) {
             #[inline]
             pub fn as_ptr(&self) -> Jt {{
                 let ptr = &raw const self.{first_instruction};
-                Jt(ptr.cast())
+                let ptr = unsafe {{ NonNull::new_unchecked(ptr.cast_mut()) }};
+                Jt(ptr)
             }}
         }}
 
