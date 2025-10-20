@@ -150,6 +150,9 @@ A few things bother me about the above layout:
 - For a `Binary` expression, we need to store two "pointers" of some kind to the two sub-nodes.
 - If we want to reduce the size of `Expr`, we must wrap every large node in `Box`.
 
+This gets _much_ worse if we need a dynamic number of sub-nodes. Each `Vec` adds 24 bytes to a
+syntax node! Then account for optional nodes, and storing spans.
+
 Surely we can do better than that. We can take advantage of the fact that our syntax tree nodes
 have two distinct "shapes":
 
@@ -171,9 +174,8 @@ two in three different ways:
 For now, we'll only support `u32` indices to nodes, and `u24` lengths. To know what kind of node we have,
 we'll still need a tag. There aren't many kinds of nodes, so a `u8` tag will be enough.
 
-Under this rule set, almost all the structural information is _implicit_, and still have plenty of flexibility
-to store any kind of syntax node, not just those with a fixed number of sub-nodes. As a result, each syntax node
-is packed into just 64 bits.
+Under this rule set, almost all the structural information is _implicit_, and we still have plenty of flexibility
+to store any kind of syntax node, not just those with a fixed number of sub-nodes, all in just 64 bits.
 
 A compiler needs more than just structural information. To store additional data, we'll use secondary storage,
 and store indices in the packed nodes.
@@ -205,6 +207,10 @@ union Repr {
 }
 ```
 
+To represent an optional node, we can use an empty `None` node, and treat anything
+other than `None` as `Some`. This means that `Option<Expr>` in our representation can still be stored
+in just 8 bytes.
+
 Okay, now that we have our layout, what is the total memory footprint for `1 + (1 * 2)`?
 
 ```rust
@@ -219,17 +225,20 @@ Okay, now that we have our layout, what is the total memory footprint for `1 + (
 // 5*8 = 40 bytes
 ```
 
-Wow! That made a _huge_ difference. The memory footprint of this "super-flat" AST is:
-- 35% of a tree of pointers AST (112 bytes -> 40 bytes)
-- 38% of a flat AST (104 bytes -> 40 bytes)
+That made a _huge_ difference. The memory footprint of this "super-flat" AST is less than 40% of a flat AST.
+
+This has a compounding effect. It gets even better on more complex ASTs, and larger syntax trees.
 
 And that's not all of it. We've cut our memory usage in half, but we've also completely removed
 all boxing, so the entire AST is in one contiguous buffer. This buffer can double its size every
 time it needs to grow, reducing the number of allocations done during parsing to nearly zero
 comparsed to a tree of pointers.
 
-Finally, this kind of AST is _great_ for memory locality. Every node is in the same array, and
-all related nodes are very close together, due to them being contiguous!
+Finally, this kind of AST is _great_ for memory locality:
+- Each node fits exactly within a 64-bit register
+- Accessing different parts of it involves just a few bit shifts
+- We can store 8 nodes in a single _cache line_!
+- Every node is in the same array, and all related nodes are co-located in memory.
 
 One major downside is that using this kind of AST introduces a _lot_ of complexity.
 
@@ -237,3 +246,7 @@ In Hebi, I've resorted to generating all the code required to construct and trav
 For the few nodes I have, it's generating nearly 3000 lines of code, which is a _massive_ increase
 over the simple "tree of pointers" AST.
 
+## Conclusion
+
+I do not think I invented this. I just haven't been able to find any information about similar approaches
+elsewhere. 
