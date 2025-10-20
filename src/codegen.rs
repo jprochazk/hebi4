@@ -121,9 +121,6 @@ use crate::{
     vm::{Control, VmState, value::ValueRaw},
 };
 
-// TODO: does assignment to parameters break things?
-// it shouldn't, but better check just in case.
-
 // TODO: basic optimizations (configurable)
 // - peephole
 // - jump chaining

@@ -68,6 +68,22 @@ Function calls are a bit special. We don't want the VM to have to copy arguments
 instead, the arguments should already be in the right place at the time of the call. To do this,
 the code generator allocates contiguous registers for the return slot and call arguments.
 
+The "holy grail" is that something like:
+
+```js
+var table = {}
+var value = 100
+table["constant_key"] = value
+```
+
+produces the following bytecode:
+
+```sh
+ltable r1, 0      # empty table into `r1`
+lint r2, 100      # store `100` into `r2`
+skeyc r1, l0, r2  # store `r2` in `r1` at key `l0`
+```
+
 ### Dead code elimination
 
 NOTE: This is not implemented yet.
@@ -83,7 +99,8 @@ traverse the AST as usual.
 ## Errors
 
 Currently, the entire compilation pipeline exits immediately upon encountering the first error.
-Errors may be rendered into an error message:
+
+Errors store a message and a span. Given the source code, they can be rendered into some nice output:
 
 ```text,ignore
 invalid number of arguments, expected 3 but got 1
@@ -91,3 +108,4 @@ invalid number of arguments, expected 3 but got 1
    |   ^^^
 ```
 
+Spans are carried from the lexer all the way to the VM.

@@ -1,0 +1,8 @@
+fn f(v) do
+  v = 1
+  v
+end
+
+var v = 0
+v = f(v)
+v
