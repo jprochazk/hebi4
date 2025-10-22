@@ -1009,6 +1009,33 @@ impl<'a, T: Trace> GcRoot<'a, T> {
     pub fn as_any(self) -> GcAnyRoot<'a> {
         GcAnyRoot(unsafe { core::mem::transmute(self) })
     }
+
+    /// Root a different pointer in this `GcRoot`.
+    ///
+    /// This function only accepts pointers to objects of the same type.
+    ///
+    /// ```rust
+    /// # use hebi4::{gc::Heap, value::{string}};
+    /// # let heap = unsafe { &mut Heap::__testing() };
+    /// string!(in heap; a = "foo");
+    /// string!(in heap; mut b = "bar");
+    ///
+    /// # assert_eq!(b.as_ref(heap).to_string(), "bar");
+    /// b.update(heap, &a);
+    /// # assert_eq!(b.as_ref(heap).to_string(), "foo");
+    /// ```
+    #[inline]
+    pub fn update(&mut self, heap: &mut Heap, ptr: impl Rooted<T>) {
+        unsafe { self.update_raw(ptr.as_ptr()) }
+    }
+
+    /// Root a different pointer in this `GcRoot`.
+    ///
+    /// The given `ptr` must still be live.
+    #[inline]
+    pub unsafe fn update_raw(&mut self, ptr: GcPtr<T>) {
+        self.place.as_mut().get_unchecked_mut().ptr = ptr;
+    }
 }
 
 impl<'a, T: Sized + 'static> GcRoot<'a, T> {
@@ -1020,19 +1047,23 @@ impl<'a, T: Sized + 'static> GcRoot<'a, T> {
 
     /// Root a different pointer in this `GcRoot`.
     ///
-    /// The given `ptr` can be anything which is rooted, even transitively.
+    /// This function accepts any object type
     ///
+    /// The given `ptr` can be anything which is rooted, even transitively.
     /// For example, a [`GcRef`] is a valid argument to this function:
     ///
     /// ```rust
     /// # use hebi4::{gc::Heap, value::{list, string}};
     /// # let heap = unsafe { &mut Heap::__testing() };
-    /// string!(in heap; a = "test");
-    /// list!(in heap; b = 0);
-    /// let b = b.set(a.as_ref(heap));
+    /// list!(in heap; a = 0);
+    /// string!(in heap; b = "foo");
+    ///
+    /// # assert_eq!(b.as_ref(heap).to_string(), "foo");
+    /// let b = b.set(heap, &a);
+    /// # assert_eq!(b.as_ref(heap).len(), 0);
     /// ```
     #[inline]
-    pub fn set<U: Trace>(self, ptr: impl Rooted<U>) -> GcRoot<'a, U> {
+    pub fn set<U: Trace>(self, heap: &mut Heap, ptr: impl Rooted<U>) -> GcRoot<'a, U> {
         // SAFETY: `ptr` is rooted, and it will still be rooted in `self`
         unsafe { self.set_raw(ptr.as_ptr()) }
     }
@@ -1522,24 +1553,15 @@ pub trait Rooted<T>: private::Sealed {
     fn as_ptr(&self) -> GcPtr<T>;
 }
 
-impl<T: Trace> private::Sealed for GcRef<'_, T> {}
-impl<T: Trace> Rooted<T> for GcRef<'_, T> {
-    #[inline]
-    fn as_ptr(&self) -> GcPtr<T> {
-        GcRef::as_ptr(self)
-    }
-}
-
-impl<T: Trace> private::Sealed for GcRefMut<'_, T> {}
-impl<T: Trace> Rooted<T> for GcRefMut<'_, T> {
-    #[inline]
-    fn as_ptr(&self) -> GcPtr<T> {
-        GcRefMut::as_ptr(self)
-    }
-}
-
 impl<T: Trace> private::Sealed for GcRoot<'_, T> {}
 impl<T: Trace> Rooted<T> for GcRoot<'_, T> {
+    fn as_ptr(&self) -> GcPtr<T> {
+        GcRoot::as_ptr(self)
+    }
+}
+
+impl<T: Trace> private::Sealed for &GcRoot<'_, T> {}
+impl<T: Trace> Rooted<T> for &GcRoot<'_, T> {
     fn as_ptr(&self) -> GcPtr<T> {
         GcRoot::as_ptr(self)
     }
