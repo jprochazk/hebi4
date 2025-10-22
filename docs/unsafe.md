@@ -67,7 +67,7 @@ have `Drop` impls. _Especially_ not `drop`s which contain branches! A dynamicall
 an `Rc` in one of its variants must first type-check before it can decrement the reference count.
 
 This naturally excludes not only `std::rc::Rc`, but also:
-- the [`gc`](https://docs.rs/gc/latest/gc/) crate, where `Gc` pointers track the number of roots,
+- the [`gc`](https://docs.rs/gc/latest/gc/) crate, where `GcPtr` pointers track the number of roots,
   similar to a reference count.
 - the [`bacon_rajan_cc`](https://docs.rs/bacon_rajan_cc/latest/bacon_rajan_cc/) crate
 
@@ -104,7 +104,7 @@ required may be:
     and casting the type.
 - Adding a way to safely and atomically initialize an entire object in the presence of allocations, which may trigger a collection.
   - An API similar to Rust for Linux Kernel's [`pin_init`](https://docs.rs/pin-init/latest/pin_init/) may be necessary here.
-- Extending the `Ref` and `RefMut` types to userland, somehow.
+- Extending the `GcRef` and `GcRefMut` types to userland, somehow.
   - This may require the nightly `arbitrary_self_types` feature.
 
 The GC API outlined below supports precise, incremental, and generational garbage collection.
@@ -112,10 +112,10 @@ Currently, it is only precise, and stop-the-world.
 
 Before being accessed, objects must be allocated in a `Heap`, and then _rooted_ on the stack. `StackRoot`s are linked into a
 per-heap stack-allocated list. They are constructed in a macro which doesn't leak the root's identifier.
-The stack root is then wrapped in a `Root`, which holds a pinned mutable reference to the `StackRoot`. As a result,
+The stack root is then wrapped in a `GcRoot`, which holds a pinned mutable reference to the `StackRoot`. As a result,
 stack roots are pinned to the stack and cannot be moved or referred to directly.
 
-A `Root` allows for safe access to the underlying object. It serves as proof that the object is rooted and is guaranteed to
+A `GcRoot` allows for safe access to the underlying object. It serves as proof that the object is rooted and is guaranteed to
 survive the next collection cycle, which makes it safe to dereference. To actually access the object, one of two methods must be called:
 
 - `as_ref`, which requires a `&Heap` reference
@@ -124,8 +124,8 @@ survive the next collection cycle, which makes it safe to dereference. To actual
 This is where the "gatekeeper" `Heap` comes in. It acts as a kind of token, of which there is only a single one active
 at a time in any given program. This token is passed around by reference, and must be used in order to _dereference_ roots.
 
-- If you have a shared reference to the heap, you can dereference as many `Root`s as you want to obtain shared access to them.
-- If you have a _unique_ reference to the heap, you can dereference exactly one `Root` to obtain a unique mutable reference to it.
+- If you have a shared reference to the heap, you can dereference as many `GcRoot`s as you want to obtain shared access to them.
+- If you have a _unique_ reference to the heap, you can dereference exactly one `GcRoot` to obtain a unique mutable reference to it.
 
 Additionally, to trigger a collection, you need a `&mut Heap`. This means collections may not happen while Rust `&T` or `&mut T` are
 held on the stack - they must not exist across a call to `collect`, and the borrow checker enforces this for us.
@@ -134,18 +134,18 @@ The consequence is that Rust's guarantees for shared xor mutable access are neve
 which means we don't need any kind of interior mutability scheme! But we may only have one mutable reference at a time.
 That's actually a problem, which we have a workaround for:
 
-- `as_ref` returns `Ref<'heap, T>` instead of `&'heap T`
-- `as_mut` returns `RefMut<'heap, T>` instead of `&'heap mut T`
+- `as_ref` returns `GcRef<'heap, T>` instead of `&'heap T`
+- `as_mut` returns `GcRefMut<'heap, T>` instead of `&'heap mut T`
 
-There is no other way to construct a `Ref` or `RefMut`. This guarantees that if you have a `Ref` or a `RefMut`, then the underlying
+There is no other way to construct a `GcRef` or `GcRefMut`. This guarantees that if you have a `GcRef` or a `GcRefMut`, then the underlying
 object is rooted. Any value stored in a rooted object becomes _transitively_ rooted, because it's reachabable through its rooted parent.
 
-Methods which read the object are implemented on `Ref<'heap, T>`, and methods which mutate it are implemented on `RefMut<'heap, T>`.
-We can do this because `Ref`, `RefMut`, and all the object types are declared within the same crate, so we aren't stopped by orphan rules.
+Methods which read the object are implemented on `GcRef<'heap, T>`, and methods which mutate it are implemented on `GcRefMut<'heap, T>`.
+We can do this because `GcRef`, `GcRefMut`, and all the object types are declared within the same crate, so we aren't stopped by orphan rules.
 This is one place where the GC not being generic is important.
 
-And finally: Mutating methods which accept an object and store it within the receiver always accept `Root`s instead of `Ref`s.
-Internally, they may unwrap the `Root` and store the raw `Gc<T>`. This is always safe, because the container is guaranteed to be rooted.
+And finally: Mutating methods which accept an object and store it within the receiver always accept `GcRoot`s instead of `GcRef`s.
+Internally, they may unwrap the `GcRoot` and store the raw `GcPtr<T>`. This is always safe, because the container is guaranteed to be rooted.
 
 That's it! The resulting GC and object API is actually pretty nice, and it is _fully_ safe to use. Compiler-enforced safety is vital here.
 Not only because GC bugs can be some of the worst heisenbugs in existence, and I wouldn't wish them upon anybody, but also because

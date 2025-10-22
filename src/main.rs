@@ -39,7 +39,7 @@ fn eval_string(code: &str) {
     hebi4::Hebi::new().with(|mut vm| {
         let loaded_module = vm.load(&module);
         let result = match vm.run(&loaded_module) {
-            Ok(v) => vm.fmt(v).to_string(),
+            Ok(v) => format!("{:?}", unsafe { v.as_ref() }),
             Err(err) => err.render(&code).to_string(),
         };
         println!("{result}");

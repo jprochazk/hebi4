@@ -1,22 +1,30 @@
 #[macro_use]
 mod macros;
 
-use crate::vm::gc::Gc;
+pub use macros::{list, string, table};
 
-// TODO: string allocation strategy
-//
-// Pass a handle to the GC into the compiler, so it can intern GC'd strings.
-// That _does_ mean you can't arbitrary move the module around, across threads,
-// etc., and to move it as such you'd have to serialize it first.
-//
-// Alternatively, canonicalize at "module load" time, as in have a separate
-// step where the module is given to a VM instance, which then moves interned
-// strings onto the GC heap, resulting in a "loaded" or "runtime" module.
-// That's then what's actually passed around in all the places.
-// Note that functions have back-pointers to their modules, which complicates
-// things.
-//
-// Tradeoffs...
+use crate::gc::{GcAnyPtr, GcPtr, Trace};
+
+// TODO: string interning
+
+// TODO: carry object type tag directly in value's discriminant.
+// This can be done via pointer tagging, there are enough bits
+// to tag `Nil`, `Bool`, `Int`, `Float`.
+
+// TODO: impl `Display` for value refs
+//       -> each type can customize its own `display`
+//       -> for userdata, we just print the type name
+
+// TODO: value marshalling
+//       -> to support user data, needs GcRef<T>.
+
+// pub trait FromValueRaw: Sized {
+//     fn from_value(value: ValueRaw) -> Option<Self>;
+// }
+
+// pub trait IntoValueRaw {
+//     fn into_value(self, heap: &Heap) -> ValueRaw;
+// }
 
 #[derive(Default, Clone, Copy)]
 #[repr(C, u64)]
@@ -26,11 +34,7 @@ pub enum ValueRaw {
     Bool(bool) = 1,
     Int(i64) = 2,
     Float(f64) = 3,
-
-    String(Gc<string::String>),
-    List(Gc<list::List>),
-    Table(Gc<table::Table>),
-    UserData(Gc<userdata::UserData>),
+    Object(GcAnyPtr),
 }
 
 impl ValueRaw {
@@ -42,30 +46,38 @@ impl ValueRaw {
     /// - `float` is false if `== 0.0`
     /// - objects are always `true`
     #[inline]
-    pub(crate) fn coerce_bool(self) -> bool {
+    pub fn coerce_bool(self) -> bool {
         match self {
             ValueRaw::Nil => false,
             ValueRaw::Bool(v) => v,
             ValueRaw::Int(v) => v != 0,
             ValueRaw::Float(v) => v != 0.0,
-            ValueRaw::String(gc) => true,
-            ValueRaw::List(gc) => true,
-            ValueRaw::Table(gc) => true,
-            ValueRaw::UserData(gc) => true,
+            ValueRaw::Object(gc) => true,
         }
     }
 
+    /// ## Safety
+    ///
+    /// - If `self` is an `Object`, the object must be live.
     #[inline]
-    pub(crate) fn type_name(self) -> &'static str {
+    pub unsafe fn type_name(self) -> &'static str {
         match self {
             ValueRaw::Nil => "nil",
             ValueRaw::Bool(_) => "bool",
             ValueRaw::Int(_) => "int",
             ValueRaw::Float(_) => "float",
-            ValueRaw::String(gc) => "str",
-            ValueRaw::List(gc) => "list",
-            ValueRaw::Table(gc) => "table",
-            ValueRaw::UserData(gc) => "udata",
+            ValueRaw::Object(gc) => gc.type_name(),
+        }
+    }
+
+    /// ## Safety
+    ///
+    /// - If `self` is an `Object`, the object must be live.
+    #[inline]
+    pub unsafe fn into_object<T: Trace>(self) -> Option<GcPtr<T>> {
+        match self {
+            ValueRaw::Object(gc) => gc.cast(),
+            _ => None,
         }
     }
 }
@@ -79,7 +91,6 @@ pub mod table;
 pub mod userdata;
 
 pub(crate) use self::string::StringHasher;
-
 #[allow(unused_imports)] // re-exports
 pub use self::{
     closure::Closure,
@@ -93,115 +104,12 @@ pub use self::{
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::vm::gc::{Heap, ValueRef, ValueRoot};
-
-    #[test]
-    fn list() {
-        let heap = &mut Heap::new();
-
-        {
-            list!(in heap; list = 128);
-
-            list.as_mut(heap).push(ValueRoot::Int(10));
-
-            // `list` is safe from collection
-            assert_eq!(heap.stats().bytes(), core::mem::size_of::<List>());
-            heap.collect();
-            assert_eq!(heap.stats().bytes(), core::mem::size_of::<List>());
-
-            {
-                let list = list.as_ref(heap);
-                assert_eq!(list.len(), 1);
-                assert_eq!(list.capacity(), 128);
-                assert!(matches!(list.get(0), Some(ValueRef::Int(10))));
-            }
-        }
-
-        // `list` will be deallocated
-        heap.collect();
-        assert_eq!(heap.stats().bytes(), 0);
-        assert_eq!(heap.stats().collections(), 2);
-    }
-
-    #[test]
-    fn table() {
-        let heap = &mut Heap::new();
-
-        {
-            table!(in heap; table = 128);
-
-            string!(in heap; string_a = "a");
-            table.as_mut(heap).insert(&string_a, ValueRoot::Int(10));
-
-            // `table` is safe from collection
-            assert_eq!(
-                heap.stats().bytes(),
-                core::mem::size_of::<Table>() + core::mem::size_of::<String>()
-            );
-            heap.collect();
-            assert_eq!(
-                heap.stats().bytes(),
-                core::mem::size_of::<Table>() + core::mem::size_of::<String>()
-            );
-
-            {
-                let table = table.as_ref(heap);
-                assert_eq!(table.len(), 1);
-                assert_eq!(table.capacity(), 128);
-
-                assert!(matches!(table.get("a"), Some(ValueRef::Int(10))));
-
-                assert!(matches!(
-                    table.get(string_a.as_ref(heap)),
-                    Some(ValueRef::Int(10))
-                ));
-            }
-
-            // insert another entry
-            string!(in heap; string_b = "b");
-            table.as_mut(heap).insert(&string_b, ValueRoot::Int(20));
-
-            // `table` is safe from collection
-            assert_eq!(
-                heap.stats().bytes(),
-                core::mem::size_of::<Table>() + (core::mem::size_of::<String>() * 2)
-            );
-            heap.collect();
-            assert_eq!(
-                heap.stats().bytes(),
-                core::mem::size_of::<Table>() + (core::mem::size_of::<String>() * 2)
-            );
-
-            {
-                let table = table.as_ref(heap);
-                assert_eq!(table.len(), 2);
-                assert_eq!(table.capacity(), 128);
-
-                assert!(matches!(table.get("a"), Some(ValueRef::Int(10))));
-                assert!(matches!(table.get("b"), Some(ValueRef::Int(20))));
-
-                assert!(matches!(
-                    table.get(string_a.as_ref(heap)),
-                    Some(ValueRef::Int(10))
-                ));
-                assert!(matches!(
-                    table.get(string_b.as_ref(heap)),
-                    Some(ValueRef::Int(20))
-                ));
-            }
-        }
-
-        // `table` and `string` will be deallocated
-        heap.collect();
-        assert_eq!(heap.stats().bytes(), 0);
-        assert_eq!(heap.stats().collections(), 3);
-    }
+    use crate::vm::gc::Heap;
 
     #[test]
     fn heap_collect_on_drop() {
         // `heap` frees all managed objects on drop
         let heap = &mut Heap::new();
-        list!(in heap; v = 0);
+        crate::value::list!(in heap; v = 0);
     }
 }

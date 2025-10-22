@@ -2,30 +2,30 @@ use std::sync::Arc;
 
 use super::String;
 use crate::{
-    ValueRaw,
     codegen::opcodes::Insn,
     module::FuncDebugInfo,
+    value::ValueRaw,
     vm::{
-        gc::{Gc, Ref, RefMut, Trace},
+        gc::{GcPtr, GcRef, GcRefMut, Trace},
         value::ModuleProto,
     },
 };
 
 #[repr(align(16))]
 pub struct FunctionProto {
-    pub(crate) name: Gc<String>,
+    pub(crate) name: GcPtr<String>,
     pub(crate) nparams: u8,
     pub(crate) nstack: u8,
     pub(crate) code: Box<[Insn]>,
     pub(crate) literals: Box<[ValueRaw]>,
-    pub(crate) module: Gc<ModuleProto>,
+    pub(crate) module: GcPtr<ModuleProto>,
     pub(crate) dbg: Option<Arc<FuncDebugInfo>>,
 }
 
-impl<'a> Ref<'a, FunctionProto> {
+impl<'a> GcRef<'a, FunctionProto> {
     #[inline]
-    pub fn name(&self) -> Ref<'a, String> {
-        Ref::map(self, |this| &this.name)
+    pub fn name(&self) -> GcRef<'a, String> {
+        GcRef::map(self, |this| &this.name)
     }
 
     #[inline]
@@ -49,8 +49,8 @@ impl<'a> Ref<'a, FunctionProto> {
     }
 
     #[inline]
-    pub(crate) fn module(&self) -> Ref<'a, ModuleProto> {
-        Ref::map(self, |this| &this.module)
+    pub(crate) fn module(&self) -> GcRef<'a, ModuleProto> {
+        GcRef::map(self, |this| &this.module)
     }
 
     #[inline]
@@ -62,7 +62,7 @@ impl<'a> Ref<'a, FunctionProto> {
     }
 }
 
-impl<'a> RefMut<'a, FunctionProto> {
+impl<'a> GcRefMut<'a, FunctionProto> {
     #[inline]
     pub(crate) fn code_mut(&mut self) -> &mut [Insn] {
         &mut self.code[..]
@@ -79,5 +79,19 @@ unsafe impl Trace for FunctionProto {
         }
         // almost certainly this has already been visited, but just in case:
         tracer.visit(self.module);
+    }
+}
+
+impl std::fmt::Debug for GcRef<'_, FunctionProto> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // SAFETY: interior pointers are transitively rooted
+        f.debug_struct("FunctionProto")
+            .field("name", &self.name())
+            .field("nparams", &self.nparams)
+            .field("nstack", &self.nstack)
+            .field("code", &self.code.len())
+            .field("literals", &self.literals.len())
+            .field("module", &self.module().name())
+            .finish()
     }
 }

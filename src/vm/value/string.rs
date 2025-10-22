@@ -1,6 +1,6 @@
 use rustc_hash::FxBuildHasher;
 
-use crate::vm::gc::{Gc, Heap, Ref, Trace, Tracer};
+use crate::vm::gc::{GcPtr, GcRef, Heap, Trace, Tracer};
 
 // TODO: intern all strings?
 #[repr(align(16))]
@@ -11,7 +11,7 @@ pub struct String {
 
 impl String {
     #[inline(never)]
-    pub(crate) fn alloc(heap: &Heap, s: &str) -> Gc<Self> {
+    pub(crate) fn alloc(heap: &Heap, s: &str) -> GcPtr<Self> {
         heap.alloc_no_gc(|ptr| unsafe {
             (*ptr).write(Self {
                 hash: heap.string_hasher().hash_str(s),
@@ -26,7 +26,7 @@ impl String {
     }
 }
 
-impl Ref<'_, String> {
+impl GcRef<'_, String> {
     #[inline]
     pub fn as_str(&self) -> &str {
         self.inner.as_str()
@@ -42,13 +42,13 @@ unsafe impl Trace for String {
     }
 }
 
-impl std::fmt::Display for Ref<'_, String> {
+impl std::fmt::Display for GcRef<'_, String> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         std::fmt::Display::fmt(self.as_str(), f)
     }
 }
 
-impl std::fmt::Debug for Ref<'_, String> {
+impl std::fmt::Debug for GcRef<'_, String> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         std::fmt::Debug::fmt(self.as_str(), f)
     }

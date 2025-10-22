@@ -31,7 +31,7 @@ mod vm;
 mod disasm;
 
 pub use module::Module;
-pub use vm::{Hebi, value::ValueRaw};
+pub use vm::{Hebi, gc, value};
 
 pub fn parse(code: &str) -> Result<ast::Ast> {
     let tokens = token::tokenize(code);

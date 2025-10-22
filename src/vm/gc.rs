@@ -1,78 +1,4 @@
 //! Garbage collector
-//!
-//! # Explicit goals
-//! - Fully safe API
-//! - Reasonably efficient
-//! - Easy to use
-//!
-//! # Non-goals
-//! - General-purpose API
-//! - Extensible
-//! - Fully safe implementation
-//!
-//! # GC rooting api:
-//! - `Root<'a, T>` => rooted on the stack
-//! - `Persistent<T>` => rooted via a special list
-//!   - `Rc<T>`, but GC-managed.
-//! - `Handle<'a, T>`, `HandleMut<'a, T>` => rooted _somehow_
-//!   - Both `Root<'a, T>` and `Persistent<'a, T>` yield handles,
-//!     given a shared/exclusive reference to the heap.
-//!   - Allows for write barriers to exist, opening up incremental collection
-//!     at some point in the future.
-//!     - Ideally the write barriers would already exist and be called,
-//!       even if they are no-ops, just to prove that it can work.
-//! - `Gc<T>` => internal "raw pointer" type, not exposed in any way,
-//!   unsafe to use.
-//!   - e.g. `Value` stores this, builtin arrays hold a list of them, etc.
-//!   - requires unsafe `Trace` impl to be correct when stored
-//!   - can be dereferenced using unsafe code, or through "handle projection" (?)
-//!
-//! # GC algorithm:
-//! - precise, stop-the-world
-//! - FUTURE: want incremental, so rooting API must support
-//!   write barriers.
-//!
-//! Tracing begins from roots:
-//! - VM state (stack, globals?, modules?, closures?)
-//! - Stack roots
-//! - Persistent handles
-//!
-//! # Allocator:
-//! - Each on-heap object is a separate `Box::new`.
-//! - FUTURE: allocate in per-type free list arenas,
-//!           with inline bitmap for metadata (e.g. color bits)
-//!           instead of storing per-object in header.
-//!
-//! # Type hierarchy:
-//! - Primitives
-//!   - nil, bool, i64, f64
-//!   - Stored on stack, no GC involvement
-//!   - Does not need heap for access
-//! - Built in objects
-//!   - String, List, Table, Closure
-//!   - Stored on heap, GC header type tag supports a subset of these directly
-//!     - Tracing these is cheap, only a `match obj.tag` + static dispatch
-//! - UserData
-//!   - Rust `struct`, wrapped in GC-managed allocation
-//!   - May expose getters, setters, methods (?)
-//!   - These cannot be traced, meaning no `Trace` derive
-//!     - Would require `unsafe Trace` to be exposed, don't want that,
-//!       even via derive.
-//!     - Every type under the sun would have to implement `Trace`, extremely
-//!       annoying due to orphan rule.
-//!   - Instead, users must store `Persistent` handles if they want to store
-//!     objects in their own structs.
-//!     - These are considered roots, so are traced without the user's
-//!       involvement.
-//!     - Big downside is that RC is slow, and these handles aren't super cheap.
-//!     - Storing `Vec<Persistent<T>>` is probably worst case, user should store
-//!       `Persistent<List>` instead, and eat the dynamic dispatch cost.
-//!   - Uses `Drop` for "finalization"
-//!     - Because dereferencing handles requires heap access, users cannot
-//!       dereference them in `drop` impls, so `Drop` types are safe to
-//!       wrap in `UserData`
-//!   - Carve out separate sweep paths for user data which does not need `drop`
-//!
 
 // TODO: root projection
 // TODO: re-rooting
@@ -92,13 +18,17 @@ use super::value::{StringHasher, ValueRaw};
 
 // # Heap
 
+// TODO: require `HeapGuard` instead of `Heap`,
+// `HeapGuard` is acquired by `Heap::enter`, which guarantees
+// no two heaps exist on the same thread at the same time.
+
 #[repr(C)]
 pub struct Heap {
-    /// boxed because root lists must have stable addresses
+    /// Boxed, because root lists must have stable addresses
     roots: UnsafeCell<Box<RootList>>,
 
-    /// objects are linked into a global list of all
-    /// allocations, which is used during sweeping
+    /// Objects are linked into a global list of all allocations,
+    /// which is used to find dead object during the sweep phase.
     head: Cell<Option<NonNull<GcHeader>>>,
 
     stats: HeapStats,
@@ -110,6 +40,11 @@ pub struct Heap {
 }
 
 impl Heap {
+    #[doc(hidden)]
+    pub unsafe fn __testing() -> Self {
+        Self::new()
+    }
+
     #[inline]
     pub(crate) fn new() -> Self {
         Self {
@@ -127,11 +62,15 @@ impl Heap {
 
     // NOTE: `&self` because it does not trigger a collection,
     // so it does not need to invalidate any shared references.
+
+    /// Allocate an object on the heap.
+    ///
+    /// The object itself may be initialized in-place in the `init` callback.
     #[inline]
     pub(crate) fn alloc_no_gc<T: Trace + 'static>(
         &self,
         init: impl FnOnce(*mut MaybeUninit<T>),
-    ) -> Gc<T> {
+    ) -> GcPtr<T> {
         // We do manual piece-wise init, because allocation failure should _not_
         // cause the value to be dropped! Therefore it must be constructed _after_
         // we have a place to put it.
@@ -154,13 +93,16 @@ impl Heap {
         // CAST: `GcBox` is a `repr(C)` struct with `GcHeader` as its first field
         self.head.set(Some(ptr.cast::<GcHeader>()));
 
-        self.stats.alloc(core::mem::size_of::<T>());
+        self.stats.on_alloc(core::mem::size_of::<T>());
 
-        Gc { ptr }
+        GcPtr { ptr }
     }
 
+    /// Trigger a full collection.
+    ///
+    /// No external roots are traced.
     #[inline]
-    pub(crate) fn collect(&mut self) {
+    pub(crate) fn collect_no_external_roots(&mut self) {
         struct NoExternalRoots;
         impl ExternalRoots for NoExternalRoots {
             unsafe fn trace(&self, _: &Tracer) {}
@@ -169,6 +111,10 @@ impl Heap {
         unsafe { Self::collect_with_external_roots(self, NoExternalRoots) };
     }
 
+    /// Trigger a full collection.
+    ///
+    /// Together with the heap's own stack roots, the given `external_roots`
+    /// are also traced to find live objects.
     #[inline]
     pub(crate) unsafe fn collect_with_external_roots(
         this: *mut Heap,
@@ -177,6 +123,7 @@ impl Heap {
         mark_and_sweep::collect(this, external_roots);
     }
 
+    /// Get some statistics about the heap.
     #[inline]
     pub fn stats(&self) -> &HeapStats {
         &self.stats
@@ -194,7 +141,7 @@ impl Heap {
     #[cfg(debug_assertions)]
     #[doc(hidden)]
     #[inline]
-    pub fn id(&self) -> HeapId {
+    pub(crate) fn id(&self) -> HeapId {
         self.heap_id
     }
 
@@ -212,6 +159,7 @@ impl Drop for Heap {
     }
 }
 
+/// Statistics about [`Heap`] usage.
 #[derive(Default, Clone)]
 pub struct HeapStats {
     alloc_bytes: Cell<usize>,
@@ -219,32 +167,39 @@ pub struct HeapStats {
 }
 
 impl HeapStats {
-    /// Bytes directly held by managed pointers.
+    /// Bytes directly used by managed objects.
     ///
-    /// Does not count backing storage of lists, tables, etc.
+    /// Only counts the object wrappers themselves, not any allocations they may contain.
+    /// For example, for an object which contains a `Vec`, the data stored in the `Vec`
+    /// is _not_ counted, because the GC does not manage those.
     #[inline]
     pub fn bytes(&self) -> usize {
         self.alloc_bytes.get()
     }
 
-    /// How many times the GC ran
+    /// How many times the GC ran a collection cycle.
     #[inline]
     pub fn collections(&self) -> usize {
         self.collections.get()
     }
 
+    // Methods for updating heap stats:
+
+    /// Called when a collection occurs.
     #[inline]
-    fn collect(&self) {
+    fn on_collect(&self) {
         self.collections.update(|v| v + 1)
     }
 
+    /// Called when a managed object is allocated by the mutator.
     #[inline]
-    fn alloc(&self, bytes: usize) {
+    fn on_alloc(&self, bytes: usize) {
         self.alloc_bytes.update(|v| v + bytes)
     }
 
+    /// Called when a managed object is freed during a sweep.
     #[inline]
-    fn free(&self, bytes: usize) {
+    fn on_free(&self, bytes: usize) {
         self.alloc_bytes.update(|v| v - bytes)
     }
 }
@@ -254,7 +209,7 @@ mod mark_and_sweep;
 #[cfg(debug_assertions)]
 #[doc(hidden)]
 #[derive(Clone, Copy, PartialEq, Eq)]
-pub struct HeapId(usize);
+pub(crate) struct HeapId(usize);
 
 #[cfg(debug_assertions)]
 impl HeapId {
@@ -270,41 +225,58 @@ impl HeapId {
 
 // # Managed pointers
 
-#[repr(C)]
-pub struct Gc<T: Sized + 'static> {
+/// Pointer to a object in the garbage-collected heap.
+///
+/// No guarantees are made about the liveness of the inner `T`.
+///
+/// Can only be dereferenced using `unsafe` code:
+///
+/// - [`GcPtr::as_ref`]
+/// - [`GcPtr::as_mut`]
+/// - [`GcPtr::as_rust_ref_very_unsafe`]
+/// - [`GcPtr::as_rust_ref_mut_very_unsafe`]
+///
+/// To be able to use the above methods, the usual Rust aliasing rules
+/// must be upheld:
+///
+/// - When creating a shared reference, no unique reference may exist.
+/// - When creating a unique reference, no other references may exist.
+///
+/// A few of the raw pointer dereferencing guarantees are already upheld by `GcPtr`:
+///
+/// - This pointer is never null.
+/// - The `T` is always properly aligned.
+/// - `T` is "dereferenceable" in the sense that the memory range of
+///   `size_of::<T>` starting at this pointer contains a valid instance of `T`,
+///   and the instance is contained entirely within the original allocation.
+#[repr(transparent)]
+pub struct GcPtr<T: Sized + 'static> {
     ptr: NonNull<GcBox<T>>,
 }
 
-impl<T: Sized + 'static> Gc<T> {
+impl<T: Sized + 'static> GcPtr<T> {
     /// Wrap a previously managed pointer.
     ///
     /// ## Safety
     /// - The pointer must have been produced by `Gc::into_raw`.
     #[inline]
-    pub(crate) unsafe fn from_raw(ptr: *mut T) -> Gc<T> {
+    pub(crate) unsafe fn from_raw(ptr: *mut T) -> GcPtr<T> {
         let offset = core::mem::offset_of!(GcBox<T>, value);
-        // CAST: `GcBox` begins with
+        // CAST: `GcBox` is a `repr(C)` struct with `T` as its 2nd field
         let ptr = ptr.cast::<u8>().sub(offset).cast::<GcBox<T>>();
         let ptr = NonNull::new_unchecked(ptr);
 
-        Gc { ptr }
+        GcPtr { ptr }
     }
 
     #[inline]
-    pub(crate) unsafe fn into_raw(self) -> *mut T {
+    pub(crate) unsafe fn into_raw(self) -> NonNull<T> {
         let ptr = unsafe { &raw const (*self.ptr.as_ptr()).value };
-        UnsafeCell::raw_get(ptr)
+        NonNull::new_unchecked(UnsafeCell::raw_get(ptr))
     }
 
     #[inline]
-    fn cast<U: Sized + 'static>(self) -> Gc<U> {
-        Gc {
-            ptr: self.ptr.cast(),
-        }
-    }
-
-    #[inline]
-    unsafe fn vt(self) -> &'static GcVtable {
+    pub(crate) unsafe fn vt(self) -> &'static GcVtable {
         let header = &raw mut (*self.ptr.as_ptr()).header;
         let header = UnsafeCell::raw_get(header);
         header.read().vt()
@@ -326,7 +298,7 @@ impl<T: Sized + 'static> Gc<T> {
     }
 }
 
-impl<T: Trace + Sized + 'static> Gc<T> {
+impl<T: Trace> GcPtr<T> {
     /// Get a shared reference to the object.
     ///
     /// ## Safety
@@ -334,10 +306,10 @@ impl<T: Trace + Sized + 'static> Gc<T> {
     /// - For the resulting reference to be valid, the object must either be:
     ///   - Rooted
     ///   - Exist while the garbage collector is guaranteed not to run
-    /// - No `RefMut` must exist to the object
+    /// - No unique reference to the object may already exist
     #[inline]
-    pub(crate) unsafe fn as_ref<'a>(self) -> Ref<'a, T> {
-        unsafe { Ref::new_unchecked(self) }
+    pub unsafe fn as_ref<'a>(self) -> GcRef<'a, T> {
+        GcRef::new_unchecked(self)
     }
 
     /// Get an exclusive reference to the object.
@@ -347,31 +319,38 @@ impl<T: Trace + Sized + 'static> Gc<T> {
     /// - For the resulting reference to be valid, the object must either be:
     ///   - Rooted
     ///   - Exist while the garbage collector is guaranteed not to run
-    /// - The resulting reference must be _unique_ for the object
+    /// - No other reference to the object may already exist
     #[inline]
-    pub(crate) unsafe fn as_mut<'a>(self) -> RefMut<'a, T> {
-        unsafe { RefMut::new_unchecked(self) }
+    pub unsafe fn as_mut<'a>(self) -> GcRefMut<'a, T> {
+        GcRefMut::new_unchecked(self)
     }
 
     /// ## Safety
     /// - The object must be alive.
-    /// - No `&mut T` must exist to the object
+    /// - No unique reference to the object may already exist
     #[inline]
-    pub(crate) unsafe fn as_rust_ref_very_unsafe<'a>(self) -> &'a T {
+    pub unsafe fn as_rust_ref_very_unsafe<'a>(self) -> &'a T {
         &*UnsafeCell::raw_get(&raw mut (*self.ptr.as_ptr()).value)
     }
 
     /// ## Safety
     /// - The object must be alive.
-    /// - The resulting reference must be _unique_ for the object
+    /// - No other reference to the object may already exist
     #[inline]
-    pub(crate) unsafe fn as_rust_ref_mut_very_unsafe<'a>(self) -> &'a mut T {
+    pub unsafe fn as_rust_ref_mut_very_unsafe<'a>(self) -> &'a mut T {
         &mut *UnsafeCell::raw_get(&raw mut (*self.ptr.as_ptr()).value)
     }
 
     #[inline]
+    pub fn as_any(self) -> GcAnyPtr {
+        GcAnyPtr {
+            ptr: self.ptr.cast(),
+        }
+    }
+
+    #[inline]
     unsafe fn trace(self, tracer: &Tracer) {
-        (*self.into_raw()).trace(tracer)
+        self.into_raw().as_ref().trace(tracer)
     }
 }
 
@@ -383,26 +362,41 @@ pub(crate) struct GcVtable {
     /// Drop and free the object
     pub free: unsafe fn(*mut ()) -> usize,
 
+    /// Debug-print the object
+    pub debug: unsafe fn(GcAnyPtr, &mut core::fmt::Formatter<'_>) -> core::fmt::Result,
+
     pub type_name: &'static str,
 }
 
 macro_rules! generate_vtable_for {
     ($T:ty) => {
-        $crate::vm::gc::GcVtable {
+        $crate::gc::GcVtable {
             trace: {
-                unsafe fn _trace(this: *const (), tracer: *const $crate::vm::gc::Tracer) {
-                    <$T as $crate::vm::gc::Trace>::trace(&*this.cast::<$T>(), &*tracer);
+                unsafe fn _trace(this: *const (), tracer: *const $crate::gc::Tracer) {
+                    <$T as $crate::gc::Trace>::trace(&*this.cast::<$T>(), &*tracer);
                 }
 
                 _trace
             },
             free: {
                 unsafe fn _free(this: *mut ()) -> usize {
-                    let _ = Box::from_raw(this.cast::<$crate::vm::gc::GcBox<$T>>());
+                    let _ = Box::from_raw(this.cast::<$crate::gc::GcBox<$T>>());
                     ::core::mem::size_of::<$T>()
                 }
 
                 _free
+            },
+            debug: {
+                unsafe fn _debug(
+                    this: $crate::gc::GcAnyPtr,
+                    fmt: &mut ::core::fmt::Formatter<'_>,
+                ) -> ::core::fmt::Result {
+                    let this: $crate::gc::GcPtr<$T> = this.cast_unchecked();
+                    let this = this.as_ref();
+                    ::core::fmt::Debug::fmt(&this, fmt)
+                }
+
+                _debug
             },
             type_name: stringify!($T),
         }
@@ -452,7 +446,7 @@ impl TaggedVt {
 
     /// Get the vtable ptr.
     #[inline]
-    fn vt(self) -> &'static GcVtable {
+    pub(crate) fn vt(self) -> &'static GcVtable {
         let ptr = self.0.map_addr(|addr| {
             let addr = addr.get() & !Self::MASK;
             // SAFETY: guaranteed to still be non-zero, as the original address is non-zero.
@@ -530,22 +524,163 @@ pub(crate) struct GcBox<T: Sized + 'static> {
     value: UnsafeCell<T>,
 }
 
-impl<T: 'static> Gc<T> {}
+impl<T: 'static> GcPtr<T> {}
 
-impl<T: 'static> Clone for Gc<T> {
+impl<T: 'static> Clone for GcPtr<T> {
     #[inline]
     fn clone(&self) -> Self {
         *self
     }
 }
 
-impl<T: 'static> Copy for Gc<T> {}
+impl<T: 'static> Copy for GcPtr<T> {}
+
+#[repr(transparent)]
+pub struct GcAnyPtr {
+    ptr: NonNull<GcBox<()>>,
+}
+
+impl GcAnyPtr {
+    /// Get a shared reference to the object.
+    ///
+    /// ## Safety
+    /// - The object must be alive.
+    /// - For the resulting reference to be valid, the object must either be:
+    ///   - Rooted
+    ///   - Exist while the garbage collector is guaranteed not to run
+    /// - No unique reference to the object may already exist
+    #[inline]
+    pub unsafe fn as_ref<'a>(self) -> GcAnyRef<'a> {
+        GcAnyRef::new_unchecked(self)
+    }
+
+    /// Get an exclusive reference to the object.
+    ///
+    /// ## Safety
+    /// - The object must be alive.
+    /// - For the resulting reference to be valid, the object must either be:
+    ///   - Rooted
+    ///   - Exist while the garbage collector is guaranteed not to run
+    /// - No other reference to the object may already exist
+    #[inline]
+    pub unsafe fn as_mut<'a>(self) -> GcAnyRefMut<'a> {
+        GcAnyRefMut::new_unchecked(self)
+    }
+
+    /// Cast to a `GcPtr<T>` after checking that `self`
+    /// actually points to a `T`.
+    #[inline]
+    pub fn cast<T: Trace>(self) -> Option<GcPtr<T>> {
+        if !self.is::<T>() {
+            return None;
+        }
+
+        // SAFETY: `self` points to an instance of `T`.
+        Some(unsafe { self.cast_unchecked() })
+    }
+
+    /// Cast to a `GcPtr<T>` without checking that `self`
+    /// actually points to a `T`.
+    ///
+    /// ## Safety
+    ///
+    /// - This pointer must point to an instance of `T`.
+    #[inline]
+    pub unsafe fn cast_unchecked<T: Trace>(self) -> GcPtr<T> {
+        GcPtr {
+            ptr: self.ptr.cast(),
+        }
+    }
+
+    #[inline]
+    pub fn is<T: Trace>(self) -> bool {
+        // SAFETY:
+        // VTables are static, so comparing them for equality
+        // is the same as comparing the types' `TypeId`s.
+        let vt = unsafe { self.vt() };
+        core::ptr::eq(vt, T::vtable())
+    }
+
+    /// Wrap a previously managed pointer.
+    ///
+    /// ## Safety
+    /// - The pointer must have been produced by [`GcAnyPtr::into_raw`].
+    #[inline]
+    pub(crate) unsafe fn from_raw(ptr: *mut ()) -> GcAnyPtr {
+        let offset = core::mem::offset_of!(GcBox<()>, value);
+        // CAST: `GcBox` is a `repr(C)` struct with `T` as its 2nd field
+        let ptr = ptr.cast::<u8>().sub(offset).cast::<GcBox<()>>();
+        let ptr = NonNull::new_unchecked(ptr);
+
+        GcAnyPtr { ptr }
+    }
+
+    #[inline]
+    pub(crate) unsafe fn into_raw(self) -> NonNull<()> {
+        let ptr = unsafe { &raw const (*self.ptr.as_ptr()).value };
+        NonNull::new_unchecked(UnsafeCell::raw_get(ptr))
+    }
+
+    /// ## Safety
+    ///
+    /// - Object must be live.
+    #[inline]
+    pub(crate) unsafe fn type_name(self) -> &'static str {
+        let header = &raw mut (*self.ptr.as_ptr()).header;
+        let header = UnsafeCell::raw_get(header);
+        header.read().vt().type_name
+    }
+
+    /// ## Safety
+    ///
+    /// - Object must be live.
+    #[inline]
+    pub(crate) unsafe fn vt(self) -> &'static GcVtable {
+        let header = &raw mut (*self.ptr.as_ptr()).header;
+        let header = UnsafeCell::raw_get(header);
+        header.read().vt()
+    }
+
+    /// ## Safety
+    ///
+    /// - Object must be live.
+    #[inline]
+    unsafe fn set_mark(self, v: bool) {
+        let header = &raw mut (*self.ptr.as_ptr()).header;
+        let header = UnsafeCell::raw_get(header);
+        let header = NonNull::new_unchecked(header);
+        GcHeader::set_mark(header, v);
+    }
+
+    /// ## Safety
+    ///
+    /// - Object must be live.
+    #[inline]
+    unsafe fn is_marked(self) -> bool {
+        let header = &raw mut (*self.ptr.as_ptr()).header;
+        let header = UnsafeCell::raw_get(header);
+        header.read().marked()
+    }
+
+    #[inline]
+    unsafe fn trace(self, tracer: &Tracer) {
+        (self.vt().trace)(self.into_raw().as_ptr().cast_const(), tracer);
+    }
+}
+
+impl Clone for GcAnyPtr {
+    #[inline]
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+impl Copy for GcAnyPtr {}
 
 // # Tracing
 
 /// Trace external roots, which is any place outside of
-/// the object graph where `Gc` pointers may be placed
-/// by the VM, and where they need to stay alive.
+/// the object graph where managed pointers may be exist,
+/// and where the GC should be able to find them.
 ///
 /// An example of this is the VM's stack, which holds live
 /// values up to the top-most call frame.
@@ -557,9 +692,14 @@ pub(crate) trait ExternalRoots: 'static {
 ///
 /// ## Safety
 ///
-/// All interior pointers must be marked.
+/// - `trace` must correctly trace all interior references.
+/// - `vtable` must correctly refer to a vtable of `Self`.
+///   the easiest way to ensure this is to use the [`vtable`] macro.
+/// - `vtable` must additionally always return the same reference
+///   to the same vtable, meaning the vtable _must_ be stored in a `static`.
 ///
-/// `vtable` must correctly refer to a vtable of `Self`.
+/// Address equality of vtable pointers is used instead of `TypeId`-based
+/// type checks.
 pub(crate) unsafe trait Trace: Sized + 'static {
     fn vtable() -> &'static GcVtable;
 
@@ -571,38 +711,50 @@ pub(crate) unsafe trait Trace: Sized + 'static {
 
 macro_rules! vtable {
     ($T:ty) => {
-        fn vtable() -> &'static $crate::vm::gc::GcVtable {
-            static VT: $crate::vm::gc::GcVtable = generate_vtable_for!($T);
+        #[inline]
+        fn vtable() -> &'static $crate::gc::GcVtable {
+            static VT: $crate::gc::GcVtable = generate_vtable_for!($T);
 
             &VT
         }
     };
 }
 
-/// A type which knows how to mark GC-managed objects.
+/// A type which knows how to mark GC-managed objects
+/// and dynamically-typed values.
 pub(crate) struct Tracer {
     _marker: PhantomData<()>,
 }
 
 impl Tracer {
+    /// Visit an interior pointer.
     #[inline]
-    pub(crate) fn visit<T: Trace>(&self, ptr: Gc<T>) {
+    pub(crate) fn visit<T: Trace>(&self, ptr: GcPtr<T>) {
         unsafe {
             if ptr.is_marked() {
                 return; // cycle
             }
             ptr.set_mark(true);
-            (*ptr.into_raw()).trace(self)
+            ptr.trace(self)
         }
     }
 
     #[inline]
+    pub(crate) fn visit_any(&self, ptr: GcAnyPtr) {
+        unsafe {
+            if ptr.is_marked() {
+                return; // cycle
+            }
+            ptr.set_mark(true);
+            ptr.trace(self);
+        }
+    }
+
+    /// Visit a value, which may contain an interior pointer.
+    #[inline]
     pub(crate) fn visit_value(&self, value: ValueRaw) {
         match value {
-            ValueRaw::String(ptr) => self.visit(ptr),
-            ValueRaw::List(ptr) => self.visit(ptr),
-            ValueRaw::Table(ptr) => self.visit(ptr),
-            ValueRaw::UserData(ptr) => self.visit(ptr),
+            ValueRaw::Object(ptr) => self.visit_any(ptr),
             ValueRaw::Nil | ValueRaw::Bool(_) | ValueRaw::Int(_) | ValueRaw::Float(_) => {}
         }
     }
@@ -678,11 +830,13 @@ impl Default for RootList {
 /// A root list node, holds a direct pointer to a GC-managed object.
 ///
 /// Not useful on its own, needs to be pinned and wrapped in a `Root`.
+///
+/// Once constructed, should be pinned and never moved again.
 #[doc(hidden)]
 #[repr(C)]
 pub struct StackRoot<T: Sized + 'static> {
     base: RootBase,
-    ptr: Gc<T>,
+    ptr: GcPtr<T>,
     pinned: PhantomPinned,
 }
 
@@ -694,7 +848,7 @@ impl<T: Trace> StackRoot<T> {
     /// - `ptr` must have been allocated via `heap`
     #[doc(hidden)]
     #[inline]
-    pub unsafe fn from_heap_ptr(heap: &Heap, ptr: Gc<T>) -> Self {
+    pub unsafe fn from_heap_ptr(heap: &Heap, ptr: GcPtr<T>) -> Self {
         let base = RootList::base(heap.roots());
 
         Self {
@@ -716,7 +870,8 @@ impl<T> StackRoot<T> {
     /// Internal API
     // Append a pinned stack root to its root list.
     //
-    // SAFETY:
+    // ## Safety
+    //
     // - `self` must remain pinned.
     // - no other stack root can be appended to any root list
     //   between the construction of `self` and calling this
@@ -737,7 +892,9 @@ impl<T> StackRoot<T> {
 
     /// Remove a pinned stack root from its root list.
     ///
-    /// SAFETY: `self` must be head of the root list.
+    /// ## Safety
+    ///
+    /// - `self` must be head of the root list.
     #[inline]
     unsafe fn __remove_from_root_list(self: Pin<&mut Self>) {
         let head = RootList::head(self.base.list);
@@ -764,15 +921,19 @@ impl<T> Drop for StackRoot<T> {
     }
 }
 
+/// A pointer representing a rooted object.
+///
+/// This type is safe to move, because the underlying reference
+/// is pinned to the stack.
 #[repr(C)]
-pub struct Root<'a, T: Sized + 'static> {
+pub struct GcRoot<'a, T: Sized + 'static> {
     place: Pin<&'a mut StackRoot<T>>,
 
     #[cfg(debug_assertions)]
     heap_id: HeapId,
 }
 
-impl<'a, T: Trace> Root<'a, T> {
+impl<'a, T: Trace> GcRoot<'a, T> {
     /// Internal API
     #[doc(hidden)]
     #[inline]
@@ -787,9 +948,29 @@ impl<'a, T: Trace> Root<'a, T> {
         }
     }
 
-    /// Dereference the rooted pointer. Grants shared access to the object.
+    // Dereferencing roots: Rust's aliasing guarantees are upheld due to usage of the `Heap`
+    // type here. In order to produce a direct reference to an object, the user must first
+    // have a direct reference to the heap.
+
+    /// Dereference the pointer, yielding a direct _shared_ reference to the object.
+    ///
+    /// Note that this requires shared access to the `heap`. That means it is not possible
+    /// to hold a shared reference to an object `A`, and at the same time hold a unique
+    /// reference to an object `B`, even though it is valid.
+    ///
+    /// To work around this issue, many APIs on builtin types accepts `Root`s directly.
+    /// For example, appending a list to itself can be done by rooting the list twice,
+    /// getting a mutable reference to the first root, and appending the second root:
+    ///
+    /// ```rust
+    /// # use hebi4::{gc::{Heap, reroot}, value::list};
+    /// # let heap = unsafe { &mut Heap::__testing() };
+    /// list!(in heap; a0 = 0);
+    /// reroot!(in heap; a1 = a0);
+    /// a0.as_mut(heap).push(a1.as_any().into());
+    /// ```
     #[inline]
-    pub fn as_ref<'v>(&self, heap: &'v Heap) -> Ref<'v, T> {
+    pub fn as_ref<'v>(&self, heap: &'v Heap) -> GcRef<'v, T> {
         #[cfg(debug_assertions)]
         debug_assert!(heap.id() == self.heap_id);
 
@@ -809,10 +990,10 @@ impl<'a, T: Trace> Root<'a, T> {
     // - Object constructors return `Gc` pointers, so are never held on the stack
     //
     // Therefore it is impossible for the object to be moved out of in safe code.
-    //
-    /// Dereference the rooted pointer. Grants unique mutable access to the object.
+
+    /// Dereference the pointer, yielding a direct _unique_ reference to the object.
     #[inline]
-    pub fn as_mut<'v>(&self, heap: &'v mut Heap) -> RefMut<'v, T> {
+    pub fn as_mut<'v>(&self, heap: &'v mut Heap) -> GcRefMut<'v, T> {
         #[cfg(debug_assertions)]
         debug_assert!(heap.id() == self.heap_id);
 
@@ -828,18 +1009,93 @@ impl<'a, T: Trace> Root<'a, T> {
         unsafe { self.place.ptr.as_mut() }
     }
 
+    #[inline]
+    pub fn as_any(self) -> GcAnyRoot<'a> {
+        GcAnyRoot(unsafe { core::mem::transmute(self) })
+    }
+}
+
+impl<'a, T: Sized + 'static> GcRoot<'a, T> {
     /// Retrieve the stored pointer.
     #[inline]
-    pub fn as_ptr(&self) -> Gc<T> {
+    pub fn as_ptr(&self) -> GcPtr<T> {
         self.place.ptr
     }
 
     /// Update the stored pointer.
     #[inline]
-    pub unsafe fn set_ptr<U: Trace>(self, ptr: Gc<U>) -> Root<'a, U> {
-        let mut this: Root<'a, U> = core::mem::transmute(self);
+    pub unsafe fn set_ptr<U: Trace>(self, ptr: GcPtr<U>) -> GcRoot<'a, U> {
+        let mut this: GcRoot<'a, U> = core::mem::transmute(self);
         this.place.as_mut().get_unchecked_mut().ptr = ptr;
         this
+    }
+}
+
+#[repr(transparent)]
+pub struct GcAnyRoot<'a>(GcRoot<'a, ()>);
+
+impl<'a> GcAnyRoot<'a> {
+    /// Cast to a `GcPtr<T>` after checking that `self`
+    /// actually points to a `T`.
+    #[inline]
+    pub fn cast<T: Trace>(self) -> Option<GcRoot<'a, T>> {
+        if !self.is::<T>() {
+            return None;
+        }
+        Some(unsafe { self.cast_unchecked() })
+    }
+
+    /// Cast to a `GcRoot<T>` without checking that `self`
+    /// actually points to a `T`.
+    ///
+    /// ## Safety
+    ///
+    /// - This pointer must point to an instance of `T`.
+    #[inline]
+    pub unsafe fn cast_unchecked<T: Trace>(self) -> GcRoot<'a, T> {
+        // SAFETY: `Self` is a `repr(transparent)` struct around `GcRoot`
+        core::mem::transmute(self)
+    }
+
+    #[inline]
+    pub fn is<T: Trace>(&self) -> bool {
+        self.as_ptr().is::<T>()
+    }
+
+    /// Retrieve the stored pointer.
+    #[inline]
+    pub fn as_ptr(&self) -> GcAnyPtr {
+        GcAnyPtr {
+            ptr: self.0.as_ptr().ptr.cast(),
+        }
+    }
+
+    /// Update the stored pointer.
+    #[inline]
+    pub unsafe fn set_ptr<T: Trace>(self, ptr: GcPtr<T>) -> GcAnyRoot<'a> {
+        let mut this: GcRoot<'a, T> = core::mem::transmute(self.0);
+        this.place.as_mut().get_unchecked_mut().ptr = ptr;
+        let this: GcRoot<'a, ()> = core::mem::transmute(this);
+        GcAnyRoot(this)
+    }
+
+    /// Update the stored pointer.
+    #[inline]
+    pub unsafe fn set_any_ptr(mut self, ptr: GcAnyPtr) -> GcAnyRoot<'a> {
+        self.0.place.as_mut().get_unchecked_mut().ptr = GcPtr { ptr: ptr.ptr };
+        self
+    }
+
+    #[inline]
+    pub(crate) fn vt(&self) -> &'static GcVtable {
+        // SAFETY: rooted
+        unsafe { self.as_ptr().vt() }
+    }
+}
+
+impl std::fmt::Debug for GcAnyRoot<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        unsafe { (self.vt().debug)(self.as_ptr(), f) }
     }
 }
 
@@ -849,30 +1105,31 @@ impl<'a, T: Trace> Root<'a, T> {
 /// which makes it safe to move around, re-root, and store as an object member.
 ///
 /// Implements `DerefMut` so can be turned into a plain reference as needed.
-pub struct Ref<'a, T: 'static>(Gc<T>, PhantomData<fn(&'a T) -> &'a T>);
+#[repr(transparent)]
+pub struct GcRef<'a, T: 'static>(GcPtr<T>, PhantomData<fn(&'a T) -> &'a T>);
 
-impl<'a, T> Clone for Ref<'a, T> {
+impl<'a, T> Clone for GcRef<'a, T> {
     fn clone(&self) -> Self {
         *self
     }
 }
-impl<'a, T> Copy for Ref<'a, T> {}
+impl<'a, T> Copy for GcRef<'a, T> {}
 
-impl<'a, T: Trace + Sized + 'static> Ref<'a, T> {
+impl<'a, T: Trace> GcRef<'a, T> {
     #[inline]
-    pub fn map<U: Trace + Sized + 'static>(
+    pub fn map<U: Trace>(
         this: &Self,
-        f: impl for<'v> FnOnce(&'v Ref<'a, T>) -> &'v Gc<U>,
-    ) -> Ref<'a, U> {
+        f: impl for<'v> FnOnce(&'v GcRef<'a, T>) -> &'v GcPtr<U>,
+    ) -> GcRef<'a, U> {
         let ptr = *f(this);
         unsafe { ptr.as_ref() }
     }
 
     #[inline]
-    pub fn map_opt<U: Trace + Sized + 'static>(
+    pub fn map_opt<U: Trace>(
         this: &Self,
-        f: impl for<'v> FnOnce(&'v Ref<'a, T>) -> Option<&'v Gc<U>>,
-    ) -> Option<Ref<'a, U>> {
+        f: impl for<'v> FnOnce(&'v GcRef<'a, T>) -> Option<&'v GcPtr<U>>,
+    ) -> Option<GcRef<'a, U>> {
         let ptr = f(this);
         match ptr {
             Some(&ptr) => Some(unsafe { ptr.as_ref() }),
@@ -881,24 +1138,86 @@ impl<'a, T: Trace + Sized + 'static> Ref<'a, T> {
     }
 }
 
-impl<'a, T: Trace + Sized + 'static> Ref<'a, T> {
+impl<'a, T: Trace> GcRef<'a, T> {
     #[inline]
-    pub(crate) unsafe fn new_unchecked(ptr: Gc<T>) -> Self {
+    pub(crate) unsafe fn new_unchecked(ptr: GcPtr<T>) -> Self {
         Self(ptr, PhantomData)
     }
 
     #[inline]
-    pub fn as_ptr(self) -> Gc<T> {
+    pub fn as_ptr(&self) -> GcPtr<T> {
         self.0
+    }
+
+    #[inline]
+    pub fn as_any(self) -> GcAnyRef<'a> {
+        GcAnyRef(self.0.as_any(), PhantomData)
     }
 }
 
-impl<'a, T: Trace + Sized + 'static> Deref for Ref<'a, T> {
+impl<'a, T: Trace> Deref for GcRef<'a, T> {
     type Target = T;
 
     #[inline]
     fn deref(&self) -> &Self::Target {
         unsafe { self.0.as_rust_ref_very_unsafe() }
+    }
+}
+
+#[repr(transparent)]
+pub struct GcAnyRef<'a>(GcAnyPtr, PhantomData<fn(&'a ()) -> &'a ()>);
+
+impl<'a> Clone for GcAnyRef<'a> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+impl<'a> Copy for GcAnyRef<'a> {}
+
+impl<'a> GcAnyRef<'a> {
+    #[inline]
+    pub(crate) fn new_unchecked(ptr: GcAnyPtr) -> Self {
+        Self(ptr, PhantomData)
+    }
+
+    #[inline]
+    pub fn cast<T: Trace>(self) -> Option<GcRef<'a, T>> {
+        let this = self.0.cast()?;
+        Some(GcRef(this, PhantomData))
+    }
+
+    #[inline]
+    pub unsafe fn cast_unchecked<T: Trace>(self) -> GcRef<'a, T> {
+        let this = unsafe { self.0.cast_unchecked() };
+        GcRef(this, PhantomData)
+    }
+
+    #[inline]
+    pub fn is<T: Trace>(&self) -> bool {
+        self.0.is::<T>()
+    }
+
+    #[inline]
+    pub fn type_name(&self) -> &'static str {
+        // SAFETY: `self` is rooted and guaranteed to be live
+        unsafe { self.0.type_name() }
+    }
+
+    #[inline]
+    pub fn as_ptr(&self) -> GcAnyPtr {
+        self.0
+    }
+
+    #[inline]
+    pub(crate) fn vt(&self) -> &'static GcVtable {
+        // SAFETY: rooted
+        unsafe { self.as_ptr().vt() }
+    }
+}
+
+impl std::fmt::Debug for GcAnyRef<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        unsafe { (self.vt().debug)(self.as_ptr(), f) }
     }
 }
 
@@ -908,37 +1227,43 @@ impl<'a, T: Trace + Sized + 'static> Deref for Ref<'a, T> {
 /// which makes it safe to move around, re-root, and store as an object member.
 ///
 /// Implements `Deref`/`DerefMut` so can be turned into a plain reference as needed.
-pub struct RefMut<'a, T: 'static>(Gc<T>, PhantomData<&'a mut T>);
+#[repr(transparent)]
+pub struct GcRefMut<'a, T: 'static>(GcPtr<T>, PhantomData<&'a mut T>);
 
-impl<'a, T: Trace + Sized + 'static> RefMut<'a, T> {
+impl<'a, T: Trace> GcRefMut<'a, T> {
     #[inline]
-    pub fn map<U: Trace + Sized + 'static>(
+    pub fn map<U: Trace>(
         this: &mut Self,
-        f: impl for<'v> FnOnce(&'v mut RefMut<'a, T>) -> &'v mut Gc<U>,
-    ) -> RefMut<'a, U> {
+        f: impl for<'v> FnOnce(&'v mut GcRefMut<'a, T>) -> &'v mut GcPtr<U>,
+    ) -> GcRefMut<'a, U> {
         let ptr = *f(this);
         unsafe { ptr.as_mut() }
     }
 
     #[inline]
-    pub fn as_ref(self) -> Ref<'a, T> {
-        Ref(self.0, PhantomData)
+    pub fn as_ref(self) -> GcRef<'a, T> {
+        GcRef(self.0, PhantomData)
+    }
+
+    #[inline]
+    pub fn as_any(self) -> GcAnyRefMut<'a> {
+        GcAnyRefMut(self.0.as_any(), PhantomData)
     }
 }
 
-impl<'a, T: Trace + Sized + 'static> RefMut<'a, T> {
+impl<'a, T: Trace> GcRefMut<'a, T> {
     #[inline]
-    pub(crate) unsafe fn new_unchecked(ptr: Gc<T>) -> Self {
+    pub(crate) unsafe fn new_unchecked(ptr: GcPtr<T>) -> Self {
         Self(ptr, PhantomData)
     }
 
     #[inline]
-    pub fn as_ptr(self) -> Gc<T> {
+    pub fn as_ptr(&self) -> GcPtr<T> {
         self.0
     }
 }
 
-impl<'a, T: Trace + Sized + 'static> Deref for RefMut<'a, T> {
+impl<'a, T: Trace> Deref for GcRefMut<'a, T> {
     type Target = T;
 
     #[inline]
@@ -947,10 +1272,89 @@ impl<'a, T: Trace + Sized + 'static> Deref for RefMut<'a, T> {
     }
 }
 
-impl<'a, T: Trace + Sized + 'static> DerefMut for RefMut<'a, T> {
+impl<'a, T: Trace> DerefMut for GcRefMut<'a, T> {
     #[inline]
     fn deref_mut(&mut self) -> &mut Self::Target {
         unsafe { self.0.as_rust_ref_mut_very_unsafe() }
+    }
+}
+
+#[repr(transparent)]
+pub struct GcAnyRefMut<'a>(GcAnyPtr, PhantomData<fn(&'a ()) -> &'a ()>);
+
+impl<'a> Clone for GcAnyRefMut<'a> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+impl<'a> Copy for GcAnyRefMut<'a> {}
+
+impl<'a> GcAnyRefMut<'a> {
+    #[inline]
+    pub(crate) unsafe fn new_unchecked(ptr: GcAnyPtr) -> Self {
+        Self(ptr, PhantomData)
+    }
+
+    #[inline]
+    pub fn cast<T: Trace>(self) -> Option<GcRefMut<'a, T>> {
+        let this = self.0.cast()?;
+        Some(GcRefMut(this, PhantomData))
+    }
+
+    #[inline]
+    pub unsafe fn cast_unchecked<T: Trace>(self) -> GcRefMut<'a, T> {
+        let this = unsafe { self.0.cast_unchecked() };
+        GcRefMut(this, PhantomData)
+    }
+
+    #[inline]
+    pub fn is<T: Trace>(&self) -> bool {
+        self.0.is::<T>()
+    }
+
+    #[inline]
+    pub fn as_ptr(self) -> GcAnyPtr {
+        self.0
+    }
+
+    #[inline]
+    pub fn as_ref(&self) -> GcAnyRef<'a> {
+        GcAnyRef(self.0, PhantomData)
+    }
+}
+
+impl<'a> From<()> for ValueRoot<'a> {
+    #[inline(always)]
+    fn from(v: ()) -> Self {
+        Self::Nil
+    }
+}
+
+impl<'a> From<bool> for ValueRoot<'a> {
+    #[inline(always)]
+    fn from(v: bool) -> Self {
+        Self::Bool(v)
+    }
+}
+
+impl<'a> From<i64> for ValueRoot<'a> {
+    #[inline(always)]
+    fn from(v: i64) -> Self {
+        Self::Int(v)
+    }
+}
+
+impl<'a> From<f64> for ValueRoot<'a> {
+    #[inline(always)]
+    fn from(v: f64) -> Self {
+        Self::Float(v)
+    }
+}
+
+impl<'a> From<GcAnyRoot<'a>> for ValueRoot<'a> {
+    #[inline(always)]
+    fn from(v: GcAnyRoot<'a>) -> Self {
+        Self::Object(v)
     }
 }
 
@@ -960,11 +1364,7 @@ pub enum ValueRoot<'a> {
     Bool(bool) = 1,
     Int(i64) = 2,
     Float(f64) = 3,
-
-    String(Root<'a, super::value::String>),
-    List(Root<'a, super::value::List>),
-    Table(Root<'a, super::value::Table>),
-    UserData(Root<'a, super::value::UserData>),
+    Object(GcAnyRoot<'a>),
 }
 
 impl<'a> ValueRoot<'a> {
@@ -975,10 +1375,19 @@ impl<'a> ValueRoot<'a> {
             ValueRoot::Bool(v) => ValueRaw::Bool(v),
             ValueRoot::Int(v) => ValueRaw::Int(v),
             ValueRoot::Float(v) => ValueRaw::Float(v),
-            ValueRoot::String(v) => ValueRaw::String(v.as_ptr()),
-            ValueRoot::List(v) => ValueRaw::List(v.as_ptr()),
-            ValueRoot::Table(v) => ValueRaw::Table(v.as_ptr()),
-            ValueRoot::UserData(v) => ValueRaw::UserData(v.as_ptr()),
+            ValueRoot::Object(v) => ValueRaw::Object(v.as_ptr()),
+        }
+    }
+}
+
+impl<'a> std::fmt::Debug for ValueRoot<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Nil => write!(f, "Nil"),
+            Self::Bool(v) => f.debug_tuple("Bool").field(v).finish(),
+            Self::Int(v) => f.debug_tuple("Int").field(v).finish(),
+            Self::Float(v) => f.debug_tuple("Float").field(v).finish(),
+            Self::Object(v) => std::fmt::Debug::fmt(v, f),
         }
     }
 }
@@ -989,11 +1398,7 @@ pub enum ValueRef<'a> {
     Bool(bool) = 1,
     Int(i64) = 2,
     Float(f64) = 3,
-
-    String(Ref<'a, super::value::String>),
-    List(Ref<'a, super::value::List>),
-    Table(Ref<'a, super::value::Table>),
-    UserData(Ref<'a, super::value::UserData>),
+    Object(GcAnyRef<'a>),
 }
 
 impl<'a> ValueRef<'a> {
@@ -1004,10 +1409,54 @@ impl<'a> ValueRef<'a> {
             ValueRef::Bool(v) => ValueRaw::Bool(v),
             ValueRef::Int(v) => ValueRaw::Int(v),
             ValueRef::Float(v) => ValueRaw::Float(v),
-            ValueRef::String(v) => ValueRaw::String(v.as_ptr()),
-            ValueRef::List(v) => ValueRaw::List(v.as_ptr()),
-            ValueRef::Table(v) => ValueRaw::Table(v.as_ptr()),
-            ValueRef::UserData(v) => ValueRaw::UserData(v.as_ptr()),
+            ValueRef::Object(v) => ValueRaw::Object(v.as_ptr()),
+        }
+    }
+}
+
+impl<'a> From<()> for ValueRef<'a> {
+    #[inline(always)]
+    fn from(v: ()) -> Self {
+        Self::Nil
+    }
+}
+
+impl<'a> From<bool> for ValueRef<'a> {
+    #[inline(always)]
+    fn from(v: bool) -> Self {
+        Self::Bool(v)
+    }
+}
+
+impl<'a> From<i64> for ValueRef<'a> {
+    #[inline(always)]
+    fn from(v: i64) -> Self {
+        Self::Int(v)
+    }
+}
+
+impl<'a> From<f64> for ValueRef<'a> {
+    #[inline(always)]
+    fn from(v: f64) -> Self {
+        Self::Float(v)
+    }
+}
+
+impl<'a> From<GcAnyRef<'a>> for ValueRef<'a> {
+    #[inline(always)]
+    fn from(v: GcAnyRef<'a>) -> Self {
+        Self::Object(v)
+    }
+}
+
+impl<'a> std::fmt::Debug for ValueRef<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Nil => write!(f, "Nil"),
+            Self::Bool(v) => f.debug_tuple("Bool").field(v).finish(),
+            Self::Int(v) => f.debug_tuple("Int").field(v).finish(),
+            Self::Float(v) => f.debug_tuple("Float").field(v).finish(),
+            Self::Object(v) => std::fmt::Debug::fmt(v, f),
         }
     }
 }
@@ -1020,19 +1469,16 @@ impl ValueRaw {
             ValueRaw::Bool(v) => ValueRef::Bool(v),
             ValueRaw::Int(v) => ValueRef::Int(v),
             ValueRaw::Float(v) => ValueRef::Float(v),
-            ValueRaw::String(v) => ValueRef::String(v.as_ref()),
-            ValueRaw::List(v) => ValueRef::List(v.as_ref()),
-            ValueRaw::Table(v) => ValueRef::Table(v.as_ref()),
-            ValueRaw::UserData(v) => ValueRef::UserData(v.as_ref()),
+            ValueRaw::Object(v) => ValueRef::Object(v.as_ref()),
         }
     }
 }
 
-impl<'a, T> Ref<'a, T> {
+impl<'a, T: Trace> GcRef<'a, T> {
     #[inline]
     pub fn map_value(
         this: &Self,
-        f: impl for<'v> FnOnce(&'v Ref<'a, T>) -> &'v ValueRaw,
+        f: impl for<'v> FnOnce(&'v GcRef<'a, T>) -> &'v ValueRaw,
     ) -> ValueRef<'a> {
         let value = *f(this);
         unsafe { value.as_ref() }
@@ -1041,7 +1487,7 @@ impl<'a, T> Ref<'a, T> {
     #[inline]
     pub fn map_value_opt(
         this: &Self,
-        f: impl for<'v> FnOnce(&'v Ref<'a, T>) -> Option<&'v ValueRaw>,
+        f: impl for<'v> FnOnce(&'v GcRef<'a, T>) -> Option<&'v ValueRaw>,
     ) -> Option<ValueRef<'a>> {
         let value = f(this);
         match value {
@@ -1051,18 +1497,34 @@ impl<'a, T> Ref<'a, T> {
     }
 }
 
-impl std::fmt::Display for ValueRef<'_> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ValueRef::Nil => write!(f, "nil"),
-            ValueRef::Bool(v) => write!(f, "{v}"),
-            ValueRef::Int(v) => write!(f, "{v}"),
-            ValueRef::Float(v) => write!(f, "{v:?}"),
-            ValueRef::String(v) => write!(f, "{v:?}"),
-            ValueRef::List(v) => write!(f, "<list>"),
-            ValueRef::Table(v) => write!(f, "<table>"),
-            ValueRef::UserData(v) => write!(f, "<userdata>"),
-        }
+mod private {
+    pub trait Sealed {}
+}
+
+pub trait Rooted<T>: private::Sealed {
+    fn as_ptr(&self) -> GcPtr<T>;
+}
+
+impl<T: Trace> private::Sealed for GcRef<'_, T> {}
+impl<T: Trace> Rooted<T> for GcRef<'_, T> {
+    #[inline]
+    fn as_ptr(&self) -> GcPtr<T> {
+        GcRef::as_ptr(self)
+    }
+}
+
+impl<T: Trace> private::Sealed for GcRefMut<'_, T> {}
+impl<T: Trace> Rooted<T> for GcRefMut<'_, T> {
+    #[inline]
+    fn as_ptr(&self) -> GcPtr<T> {
+        GcRefMut::as_ptr(self)
+    }
+}
+
+impl<T: Trace> private::Sealed for GcRoot<'_, T> {}
+impl<T: Trace> Rooted<T> for GcRoot<'_, T> {
+    fn as_ptr(&self) -> GcPtr<T> {
+        GcRoot::as_ptr(self)
     }
 }
 
@@ -1079,35 +1541,62 @@ impl std::fmt::Display for ValueRef<'_> {
 //     UserData(RefMut<'a, super::value::UData>),
 // }
 
+#[macro_export]
+#[doc(hidden)]
+macro_rules! __let_root_unchecked {
+    (unsafe in $heap:ident; $place:ident = $ptr:expr) => {
+        let ptr = $ptr;
+        let mut place = unsafe { $crate::gc::StackRoot::from_heap_ptr($heap, ptr) };
+        let $place = unsafe {
+            $crate::gc::GcRoot::__new($heap, ::core::pin::Pin::new_unchecked(&mut place))
+        };
+    };
+}
+
 /// Create a root on the stack.
 ///
-/// ```rust,ignore
-/// let_root_unchecked!(unsafe in heap; object = heap.alloc_no_gc(..));
+/// ```rust
+/// # use hebi4::{gc::{Heap, let_root_unchecked}, value::List};
+/// # let heap = unsafe { &mut Heap::__testing() };
+/// # let ptr = List::alloc(heap, 0);
+/// let_root_unchecked!(unsafe in heap; obj = ptr);
 /// ```
 ///
-/// Rooting a reclaimed object is undefined behavior.
-/// Inversely, _not_ rooting an allocated object is undefined behavior.
+/// Rooting a dead object is immediate undefined behavior.
+///
+/// Inversely, _not_ rooting an allocated object may result
+/// in undefined behavior, and should be well justified.
 ///
 /// To use this correctly, you must only allocate using `alloc_no_gc`,
 /// and _immediately_ root the resulting object.
 ///
 /// ## Safety
 ///
-/// - The object pointed to by `$ptr` must still be live at the time of initialization.
+/// - The object pointed to by `$ptr` must still be live
+///   at the time of initialization.
+pub use crate::__let_root_unchecked as let_root_unchecked;
+
 #[macro_export]
-macro_rules! let_root_unchecked {
-    (unsafe in $heap:ident; $place:ident = $ptr:expr) => {
-        let ptr = $ptr;
-        let mut place = unsafe { $crate::vm::gc::StackRoot::from_heap_ptr($heap, ptr) };
-        let $place = unsafe {
-            $crate::vm::gc::Root::__new($heap, ::core::pin::Pin::new_unchecked(&mut place))
-        };
+#[doc(hidden)]
+macro_rules! __reroot {
+    (in $heap:ident; $place:ident = $ptr:expr) => {
+        let ptr = $crate::gc::Rooted::as_ptr(&$ptr);
+        $crate::gc::let_root_unchecked!(unsafe in $heap; $place = ptr);
     };
 }
 
-// #[macro_export]
-// macro_rules! reroot {
-//     (in $heap:ident; $place:ident = $root:expr) => {
-//         let
-//     };
-// }
+/// Create a root on the stack from an existing root.
+///
+/// Anything "rooted" may be used as the target pointer:
+/// - [`GcRef`]
+/// - [`GcRefMut`]
+/// - [`Root`]
+///
+/// ```rust
+/// # use hebi4::{gc::{Heap, reroot}, value::list};
+/// # let heap = unsafe { &mut Heap::__testing() };
+/// list!(in heap; a0 = 100);
+/// reroot!(in heap; a1 = a0);
+/// println!("{}", a1.as_ref(heap).capacity());
+/// ```
+pub use crate::__reroot as reroot;

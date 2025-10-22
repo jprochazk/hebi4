@@ -31,7 +31,7 @@ fn run(path: &Path) {
         // run each code snippet twice using the same VM,
         // ensuring it has the same result.
         let (snapshot, failure) = match r.run(&loaded_module) {
-            Ok(value) => (format!("OK\n{}", r.fmt(value)), false),
+            Ok(value) => (format!("OK\n{:?}", unsafe { value.as_ref() }), false),
             Err(err) => (
                 format!(
                     "ERROR\n{}\n\nDISASM:\n\n{}",
@@ -43,7 +43,7 @@ fn run(path: &Path) {
         };
 
         let (snapshot2, failure2) = match r.run(&loaded_module) {
-            Ok(value) => (format!("OK\n{}", r.fmt(value)), false),
+            Ok(value) => (format!("OK\n{:?}", unsafe { value.as_ref() }), false),
             Err(err) => (
                 format!(
                     "ERROR\n{}\n\nDISASM:\n\n{}",
@@ -83,12 +83,14 @@ fn separate_modules() {
     Hebi::new().with(|mut r| {
         let a = r.load(&a);
         let a = r.run(&a).unwrap();
-        let a = r.fmt(a).to_string();
+        let a = unsafe { a.as_ref() };
+        let a = format!("{a:?}");
         let b = r.load(&b);
         let b = r.run(&b).unwrap();
-        let b = r.fmt(b).to_string();
+        let b = unsafe { b.as_ref() };
+        let b = format!("{b:?}");
 
-        assert_eq!(a, "10");
-        assert_eq!(b, "300");
+        assert_eq!(a, "Int(10)");
+        assert_eq!(b, "Int(300)");
     })
 }

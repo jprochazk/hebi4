@@ -2,9 +2,10 @@
 
 use crate::{
     codegen::opcodes::{FnId, Insn},
+    gc::ValueRef,
     module::Local,
     vm::{
-        gc::Ref,
+        gc::GcRef,
         value::{FunctionProto, ModuleProto},
     },
 };
@@ -313,14 +314,14 @@ impl DisasmFunc for crate::module::FuncInfo {
     }
 }
 
-impl<'a> Ref<'a, ModuleProto> {
+impl<'a> GcRef<'a, ModuleProto> {
     pub fn disasm(&self, src: &str) -> impl std::fmt::Display {
         DisasmModuleWithSrc(*self, src)
     }
 }
 
-impl<'a> DisasmModule for Ref<'a, ModuleProto> {
-    type Func = Ref<'a, FunctionProto>;
+impl<'a> DisasmModule for GcRef<'a, ModuleProto> {
+    type Func = GcRef<'a, FunctionProto>;
 
     fn functions(&self) -> impl Iterator<Item = Self::Func> + '_ {
         self.functions()
@@ -331,7 +332,7 @@ impl<'a> DisasmModule for Ref<'a, ModuleProto> {
     }
 }
 
-impl<'a> DisasmFunc for Ref<'a, FunctionProto> {
+impl<'a> DisasmFunc for GcRef<'a, FunctionProto> {
     fn name(&self) -> impl std::fmt::Display + '_ {
         self.name()
     }
@@ -361,6 +362,20 @@ impl<'a> DisasmFunc for Ref<'a, FunctionProto> {
     }
 
     fn literal(&self, at: usize) -> impl std::fmt::Display + '_ {
-        Ref::map_value(self, |this| &this.literals()[at])
+        DisplayValueRef(GcRef::map_value(self, |this| &this.literals()[at]))
+    }
+}
+
+struct DisplayValueRef<'a>(ValueRef<'a>);
+
+impl std::fmt::Display for DisplayValueRef<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.0 {
+            ValueRef::Nil => write!(f, "nil"),
+            ValueRef::Bool(v) => write!(f, "{v}"),
+            ValueRef::Int(v) => write!(f, "{v}"),
+            ValueRef::Float(v) => write!(f, "{v}"),
+            ValueRef::Object(v) => write!(f, "{}", v.type_name()),
+        }
     }
 }

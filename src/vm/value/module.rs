@@ -5,33 +5,37 @@ use super::{FunctionProto, ValueRaw};
 use crate::{
     codegen::opcodes::{FnId, Insn, Reg, asm},
     module::{FuncInfo, Literal, Module},
-    vm::gc::{Gc, Heap, Ref, RefMut, Root, Trace},
-    vm::value::String,
+    value::string,
+    vm::{
+        gc::{GcPtr, GcRef, GcRefMut, GcRoot, Heap, Trace, let_root_unchecked},
+        value::String,
+    },
 };
 
 pub struct ModuleProto {
+    pub(crate) name: GcPtr<String>,
     pub(crate) module_id: ModuleId,
-    pub(crate) entrypoint: Option<Gc<FunctionProto>>,
-    pub(crate) functions: Box<[Gc<FunctionProto>]>,
+    pub(crate) entrypoint: Option<GcPtr<FunctionProto>>,
+    pub(crate) functions: Box<[GcPtr<FunctionProto>]>,
     pub(crate) module_vars: Box<[ValueRaw]>,
 }
 
-impl<'a> Ref<'a, ModuleProto> {
+impl<'a> GcRef<'a, ModuleProto> {
     #[inline]
-    pub(crate) fn get_function(&self, id: FnId) -> Option<Ref<'a, FunctionProto>> {
-        Ref::map_opt(self, |this| this.functions.get(id.zx()))
+    pub(crate) fn get_function(&self, id: FnId) -> Option<GcRef<'a, FunctionProto>> {
+        GcRef::map_opt(self, |this| this.functions.get(id.zx()))
     }
 
     #[inline]
-    pub(crate) unsafe fn get_function_unchecked(&self, id: FnId) -> Ref<'a, FunctionProto> {
-        Ref::map(self, |this| unsafe {
+    pub(crate) unsafe fn get_function_unchecked(&self, id: FnId) -> GcRef<'a, FunctionProto> {
+        GcRef::map(self, |this| unsafe {
             this.functions.get_unchecked(id.zx())
         })
     }
 
     #[inline]
-    pub(crate) fn entrypoint(&self) -> Ref<'a, FunctionProto> {
-        Ref::map(self, |this| match &this.entrypoint {
+    pub(crate) fn entrypoint(&self) -> GcRef<'a, FunctionProto> {
+        GcRef::map(self, |this| match &this.entrypoint {
             Some(entrypoint) => entrypoint,
             // SAFETY: after initialization, `entrypoint` is never `None`
             None => unsafe { core::hint::unreachable_unchecked() },
@@ -45,18 +49,23 @@ impl<'a> Ref<'a, ModuleProto> {
             index: 0,
         }
     }
+
+    #[inline]
+    pub fn name(&self) -> GcRef<'a, String> {
+        GcRef::map(self, |this| &this.name)
+    }
 }
 
 pub(crate) struct Functions<'a> {
-    module: Ref<'a, ModuleProto>,
+    module: GcRef<'a, ModuleProto>,
     index: usize,
 }
 
 impl<'a> Iterator for Functions<'a> {
-    type Item = Ref<'a, FunctionProto>;
+    type Item = GcRef<'a, FunctionProto>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        Ref::map_opt(&self.module, |module| {
+        GcRef::map_opt(&self.module, |module| {
             match module.functions.get(self.index) {
                 Some(function) => {
                     self.index += 1;
@@ -68,7 +77,7 @@ impl<'a> Iterator for Functions<'a> {
     }
 }
 
-impl<'a> RefMut<'a, ModuleProto> {}
+impl<'a> GcRefMut<'a, ModuleProto> {}
 
 unsafe impl Trace for ModuleProto {
     vtable!(ModuleProto);
@@ -86,9 +95,19 @@ unsafe impl Trace for ModuleProto {
     }
 }
 
+impl<'a> std::fmt::Debug for GcRef<'a, ModuleProto> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ModuleProto")
+            .field("name", &self.name())
+            .field("functions", &self.functions.len())
+            .field("module_vars", &self.module_vars.len())
+            .finish()
+    }
+}
+
 #[derive(Default)]
 pub(crate) struct ModuleRegistry {
-    modules: Vec<Gc<ModuleProto>>,
+    modules: Vec<GcPtr<ModuleProto>>,
     by_name: HashMap<std::string::String, ModuleId, FxBuildHasher>,
 }
 
@@ -97,7 +116,7 @@ impl ModuleRegistry {
         Self::default()
     }
 
-    pub(crate) fn add(&mut self, heap: &mut Heap, module: &Module) -> Gc<ModuleProto> {
+    pub(crate) fn add(&mut self, heap: &mut Heap, module: &Module) -> GcPtr<ModuleProto> {
         let id = ModuleId(self.modules.len() as u32);
         let name = module.name().to_owned();
         let module = canonicalize(heap, module, id);
@@ -108,7 +127,7 @@ impl ModuleRegistry {
         module
     }
 
-    pub(crate) fn iter(&self) -> impl Iterator<Item = Gc<ModuleProto>> {
+    pub(crate) fn iter(&self) -> impl Iterator<Item = GcPtr<ModuleProto>> {
         self.modules.iter().copied()
     }
 }
@@ -132,9 +151,12 @@ const ENTRYPOINT: [Insn; 2] = unsafe {
     ]
 };
 
-fn canonicalize(heap: &mut Heap, info: &Module, id: ModuleId) -> Gc<ModuleProto> {
+fn canonicalize(heap: &mut Heap, info: &Module, id: ModuleId) -> GcPtr<ModuleProto> {
+    string!(in heap; name = info.name());
+
     let_root_unchecked!(unsafe in heap; module = heap.alloc_no_gc(|ptr| unsafe {
         (*ptr).write(ModuleProto {
+            name: name.as_ptr(),
             module_id: id,
             entrypoint: None,
             functions: Box::new([]),
@@ -162,8 +184,8 @@ fn canonicalize(heap: &mut Heap, info: &Module, id: ModuleId) -> Gc<ModuleProto>
 fn canonicalize_function(
     heap: &mut Heap,
     function: &FuncInfo,
-    module: &Root<'_, ModuleProto>,
-) -> Gc<FunctionProto> {
+    module: &GcRoot<'_, ModuleProto>,
+) -> GcPtr<FunctionProto> {
     string!(in heap; name = function.name());
 
     let name = name.as_ptr();
@@ -195,7 +217,7 @@ fn canonicalize_literals(heap: &mut Heap, literals: &[Literal]) -> Box<[ValueRaw
             Literal::Bool(v) => ValueRaw::Bool(*v),
             Literal::Int(v) => ValueRaw::Int(*v),
             Literal::Float(v) => ValueRaw::Float(*v),
-            Literal::String(v) => ValueRaw::String(String::alloc(heap, v.as_str())),
+            Literal::String(v) => ValueRaw::Object(String::alloc(heap, v.as_str()).as_any()),
         };
         out.push(value);
     }
@@ -205,8 +227,8 @@ fn canonicalize_literals(heap: &mut Heap, literals: &[Literal]) -> Box<[ValueRaw
 fn generate_entrypoint(
     heap: &Heap,
     name: &str,
-    module: &Root<'_, ModuleProto>,
-) -> Gc<FunctionProto> {
+    module: &GcRoot<'_, ModuleProto>,
+) -> GcPtr<FunctionProto> {
     string!(in heap; name = &format!("{name}#start"));
     let_root_unchecked!(unsafe in heap; f = heap.alloc_no_gc(|ptr| unsafe {
         (*ptr).write(FunctionProto {

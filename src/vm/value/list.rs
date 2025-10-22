@@ -1,8 +1,8 @@
 use super::{
-    super::gc::{Ref, RefMut, Trace, Tracer, ValueRef, ValueRoot},
+    super::gc::{GcRef, GcRefMut, Trace, Tracer, ValueRef, ValueRoot},
     ValueRaw,
 };
-use crate::vm::gc::{Gc, Heap};
+use crate::vm::gc::{GcPtr, Heap};
 
 #[repr(align(16))]
 pub struct List {
@@ -11,7 +11,7 @@ pub struct List {
 
 impl List {
     #[inline(never)]
-    pub fn alloc(heap: &Heap, capacity: usize) -> Gc<Self> {
+    pub fn alloc(heap: &Heap, capacity: usize) -> GcPtr<Self> {
         heap.alloc_no_gc(|ptr| unsafe {
             (*ptr).write(Self {
                 items: Vec::with_capacity(capacity),
@@ -21,7 +21,7 @@ impl List {
 
     /// Allocate a `List` initialized to `len` `nil`s.
     #[inline(never)]
-    pub fn alloc_zeroed(heap: &Heap, len: usize) -> Gc<Self> {
+    pub fn alloc_zeroed(heap: &Heap, len: usize) -> GcPtr<Self> {
         heap.alloc_no_gc(|ptr| unsafe {
             let mut items = Vec::with_capacity(len);
             {
@@ -48,7 +48,7 @@ unsafe impl Trace for List {
     }
 }
 
-impl<'a> Ref<'a, List> {
+impl<'a> GcRef<'a, List> {
     #[inline]
     pub fn len(&self) -> usize {
         self.items.len()
@@ -61,7 +61,7 @@ impl<'a> Ref<'a, List> {
 
     #[inline]
     pub(crate) fn get(&self, index: usize) -> Option<ValueRef<'a>> {
-        Ref::map_value_opt(self, |this| this.items.get(index))
+        GcRef::map_value_opt(self, |this| this.items.get(index))
     }
 
     #[inline]
@@ -73,7 +73,7 @@ impl<'a> Ref<'a, List> {
     }
 }
 
-impl<'a> IntoIterator for Ref<'a, List> {
+impl<'a> IntoIterator for GcRef<'a, List> {
     type Item = ValueRef<'a>;
 
     type IntoIter = ListIter<'a>;
@@ -85,7 +85,7 @@ impl<'a> IntoIterator for Ref<'a, List> {
 }
 
 pub struct ListIter<'a> {
-    pub(crate) list: Ref<'a, List>,
+    pub(crate) list: GcRef<'a, List>,
     pub(crate) index: usize,
 }
 
@@ -123,7 +123,7 @@ impl std::fmt::Display for IndexOutOfBounds {
     }
 }
 
-impl<'a> RefMut<'a, List> {
+impl<'a> GcRefMut<'a, List> {
     /// Append `value` to the list.
     #[inline]
     pub fn push(&mut self, value: ValueRoot<'_>) {
@@ -183,5 +183,66 @@ impl<'a> RefMut<'a, List> {
         unsafe {
             self.items.set_len(new_size);
         }
+    }
+}
+
+impl std::fmt::Debug for GcRef<'_, List> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut list = f.debug_list();
+        for value in self.iter() {
+            list.entry(&value);
+        }
+        list.finish()
+    }
+}
+
+impl std::fmt::Debug for GcRefMut<'_, List> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut list = f.debug_list();
+        // Not using `iter`, because that requires `GcRef` which can't
+        // be produced from `&GcRefMut`, it needs an owned `GcRefMut`.
+        for value in &self.items {
+            // SAFETY: transitively rooted
+            let value = unsafe { value.as_ref() };
+            list.entry(&value);
+        }
+        list.finish()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        gc::{Heap, ValueRef, ValueRoot},
+        value::list,
+    };
+
+    #[test]
+    fn list() {
+        let heap = &mut Heap::new();
+
+        {
+            list!(in heap; list = 128);
+
+            list.as_mut(heap).push(ValueRoot::Int(10));
+
+            // `list` is safe from collection
+            assert_eq!(heap.stats().bytes(), core::mem::size_of::<List>());
+            heap.collect_no_external_roots();
+            assert_eq!(heap.stats().bytes(), core::mem::size_of::<List>());
+
+            {
+                let list = list.as_ref(heap);
+                assert_eq!(list.len(), 1);
+                assert_eq!(list.capacity(), 128);
+                assert!(matches!(list.get(0), Some(ValueRef::Int(10))));
+            }
+        }
+
+        // `list` will be deallocated
+        heap.collect_no_external_roots();
+        assert_eq!(heap.stats().bytes(), 0);
+        assert_eq!(heap.stats().collections(), 2);
     }
 }

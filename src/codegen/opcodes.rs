@@ -7,8 +7,9 @@ mod private {
     pub trait Sealed {}
 }
 
-use super::{Control, ValueRaw, VmState};
 use core::ptr::NonNull;
+
+use super::{Control, ValueRaw, VmState};
 
 pub trait OperandPack: private::Sealed + Sized {}
 

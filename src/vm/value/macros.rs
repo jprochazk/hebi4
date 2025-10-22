@@ -1,42 +1,68 @@
-/// ```rust,ignore
-/// string!(in heap; string = "test");
-/// println!("{string}");
-/// ```
 #[macro_export]
-macro_rules! string {
+#[doc(hidden)]
+macro_rules! __string {
     (in $heap:ident; $string:ident = $str:expr) => {
         // SAFETY: the allocated object is immediately rooted
-        let_root_unchecked!(
+        $crate::gc::let_root_unchecked!(
             unsafe in $heap;
-            $string = $crate::vm::value::String::alloc($heap, $str)
+            $string = $crate::value::String::alloc($heap, $str)
         );
     };
 }
 
+/// Allocate a managed string, and immediately root it.
+///
+/// The rhs of the assignment is the string to copy.
+///
 /// ```rust,ignore
-/// list!(in heap; list = 0);
+/// # use hebi4::{gc::Heap, value::string};
+/// # let mut heap = unsafe { &mut Heap::testing() };
+/// string!(in heap; string = "test");
 /// ```
+pub use crate::__string as string;
+
 #[macro_export]
-macro_rules! list {
+#[doc(hidden)]
+macro_rules! __list {
     (in $heap:ident; $list:ident = $capacity:expr) => {
         // SAFETY: the allocated object is immediately rooted
-        let_root_unchecked!(
+        $crate::gc::let_root_unchecked!(
             unsafe in $heap;
-            $list = $crate::vm::value::List::alloc($heap, $capacity)
+            $list = $crate::value::List::alloc($heap, $capacity)
         );
     };
 }
 
+/// Allocate a managed list, and immediately root it.
+///
+/// The rhs of the assignment is the initial capacity of the list.
+///
 /// ```rust,ignore
-/// table!(in heap; table = 0);
+/// # use hebi4::{gc::Heap, value::list};
+/// # let mut heap = unsafe { &mut Heap::testing() };
+/// list!(in heap; list = 0);
 /// ```
+pub use crate::__list as list;
+
 #[macro_export]
-macro_rules! table {
+#[doc(hidden)]
+macro_rules! __table {
     (in $heap:ident; $table:ident = $capacity:expr) => {
         // SAFETY: the allocated object is immediately rooted
-        let_root_unchecked!(
+        $crate::gc::let_root_unchecked!(
             unsafe in $heap;
-            $table = $crate::vm::value::Table::alloc($heap, $capacity)
+            $table = $crate::value::Table::alloc($heap, $capacity)
         );
     };
 }
+
+/// Allocate a managed table, and immediately root it.
+///
+/// The rhs of the assignment is the initial capacity of the table.
+///
+/// ```rust,ignore
+/// # use hebi4::{gc::Heap, value::table};
+/// # let mut heap = unsafe { &mut Heap::testing() };
+/// table!(in heap; table = 0);
+/// ```
+pub use crate::__table as table;

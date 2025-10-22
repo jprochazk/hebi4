@@ -52,7 +52,7 @@ pub mod value;
 use std::{marker::PhantomData, ptr::NonNull};
 
 use array::{DynArray, DynStack};
-use gc::{Gc, Heap};
+use gc::{GcPtr, Heap};
 use value::{List, ModuleProto, String, Table};
 
 use crate::{
@@ -90,7 +90,7 @@ impl LpIdx for Lit8 {
 
 impl Lp {
     #[inline]
-    fn from_fn(f: Gc<FunctionProto>) -> Self {
+    fn from_fn(f: GcPtr<FunctionProto>) -> Self {
         unsafe {
             let ptr = f.as_ref().literals().as_ptr().cast_mut();
             Self(NonNull::new_unchecked(ptr))
@@ -131,11 +131,11 @@ impl Lp {
     }
 
     #[inline(always)]
-    pub unsafe fn str_unchecked(self, r: impl LpIdx) -> Gc<String> {
+    pub unsafe fn str_unchecked(self, r: impl LpIdx) -> GcPtr<String> {
         let v = self._at(r.idx());
 
-        debug_assert!(matches!(&*v, ValueRaw::String(..)));
-        v.cast::<u64>().add(1).cast::<Gc<String>>().read()
+        debug_assert!(matches!(&*v, ValueRaw::Object(gc) if gc.is::<String>()));
+        v.cast::<u64>().add(1).cast::<GcPtr<String>>().read()
     }
 }
 
@@ -148,7 +148,7 @@ impl Jt {
 
 impl Ip {
     #[inline]
-    fn from_fn(f: Gc<FunctionProto>) -> Self {
+    fn from_fn(f: GcPtr<FunctionProto>) -> Self {
         unsafe {
             let ptr = f.as_mut().code_mut().as_mut_ptr();
             Self(NonNull::new_unchecked(ptr))
@@ -178,7 +178,7 @@ impl Ip {
 
 #[derive(Clone, Copy)]
 struct CallFrame {
-    callee: Gc<FunctionProto>,
+    callee: GcPtr<FunctionProto>,
 
     /// Stack base of _this_ frame.
     stack_base: u32,
@@ -201,7 +201,7 @@ impl CallFramePtr {
     }
 
     #[inline]
-    unsafe fn callee(self) -> Gc<FunctionProto> {
+    unsafe fn callee(self) -> GcPtr<FunctionProto> {
         (*self.0).callee
     }
 
@@ -260,7 +260,7 @@ impl Vm {
     }
 
     #[inline]
-    unsafe fn get_function_in_current_module(self, id: FnId) -> Gc<FunctionProto> {
+    unsafe fn get_function_in_current_module(self, id: FnId) -> GcPtr<FunctionProto> {
         self.current_module()
             .as_ref()
             .get_function_unchecked(id)
@@ -268,12 +268,12 @@ impl Vm {
     }
 
     #[inline]
-    unsafe fn current_module(self) -> Gc<ModuleProto> {
+    unsafe fn current_module(self) -> GcPtr<ModuleProto> {
         (*self.0.as_ptr()).current_module.unwrap_unchecked()
     }
 
     #[inline]
-    unsafe fn set_current_module_for(self, f: Gc<FunctionProto>) {
+    unsafe fn set_current_module_for(self, f: GcPtr<FunctionProto>) {
         let module = f.as_ref().module().as_ptr();
         (*self.0.as_ptr()).current_module = Some(module);
     }
@@ -586,7 +586,7 @@ unsafe fn sidx(vm: Vm, jt: Jt, ip: Ip, args: Sidx, sp: Sp, lp: Lp) -> Control {
     let idx = *sp.at(args.idx());
     let src = *sp.at(args.src());
 
-    let ValueRaw::List(list) = target else {
+    let Some(list) = target.into_object::<List>() else {
         return not_a_list_error(ip, vm);
     };
 
@@ -617,7 +617,7 @@ unsafe fn sidxn(vm: Vm, jt: Jt, ip: Ip, args: Sidxn, sp: Sp, lp: Lp) -> Control 
     let list = *sp.at(args.target());
     let src = *sp.at(args.src());
 
-    let ValueRaw::List(list) = list else {
+    let Some(list) = list.into_object::<List>() else {
         return not_a_list_error(ip, vm);
     };
 
@@ -658,11 +658,11 @@ unsafe fn skey(vm: Vm, jt: Jt, ip: Ip, args: Skey, sp: Sp, lp: Lp) -> Control {
     let key = *sp.at(args.key());
     let src = *sp.at(args.src());
 
-    let ValueRaw::Table(table) = target else {
+    let Some(table) = target.into_object::<Table>() else {
         return not_a_table_error(ip, vm);
     };
 
-    let ValueRaw::String(key) = key else {
+    let Some(key) = key.into_object::<String>() else {
         return invalid_table_key_error(ip, vm);
     };
 
@@ -688,7 +688,7 @@ unsafe fn skeyc(vm: Vm, jt: Jt, ip: Ip, args: Skeyc, sp: Sp, lp: Lp) -> Control 
     let key = lp.str_unchecked(args.key());
     let src = *sp.at(args.src());
 
-    let ValueRaw::Table(table) = target else {
+    let Some(table) = target.into_object::<Table>() else {
         return not_a_table_error(ip, vm);
     };
 
@@ -728,7 +728,9 @@ unsafe fn lnum(vm: Vm, jt: Jt, ip: Ip, args: Lnum, sp: Sp, lp: Lp) -> Control {
 
 #[inline(always)]
 unsafe fn lstr(vm: Vm, jt: Jt, ip: Ip, args: Lstr, sp: Sp, lp: Lp) -> Control {
-    todo!()
+    *sp.at(args.dst()) = ValueRaw::Object(lp.str_unchecked(args.id()).as_any());
+
+    dispatch_next(vm, jt, ip, sp, lp)
 }
 
 #[inline(always)]
@@ -765,7 +767,7 @@ unsafe fn llist(vm: Vm, jt: Jt, ip: Ip, args: Llist, sp: Sp, lp: Lp) -> Control 
     let heap = vm.heap();
     let list = List::alloc_zeroed(&*heap, len);
 
-    *sp.at(args.dst()) = ValueRaw::List(list);
+    *sp.at(args.dst()) = ValueRaw::Object(list.as_any());
 
     dispatch_next(vm, jt, ip, sp, lp)
 }
@@ -780,7 +782,7 @@ unsafe fn ltable(vm: Vm, jt: Jt, ip: Ip, args: Ltable, sp: Sp, lp: Lp) -> Contro
     let heap = vm.heap();
     let table = Table::alloc(&*heap, len);
 
-    *sp.at(args.dst()) = ValueRaw::Table(table);
+    *sp.at(args.dst()) = ValueRaw::Object(table.as_any());
 
     dispatch_next(vm, jt, ip, sp, lp)
 }
@@ -1287,7 +1289,7 @@ unsafe fn stop(vm: Vm, jt: Jt, ip: Ip, args: Stop, sp: Sp, lp: Lp) -> Control {
 /// `r0` in the new frame will be in the same location as `r6`
 /// in the previous frame.
 #[inline(always)]
-unsafe fn do_call(callee: Gc<FunctionProto>, ret: Reg, ip: Ip, vm: Vm) -> (Sp, Lp, Ip) {
+unsafe fn do_call(callee: GcPtr<FunctionProto>, ret: Reg, ip: Ip, vm: Vm) -> (Sp, Lp, Ip) {
     // See doc comment.
     let stack_base = vm.current_frame().stack_base() + (ret.get() as u32);
 
@@ -1377,7 +1379,7 @@ pub(crate) struct VmState {
     /// so that we can `fastcall` other functions from the same module.
     ///
     /// NOTE: This is always `Some` while the VM is executing
-    current_module: Option<Gc<ModuleProto>>,
+    current_module: Option<GcPtr<ModuleProto>>,
 
     /// Saved error.
     ///
@@ -1459,7 +1461,7 @@ impl gc::ExternalRoots for VmRoots {
 
 #[repr(transparent)]
 pub struct Module<'vm> {
-    inner: Gc<ModuleProto>,
+    inner: GcPtr<ModuleProto>,
     _lifetime: PhantomData<fn(&'vm ()) -> &'vm ()>,
 }
 
@@ -1505,7 +1507,7 @@ impl<'vm> Runtime<'vm> {
         Ok(value)
     }
 
-    fn run_inner(&mut self, m: Gc<ModuleProto>) -> Result<()> {
+    fn run_inner(&mut self, m: GcPtr<ModuleProto>) -> Result<()> {
         unsafe {
             self.vm.as_mut().current_frame = Some(CallFrame {
                 callee: m.as_ref().entrypoint().as_ptr(),
@@ -1569,80 +1571,6 @@ impl<'vm> Runtime<'vm> {
                 return Ok(());
             }
         }
-    }
-
-    pub fn fmt(&self, value: ValueRaw) -> impl std::fmt::Display + '_ {
-        struct ValueFormatter<'a, 'gc> {
-            this: &'a Runtime<'gc>,
-            value: ValueRaw,
-        }
-
-        impl<'gc> std::fmt::Display for ValueFormatter<'_, 'gc> {
-            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                match self.value {
-                    ValueRaw::Nil => write!(f, "nil"),
-                    ValueRaw::Bool(v) => write!(f, "{v}"),
-                    ValueRaw::Int(v) => write!(f, "{v}"),
-                    ValueRaw::Float(v) => write!(f, "{v}"),
-                    ValueRaw::String(v) => {
-                        let str = unsafe { v.as_ref() };
-                        write!(f, "{}", str.as_str())
-                    }
-                    ValueRaw::List(v) => {
-                        let list = unsafe { v.as_ref() };
-
-                        write!(f, "[")?;
-                        let mut comma = false;
-                        for item in list {
-                            if comma {
-                                write!(f, ", ")?;
-                            }
-                            write!(
-                                f,
-                                "{}",
-                                ValueFormatter {
-                                    this: self.this,
-                                    value: item.raw(),
-                                }
-                            )?;
-                            comma = true;
-                        }
-                        write!(f, "]")?;
-
-                        Ok(())
-                    }
-                    ValueRaw::Table(v) => {
-                        let table = unsafe { v.as_ref() };
-
-                        write!(f, "{{")?;
-                        let mut comma = false;
-                        for (key, value) in table {
-                            if comma {
-                                write!(f, ", ")?;
-                            }
-                            write!(
-                                f,
-                                "{}={}",
-                                key.as_str(),
-                                ValueFormatter {
-                                    this: self.this,
-                                    value: value.raw(),
-                                }
-                            )?;
-                            comma = true;
-                        }
-                        write!(f, "}}")?;
-
-                        Ok(())
-                    }
-                    ValueRaw::UserData(v) => {
-                        todo!()
-                    }
-                }
-            }
-        }
-
-        ValueFormatter { this: self, value }
     }
 }
 

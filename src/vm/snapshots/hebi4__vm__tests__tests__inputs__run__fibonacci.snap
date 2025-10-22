@@ -3,4 +3,4 @@ source: src/vm/tests.rs
 expression: snapshot
 ---
 OK
-55
+Int(55)

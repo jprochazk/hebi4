@@ -2,7 +2,7 @@ use super::*;
 
 // Stop-the-world, mark and sweep GC.
 pub(crate) unsafe fn collect(heap: *mut Heap, external_roots: impl ExternalRoots) {
-    (*heap).stats.collect();
+    (*heap).stats.on_collect();
     mark(heap, external_roots);
     sweep(heap);
 }
@@ -31,7 +31,7 @@ unsafe fn mark(heap: *mut Heap, external_roots: impl ExternalRoots) {
         ptr.set_mark(true);
 
         unsafe {
-            (ptr.vt().trace)(ptr.into_raw(), &tracer);
+            (ptr.vt().trace)(ptr.into_raw().as_ptr(), &tracer);
         }
     });
 }
@@ -73,7 +73,7 @@ unsafe fn sweep(heap: *mut Heap) {
         iter = next;
     }
 
-    (*heap).stats.free(freed_bytes);
+    (*heap).stats.on_free(freed_bytes);
 }
 
 pub(crate) unsafe fn free_all(heap: *mut Heap) {
@@ -90,5 +90,5 @@ pub(crate) unsafe fn free_all(heap: *mut Heap) {
         iter = next;
     }
 
-    (*heap).stats.free(freed_bytes);
+    (*heap).stats.on_free(freed_bytes);
 }

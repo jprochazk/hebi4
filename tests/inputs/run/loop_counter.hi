@@ -1,0 +1,6 @@
+var v = 0
+loop
+  if v == 10 do break end
+  v += 1
+end
+v
