@@ -85,11 +85,6 @@ expr call {
     args: [expr],
 };
 
-expr call_table {
-    callee: expr,
-    args: [table_entry],
-};
-
 expr infix(op: InfixOp as u24) {
     lhs: expr,
     rhs: expr,

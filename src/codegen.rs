@@ -1253,7 +1253,6 @@ fn eval_expr_maybe_reuse<'a>(
         ast::ExprKind::GetIndex(node) => eval_expr_get_index(m, node, span, dst),
         ast::ExprKind::SetIndex(node) => eval_expr_set_index(m, node, span, dst),
         ast::ExprKind::Call(node) => eval_expr_call(m, node, span, dst),
-        ast::ExprKind::CallTable(node) => todo!(),
         ast::ExprKind::Infix(node) => eval_expr_infix(m, node, span, dst),
         ast::ExprKind::Prefix(node) => eval_expr_prefix(m, node, span, dst),
         ast::ExprKind::List(node) => eval_expr_list(m, node, span, dst),
@@ -1841,7 +1840,6 @@ impl ExprInfo for Node<'_, ast::Expr> {
     fn needs_contiguous_registers(&self) -> bool {
         match self.kind() {
             ast::ExprKind::Call(node) => !node.args().is_empty(),
-            ast::ExprKind::CallTable(node) => !node.args().is_empty(),
 
             ast::ExprKind::Return(..)
             | ast::ExprKind::Break(..)
