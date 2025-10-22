@@ -1,9 +1,5 @@
 //! Garbage collector
 
-// TODO: root projection
-// TODO: re-rooting
-// TODO: storing in objects
-
 use std::{
     cell::{Cell, UnsafeCell},
     marker::{PhantomData, PhantomPinned},
@@ -1022,9 +1018,30 @@ impl<'a, T: Sized + 'static> GcRoot<'a, T> {
         self.place.ptr
     }
 
-    /// Update the stored pointer.
+    /// Root a different pointer in this `GcRoot`.
+    ///
+    /// The given `ptr` can be anything which is rooted, even transitively.
+    ///
+    /// For example, a [`GcRef`] is a valid argument to this function:
+    ///
+    /// ```rust
+    /// # use hebi4::{gc::Heap, value::{list, string}};
+    /// # let heap = unsafe { &mut Heap::__testing() };
+    /// string!(in heap; a = "test");
+    /// list!(in heap; b = 0);
+    /// let b = b.set(a.as_ref(heap));
+    /// ```
     #[inline]
-    pub unsafe fn set_ptr<U: Trace>(self, ptr: GcPtr<U>) -> GcRoot<'a, U> {
+    pub fn set<U: Trace>(self, ptr: impl Rooted<U>) -> GcRoot<'a, U> {
+        // SAFETY: `ptr` is rooted, and it will still be rooted in `self`
+        unsafe { self.set_raw(ptr.as_ptr()) }
+    }
+
+    /// Root a different pointer in this `GcRoot`.
+    ///
+    /// The given `ptr` must still be live.
+    #[inline]
+    pub unsafe fn set_raw<U: Trace>(self, ptr: GcPtr<U>) -> GcRoot<'a, U> {
         let mut this: GcRoot<'a, U> = core::mem::transmute(self);
         this.place.as_mut().get_unchecked_mut().ptr = ptr;
         this
@@ -1544,6 +1561,13 @@ impl<T: Trace> Rooted<T> for GcRoot<'_, T> {
 #[macro_export]
 #[doc(hidden)]
 macro_rules! __let_root_unchecked {
+    (unsafe in $heap:ident; mut $place:ident = $ptr:expr) => {
+        let ptr = $ptr;
+        let mut place = unsafe { $crate::gc::StackRoot::from_heap_ptr($heap, ptr) };
+        let mut $place = unsafe {
+            $crate::gc::GcRoot::__new($heap, ::core::pin::Pin::new_unchecked(&mut place))
+        };
+    };
     (unsafe in $heap:ident; $place:ident = $ptr:expr) => {
         let ptr = $ptr;
         let mut place = unsafe { $crate::gc::StackRoot::from_heap_ptr($heap, ptr) };
@@ -1579,6 +1603,10 @@ pub use crate::__let_root_unchecked as let_root_unchecked;
 #[macro_export]
 #[doc(hidden)]
 macro_rules! __reroot {
+    (in $heap:ident; mut $place:ident = $ptr:expr) => {
+        let ptr = $crate::gc::Rooted::as_ptr(&$ptr);
+        $crate::gc::let_root_unchecked!(unsafe in $heap; mut $place = ptr);
+    };
     (in $heap:ident; $place:ident = $ptr:expr) => {
         let ptr = $crate::gc::Rooted::as_ptr(&$ptr);
         $crate::gc::let_root_unchecked!(unsafe in $heap; $place = ptr);

@@ -11,7 +11,7 @@ pub struct String {
 
 impl String {
     #[inline(never)]
-    pub(crate) fn alloc(heap: &Heap, s: &str) -> GcPtr<Self> {
+    pub fn alloc(heap: &Heap, s: &str) -> GcPtr<Self> {
         heap.alloc_no_gc(|ptr| unsafe {
             (*ptr).write(Self {
                 hash: heap.string_hasher().hash_str(s),
