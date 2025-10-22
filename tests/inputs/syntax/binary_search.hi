@@ -1,28 +1,24 @@
 ##parse
 
-fn binary_search(arr, target) do
-  var low  = 0
-  var high = len(arr) - 1
+fn binary_search(arr, target) {
+  let low  = 0
+  let high = len(arr) - 1
 
-  loop
-    if low > high do
-      break
-    end
+  loop {
+    if low > high { break }
 
-    var mid = (low + high) / 2
-    var v   = arr[mid]
+    let mid = (low + high) / 2
+    let v   = arr[mid]
 
-    if v == target do
-      return mid
-    end
+    if v == target { return mid }
 
-    if v < target do
+    if v < target {
       low = mid + 1
-    else
+    } else {
       high = mid - 1
-    end
-  end
+    }
+  }
 
   return -1
-end
+}
 

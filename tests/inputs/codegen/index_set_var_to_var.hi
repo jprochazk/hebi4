@@ -1,4 +1,4 @@
-var a = [0]
-var i = 0
-var v = 1
+let a = [0]
+let i = 0
+let v = 1
 a[i] = v

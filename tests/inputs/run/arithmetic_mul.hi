@@ -1,6 +1,6 @@
-var result = 1
-var a = 2
-var b = 2
+let result = 1
+let a = 2
+let b = 2
 
 result *= a * b  # 1 * 2 * 2 = 4
 result *= 1 * b  # 4 * 1 * 2 = 8

@@ -1,4 +1,4 @@
-do
-    var v = 0
+do {
+    let v = 0
     0
-end
+}

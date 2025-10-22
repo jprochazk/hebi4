@@ -223,8 +223,7 @@ impl Vm {
         const _: () =
             assert!(core::mem::size_of::<Option<CallFrame>>() == core::mem::size_of::<CallFrame>());
 
-        let ptr = &raw mut (*self.0.as_ptr()).current_frame;
-        let ptr = ptr.cast::<CallFrame>();
+        let ptr = (*self.0.as_ptr()).frames.top_unchecked();
         CallFramePtr(ptr)
     }
 
@@ -241,10 +240,10 @@ impl Vm {
     }
 
     #[inline]
-    unsafe fn has_enough_stack_space(self, stack_base: usize, nstack: usize) -> bool {
+    unsafe fn has_enough_stack_space(self, stack_base: usize, frame_size: usize) -> bool {
         let stack = &mut (*self.0.as_ptr()).stack;
         let remaining = stack.remaining(stack_base);
-        remaining >= (nstack as isize)
+        remaining >= (frame_size as isize)
     }
 
     #[inline]
@@ -1278,13 +1277,8 @@ unsafe fn stop(vm: Vm, jt: Jt, ip: Ip, args: Stop, sp: Sp, lp: Lp) -> Control {
 /// example: assuming 3 args, with ret at r6:
 /// ```text,ignore
 ///   frame N:   [ 0 1 2 3 4 5 6 7 8 9 ]
-///                            ^ ^
-///                            | args
-///                            ret
-///   frame N+1: [ 6 7 8 9 ... ]
-///                ^ ^
-///                | args
-///                ret
+///   frame N+1:             [ 6 7 8 9 ... ]
+///                         ret^ ^args
 /// ```
 /// `r0` in the new frame will be in the same location as `r6`
 /// in the previous frame.
@@ -1292,43 +1286,38 @@ unsafe fn stop(vm: Vm, jt: Jt, ip: Ip, args: Stop, sp: Sp, lp: Lp) -> Control {
 unsafe fn do_call(callee: GcPtr<FunctionProto>, ret: Reg, ip: Ip, vm: Vm) -> (Sp, Lp, Ip) {
     // See doc comment.
     let stack_base = vm.current_frame().stack_base() + (ret.get() as u32);
+    let frame_size = callee.as_ref().stack_size();
 
     // Return addr points to the next instruction after the call instruction.
     let current_function_start = Ip::from_fn(vm.current_frame().callee());
     let return_addr = 1 + (ip.offset_from_unsigned(current_function_start) as u32);
 
-    let new_frame = CallFrame {
+    let sp: Sp = maybe_grow_stack(vm, stack_base as usize, frame_size);
+    let lp: Lp = Lp::from_fn(callee);
+    let ip: Ip = Ip::from_fn(callee);
+    vm.set_current_module_for(callee);
+    vm.push_frame(CallFrame {
         callee,
         stack_base,
         return_addr,
-    };
-
-    let sp: Sp = maybe_grow_stack(vm, &new_frame);
-    let lp: Lp = Lp::from_fn(new_frame.callee);
-    let ip: Ip = Ip::from_fn(new_frame.callee);
-    vm.set_current_module_for(callee);
-
-    let prev_frame = core::ptr::replace(vm.current_frame().raw(), new_frame);
-    vm.push_frame(prev_frame);
+    });
 
     (sp, lp, ip)
 }
 
 #[inline(always)]
-unsafe fn maybe_grow_stack(vm: Vm, new_frame: &CallFrame) -> Sp {
-    let new_stack_base = new_frame.stack_base as usize;
-    let new_frame_size = new_frame.callee.as_ref().stack_size() as usize;
-    if !vm.has_enough_stack_space(new_stack_base, new_frame_size) {
-        grow_stack(vm, new_frame)
+unsafe fn maybe_grow_stack(vm: Vm, stack_base: usize, frame_size: usize) -> Sp {
+    if !vm.has_enough_stack_space(stack_base, frame_size) {
+        grow_stack(vm, frame_size)
     }
 
-    vm.stack_at(new_stack_base)
+    vm.stack_at(stack_base)
 }
 
 #[cold]
-unsafe fn grow_stack(vm: Vm, new_frame: &CallFrame) {
+unsafe fn grow_stack(vm: Vm, frame_size: usize) {
     // NOTE: We allocate more than we need here, capacity doubles each time anyway.
-    vm.grow_stack(new_frame.callee.as_ref().stack_size());
+    vm.grow_stack(frame_size);
 }
 
 #[inline(always)]
@@ -1372,9 +1361,6 @@ pub(crate) struct VmState {
     /// Invariant: Should never be empty.
     frames: DynStack<CallFrame>,
 
-    /// Storage for the current call frame while the VM is executing.
-    current_frame: Option<CallFrame>,
-
     /// When executing a function, we store the module it belongs to here,
     /// so that we can `fastcall` other functions from the same module.
     ///
@@ -1409,7 +1395,6 @@ impl Hebi {
                 current_module: None,
                 error: None,
                 saved_ip: None,
-                current_frame: None,
             }),
         }
     }
@@ -1509,7 +1494,7 @@ impl<'vm> Runtime<'vm> {
 
     fn run_inner(&mut self, m: GcPtr<ModuleProto>) -> Result<()> {
         unsafe {
-            self.vm.as_mut().current_frame = Some(CallFrame {
+            Vm(self.vm).push_frame(CallFrame {
                 callee: m.as_ref().entrypoint().as_ptr(),
                 stack_base: 0,
                 return_addr: 0,

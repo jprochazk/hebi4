@@ -1,27 +1,27 @@
 ##parse
 
-fn fib_rec(n) do
-  if n < 2 do
+fn fib_rec(n) {
+  if n < 2 {
     n
-  else
+  } else {
     fib(n-1) + fib(n-2)
-  end
-end
+  }
+}
 
-fn fib_iter(n) do
-  if n < 2 do return n end
+fn fib_iter(n) {
+  if n < 2 { return n }
 
-  var prev = 0
-  var curr = 1
-  var i = 2
-  loop
-    if i > n do break end
+  let prev = 0
+  let curr = 1
+  let i = 2
+  loop {
+    if i > n { break }
     i += 1
 
-    var next = prev + curr
+    let next = prev + curr
     prev = curr
     curr = next
-  end
+  }
 
   return curr
-end
+}

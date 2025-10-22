@@ -1,7 +1,7 @@
-fn f(v) do end
+fn f(v) {}
 
-var a = 0
-var b = 1
+let a = 0
+let b = 1
 
 # dst is `r1`, and arg must go into `r2`,
 # but `r2` is already taken, so we have

@@ -1,2 +1,2 @@
-var v = do 1 end
+let v = do { 1 }
 v

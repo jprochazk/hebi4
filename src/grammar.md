@@ -78,7 +78,7 @@ stmt_var =
 ```
 
 a function has list of parameters, its body is a list of statements,
-and its body is a list of statements terminated by the "end" keyword
+and its body is a list of statements terminated by the "}" character
 because this is a dynamically typed language, there are no parameter type annotations
 the param list is a list of identifiers surrounded by parentheses
 
@@ -86,13 +86,13 @@ note that a function may also appear as an expression, in which case it isn't re
 to have a name. (see `expr_fn`)
 ```
 stmt_fn =
-    "fn" IDENT "(" IDENT,* ")" "do" stmt* "end"
+    "fn" IDENT "(" IDENT,* ")" "{" stmt* "}"
 ```
 
 loops are infinite by default, and must be manually broken out of with `break` to become non-infinite
 ```
 stmt_loop =
-    "loop" stmt* "end"
+    "loop" "{" stmt* "}"
 ```
 
 an expression statement is an expression executed purely for its side-effects
@@ -117,7 +117,7 @@ return is an expression. it may be tricky to parse a return without a value, but
 a `return` appears either at the top-level, or in a function.
 if it appears at the top-level, then it must either contain a subexpression, or we must find
 something that can't possibly begin an expression, or the end of the file.
-similarly, for `return` in a function, we must find either the "end" keyword,
+similarly, for `return` in a function, we must find either the "}" character,
 an expression, or something that can't possibly begin an expression.
 for both of these, the parser must maintain a function that determines if the next token may begin an expression.
 ```
@@ -146,25 +146,25 @@ this allows it to be used as a kind of ternary operator.
 in case the `expr_if` appears as the direct child of a `stmt_expr` node, it does not need to have an `else` branch.
 if it appears as a subexpression anywhere, it MUST have an `else` branch.
 for example:
-  var x = if true then 0 end
+  var x = if true { 0 }
 would be a syntax error; the `if` expr is used as the rhs of a `stmt_var`, which means it MUST have an `else` branch.
 ```
 expr_if =
-    "if" expr "do" stmt* "end"
-    "if" expr "do" stmt* "else" stmt* "end"
+    "if" expr "{" stmt* "}"
+    "if" expr "{" stmt* "}" "else" "{" stmt* "}"
 ```
 
 `do` expressions are similar to `if`: a sequence of statements, its value being the last `stmt_expr` in its body.
 in case no `stmt_expr` appears within its body, then its value is `nil`.
 ```
 expr_do =
-    "do" stmt* "end"
+    "do" "{" stmt* "}"
 ```
 
 same as `stmt_fn`, but may be anonymous
 ```
 expr_fn =
-    "fn" IDENT? "(" IDENT,* ")" "do" stmt* "end"
+    "fn" IDENT? "(" IDENT,* ")" "{" stmt* "}"
 ```
 
 an assignment is the highest precedence expression.
@@ -331,139 +331,138 @@ expr_nil =
 ## Examples
 
 ```
-fn fib_rec(n) do
-    if n < 2 do n
-    else fib(n-1) + fib(n-2)
-    end
-end
+fn fib_rec(n) {
+    if n < 2 { n }
+    else { fib(n-1) + fib(n-2) }
+}
 
-fn fib_iter(n) do
-    if n < 2 do return n end
+fn fib_iter(n) {
+    if n < 2 { return n }
     var prev = 0
     var curr = 1
 
     var i = 2
-    loop
-        if i > n do break end
+    loop {
+        if i > n { break }
         i += 1
 
         var next = prev + curr
         prev = curr
         curr = next
-    end
+    }
 
     return curr
-end
+}
 
-fn factorial(n) do
-  if n <= 1 do
+fn factorial(n) {
+  if n <= 1 {
     return 1
-  end
+  }
   return n * factorial(n - 1)
-end
+}
 
-fn greatest_common_divisor(a, b) do
+fn greatest_common_divisor(a, b) {
   loop
-    if a == b do
+    if a == b {
       return a
-    end
+    }
 
-    if a > b do
+    if a > b {
       a = a - b
-    else
+    } else {
       b = b - a
-    end
-  end
-end
+    }
+  }
+}
 
-fn is_prime(n) do
-  if n < 2 do
+fn is_prime(n) {
+  if n < 2 {
     return false
-  end
+  }
 
   var i = 2
   loop
-    if i * i > n do
+    if i * i > n {
       break
-    end
+    }
 
-    if n / i * i == n do
+    if n / i * i == n {
       return false
-    end
+    }
 
     i = i + 1
-  end
+  }
 
   return true
-end
+}
 
-fn selection_sort(arr) do
+fn selection_sort(arr) {
   var n = len(arr)
   var i = 0
   loop
-    if i >= n - 1 do
+    if i >= n - 1 {
       break
-    end
+    }
 
     var min_idx = i
     var j = i + 1
     loop
-      if j >= n do
+      if j >= n {
         break
-      end
-      if arr[j] < arr[min_idx] do
+      }
+      if arr[j] < arr[min_idx] {
         min_idx = j
-      end
+      }
       j = j + 1
-    end
+    }
 
-    if min_idx != i do
+    if min_idx != i {
       var tmp = arr[i]
       arr[i] = arr[min_idx]
       arr[min_idx] = tmp
-    end
+    }
 
     i = i + 1
-  end
+  }
 
   return arr
-end
+}
 
-fn binary_search(arr, target) do
+fn binary_search(arr, target) {
   var low  = 0
   var high = len(arr) - 1
 
   loop
-    if low > high do
+    if low > high {
       break
-    end
+    }
 
     var mid = (low + high) / 2
     var v   = arr[mid]
 
-    if v == target do
+    if v == target {
       return mid
-    end
+    }
 
-    if v < target do
+    if v < target {
       low = mid + 1
-    else
+    } else {
       high = mid - 1
-    end
-  end
+    }
+  }
 
   return -1
-end
+}
 ```
 
 ```
 svc = http.service()
 
-svc.GET("/hello/{name}", fn(req, res) do
+svc.GET("/hello/{name}", fn(req, res) {
   res.status(200)
   res.header("Content-Type", "text/plain")
   res.body("Hello, {req.params.name}!")
-end)
+})
 
 http.serve(svc)
 ```

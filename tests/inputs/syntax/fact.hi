@@ -1,10 +1,10 @@
 ##parse
 
-fn factorial(n) do
-  if n <= 1 do
+fn factorial(n) {
+  if n <= 1 {
     return 1
-  else
+  } else {
     return n * factorial(n - 1)
-  end
-end
+  }
+}
 

@@ -1,7 +1,7 @@
 ##parse
 
-do
+do {
   return
-end
+}
 
 100 # not return value

@@ -1,6 +1,6 @@
-var v = 0
-loop
+let v = 0
+loop {
   v = 1
   break
-end
+}
 v

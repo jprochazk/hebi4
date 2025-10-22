@@ -7,9 +7,15 @@ fn main() {
     match &args[..] {
         ["-p" | "--print-ast", expr] => print_string(expr),
         ["-e" | "--eval", expr] => eval_string(expr),
+        ["-d" | "--disassemble", expr] => disassemble_string(expr),
         [path] => eval_file(Path::new(path)),
         _ => help(),
     }
+}
+
+fn disassemble_string(code: &str) {
+    let module = compile_string(code);
+    println!("{}", module.disasm(code));
 }
 
 fn print_string(code: &str) {
@@ -27,14 +33,18 @@ fn print_string(code: &str) {
     println!("{result}");
 }
 
-fn eval_string(code: &str) {
-    let module = match hebi4::Module::compile(None, &code) {
+fn compile_string(code: &str) -> hebi4::Module {
+    match hebi4::Module::compile(None, &code) {
         Ok(m) => m,
         Err(err) => {
             eprintln!("{}", err.render(&code));
             std::process::exit(1);
         }
-    };
+    }
+}
+
+fn eval_string(code: &str) {
+    let module = compile_string(code);
 
     hebi4::Hebi::new().with(|mut vm| {
         let loaded_module = vm.load(&module);

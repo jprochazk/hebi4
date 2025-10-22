@@ -1,6 +1,6 @@
-var result = 0
-var a = 1
-var b = 1
+let result = 0
+let a = 1
+let b = 1
 
 result = a * b
 result = 1 * b

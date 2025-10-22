@@ -1,15 +1,15 @@
 ##parse
 
-do
+do {
   1 + 1
   2 + 2
-end
+}
 
-do
-  do
+do {
+  do {
     1 + 1
     2 + 2
-  end
-end
+  }
+}
 
-var expr = do 1 + 1 end
+let expr = do { 1 + 1 }

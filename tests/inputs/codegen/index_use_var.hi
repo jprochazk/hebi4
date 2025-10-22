@@ -1,2 +1,2 @@
-var i = do 0 end
+let i = do { 0 }
 [][i]

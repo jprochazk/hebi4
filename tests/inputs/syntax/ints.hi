@@ -1,6 +1,6 @@
 ##parse
 
-var zero = 0
-var one = 1
-var i32_max = 2_147_483_647
-var i64_max = 9_223_372_036_854_775_807
+let zero = 0
+let one = 1
+let i32_max = 2_147_483_647
+let i64_max = 9_223_372_036_854_775_807

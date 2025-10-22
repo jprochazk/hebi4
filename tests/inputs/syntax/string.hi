@@ -1,11 +1,11 @@
 ##parse
 
-var simple = "test"
+let simple = "test"
 
-var laughing_face = "\u{1F602}"
+let laughing_face = "\u{1F602}"
 
-var newline = "\x0A"
+let newline = "\x0A"
 
-var newline_tab = "\n\t"
+let newline_tab = "\n\t"
 
-var escaped_quote = "\""
+let escaped_quote = "\""

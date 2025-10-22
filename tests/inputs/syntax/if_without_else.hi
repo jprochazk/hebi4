@@ -1,1 +1,1 @@
-var x = if true do 0 end
+let x = if true { 0 }

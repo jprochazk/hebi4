@@ -1,7 +1,7 @@
-if 1 do return 1 end
-if 0 do return 2 end
-if "hello" do return 3 end
-if "" do return 4 end
-if true do return 5 end
-if false do return 6 end
-if nil do return 7 end
+if 1 { return 1 }
+if 0 { return 2 }
+if "hello" { return 3 }
+if "" { return 4 }
+if true { return 5 }
+if false { return 6 }
+if nil { return 7 }

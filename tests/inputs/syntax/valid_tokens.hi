@@ -1,10 +1,9 @@
 ##tokenize
 
-var
+let
 fn
 do
 loop
-end
 return
 break
 continue

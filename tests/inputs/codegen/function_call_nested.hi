@@ -1,4 +1,4 @@
-fn f(v) do end
+fn f(v) {}
 
 # nested calls: each subsequent call gets a register,
 # plus one register for `0`.

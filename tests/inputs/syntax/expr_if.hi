@@ -1,18 +1,17 @@
 ##parse
 
-var simple =
-  if true do 0 else -1 end
+let simple =
+  if true { 0 } else { -1 }
 
-var ternary =
-  if true do 1 else 0 end
+let ternary =
+  if true { 1 } else { 0 }
 
-var multi_one =
-  if true do 0
-  else if true do 1
-  else -1 end
+let multi_one =
+  if true { 0 }
+  else if true { 1 }
+  else { -1 }
 
-var mutli_one_else =
-  if true do 0
-  else if true do 1
-  else 2
-  end
+let mutli_one_else =
+  if true { 0 }
+  else if true { 1 }
+  else { 2 }

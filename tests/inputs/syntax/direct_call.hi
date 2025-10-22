@@ -1,8 +1,8 @@
 ##emit
 
-fn test(a, b, c) do
+fn test(a, b, c) {
     print(a, b, c)
-end
+}
 
 test(1, 2, 3)
 

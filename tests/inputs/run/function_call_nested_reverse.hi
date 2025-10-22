@@ -1,4 +1,4 @@
-fn a() do b() end
-fn b() do 100 end
+fn a() { b() }
+fn b() { 100 }
 
 a()

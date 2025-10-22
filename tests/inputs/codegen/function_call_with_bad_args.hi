@@ -2,7 +2,7 @@
 # in case the callee is a function declaration,
 # and it's clear syntactically:
 
-fn f(a, b, c) do end
+fn f(a, b, c) { }
 
 # we could choose to just emit a `dyn` call and
 # let this explode at runtime, and this is somewhat

@@ -1,6 +1,6 @@
 ##parse
 
-loop
+loop {
   continue
   break
-end
+}

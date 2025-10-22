@@ -1,23 +1,23 @@
 ##parse
 
-fn is_prime(n) do
-  if n < 2 do
+fn is_prime(n) {
+  if n < 2 {
     return false
-  end
+  }
 
-  var i = 2
-  loop
-    if i * i > n do
+  let i = 2
+  loop {
+    if i * i > n {
       break
-    end
+    }
 
-    if n / i * i == n do
+    if n / i * i == n {
       return false
-    end
+    }
 
     i = i + 1
-  end
+  }
 
   return true
-end
+}
 

@@ -77,7 +77,7 @@ fn run(path: &Path) {
 // using the same VM.
 #[test]
 fn separate_modules() {
-    let a = module(r#"fn f(a) do a end f(10)"#);
+    let a = module(r#"fn f(a) { a } f(10)"#);
     let b = module(r#"100 + 200"#);
 
     Hebi::new().with(|mut r| {

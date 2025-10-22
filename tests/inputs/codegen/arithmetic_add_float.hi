@@ -1,6 +1,6 @@
-var result = 0
-var a = 1.0
-var b = 1.0
+let result = 0
+let a = 1.0
+let b = 1.0
 
 result = a + b
 result = 1.0 + b

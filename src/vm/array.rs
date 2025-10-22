@@ -52,8 +52,21 @@ impl<T: Sized + Copy> DynStack<T> {
     /// - There must be a value at the top of the stack.
     #[inline]
     pub unsafe fn pop_unchecked(&mut self) -> T {
+        debug_assert!(self.length > 0);
         self.length -= 1;
         self.inner.offset(self.length).read()
+    }
+
+    /// Read the top value.
+    ///
+    /// Assumes length is non-zero.
+    ///
+    /// # Safety
+    /// - There must be a value at the top of the stack.
+    #[inline]
+    pub unsafe fn top_unchecked(&mut self) -> *mut T {
+        debug_assert!(self.length > 0);
+        self.inner.base.add(self.length - 1)
     }
 
     #[inline]
@@ -142,7 +155,7 @@ impl<T: Sized + Copy> DynArray<T> {
     }
 
     /// Assuming the array holds items up to `offset`,
-    /// returns how many bytes are remaining.
+    /// returns how many slots are remaining.
     ///
     /// The array does not guarantee to hold items up to `offset`.
     #[inline]
@@ -154,7 +167,8 @@ impl<T: Sized + Copy> DynArray<T> {
     ///
     /// Calling this invalidates any pointers to the array created by
     /// [`Self::offset`] before the call.
-    #[inline(never)]
+    #[cold]
+    #[inline]
     pub unsafe fn grow(&mut self, additional: usize) {
         let old_capacity = self.capacity;
         let old_base = self.base;

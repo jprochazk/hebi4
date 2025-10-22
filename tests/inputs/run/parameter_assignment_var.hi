@@ -1,9 +1,9 @@
-fn f(v) do
+fn f(v) {
   v = 1
   v
-end
+}
 
-var v = 0
+let v = 0
 f(v)
 v
 

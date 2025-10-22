@@ -1,6 +1,6 @@
-var result = 10
-var a = 10
-var b = 10
+let result = 10
+let a = 10
+let b = 10
 
 # note: integer division
 result /= a  / b  # 10 / (10 / 10) = 10

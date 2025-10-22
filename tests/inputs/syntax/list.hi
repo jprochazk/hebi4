@@ -1,9 +1,9 @@
 ##parse
 
-var empty = []
+let empty = []
 
-var single = [0]
-var single_tc = [0,]
+let single = [0]
+let single_tc = [0,]
 
-var multi = [0, 1, 2]
-var multi_tc = [0, 1, 2,]
+let multi = [0, 1, 2]
+let multi_tc = [0, 1, 2,]

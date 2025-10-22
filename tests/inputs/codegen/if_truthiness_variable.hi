@@ -1,7 +1,7 @@
-var x = 1
-var y = 0
-var z = nil
+let x = 1
+let y = 0
+let z = nil
 
-if x do return 1 end
-if y do return 2 end
-if z do return 3 end
+if x { return 1 }
+if y { return 2 }
+if z { return 3 }

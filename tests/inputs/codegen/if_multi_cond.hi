@@ -1,11 +1,10 @@
-var a = 0
-var b = 1
+let a = 0
+let b = 1
 
-if a < b do        # islt
-else if a > b do   # isgt
-else if a <= b do  # islt
-else if a >= b do  # isgt
-else if a == b do  # iseq
-else if a != b do  # isne
-end
+if a < b {}        # islt
+else if a > b {}   # isgt
+else if a <= b {}  # islt
+else if a >= b {}  # isgt
+else if a == b {}  # iseq
+else if a != b {}  # isne
 

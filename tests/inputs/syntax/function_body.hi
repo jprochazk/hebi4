@@ -1,13 +1,13 @@
 ##parse
 
-fn test() do
+fn test() {
   1 + 1
-end
+}
 
-fn test(a, b, c) do
+fn test(a, b, c) {
   1 + 1
-end
+}
 
-fn test(a, b, c, ) do
+fn test(a, b, c, ) {
   1 + 1
-end
+}

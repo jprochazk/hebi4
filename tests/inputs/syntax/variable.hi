@@ -1,4 +1,4 @@
 ##parse
 
-var x = 0
-var y = 1
+let x = 0
+let y = 1

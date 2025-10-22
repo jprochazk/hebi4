@@ -1,1 +1,1 @@
-do do 1 end end
+do { do { 1 } }

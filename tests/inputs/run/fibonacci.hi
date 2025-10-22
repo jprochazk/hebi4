@@ -1,7 +1,6 @@
-fn fib(n) do
-  if n<2 do n
-  else fib(n-1)+fib(n-2)
-  end
-end
+fn fib(n) {
+  if n<2 { n }
+  else { fib(n-1)+fib(n-2) }
+}
 
 fib(10)

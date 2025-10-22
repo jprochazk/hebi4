@@ -200,11 +200,10 @@ fn lexeme(src: &str, kind: TokenKind) -> &str {
 
 #[rustfmt::skip]
 macro_rules! t {
-    (var) => ($crate::token::TokenKind::Var);
+    (let) => ($crate::token::TokenKind::Let);
     (fn) => ($crate::token::TokenKind::Fn);
     (do) => ($crate::token::TokenKind::Do);
     (loop) => ($crate::token::TokenKind::Loop);
-    (end) => ($crate::token::TokenKind::End);
     (return) => ($crate::token::TokenKind::Return);
     (break) => ($crate::token::TokenKind::Break);
     (continue) => ($crate::token::TokenKind::Continue);
@@ -320,16 +319,14 @@ impl Token {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, logos::Logos)]
 pub enum TokenKind {
-    #[token("var")]
-    Var,
+    #[token("let")]
+    Let,
     #[token("fn")]
     Fn,
     #[token("do")]
     Do,
     #[token("loop")]
     Loop,
-    #[token("end")]
-    End,
     #[token("return")]
     Return,
     #[token("break")]
@@ -427,11 +424,10 @@ pub enum TokenKind {
 impl TokenKind {
     pub fn bare_lexeme(self) -> &'static str {
         match self {
-            TokenKind::Var => "var",
+            TokenKind::Let => "let",
             TokenKind::Fn => "fn",
             TokenKind::Do => "do",
             TokenKind::Loop => "loop",
-            TokenKind::End => "end",
             TokenKind::Return => "return",
             TokenKind::Break => "break",
             TokenKind::Continue => "continue",

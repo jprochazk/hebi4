@@ -1,4 +1,4 @@
-fn f(a, b, c) do end
+fn f(a, b, c) {}
 
 f(1, 2, 3)
 

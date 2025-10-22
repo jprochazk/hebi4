@@ -1,4 +1,4 @@
-do
-  var a = 1
-end
+do {
+  let a = 1
+}
 a = 2

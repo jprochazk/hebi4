@@ -1,11 +1,11 @@
-loop
-  var v = 0
-  loop
-    var v = 1
+loop {
+  let v = 0
+  loop {
+    let v = 1
     break
-    var v = 2
-  end
+    let v = 2
+  }
   break
-  var v = 3
-end
+  let v = 3
+}
 
