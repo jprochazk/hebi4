@@ -23,7 +23,7 @@ fn codegen() {
 fn miri(args: &[String]) {
     // let miriflags = "-Zmiri-tree-borrows -Zmiri-disable-isolation";
     let miriflags = "-Zmiri-disable-isolation";
-    cargo("+nightly miri test")
+    cargo("+nightly miri nextest run")
         .with_args(args)
         .with_envs([("MIRIFLAGS", miriflags)])
         .run();
