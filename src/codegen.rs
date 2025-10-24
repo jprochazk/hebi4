@@ -1732,6 +1732,11 @@ fn eval_expr_set_index<'a>(
     span: Span,
     dst: Option<Reg>,
 ) -> Result<Value<'a>> {
+    // TODO: support `op`
+    if *node.op() != ast::AssignOp::None {
+        todo!()
+    }
+
     // expr in statement position, result is always unused
     let _ = dst;
 
