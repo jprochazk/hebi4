@@ -60,12 +60,12 @@ impl<'a> GcRef<'a, List> {
     }
 
     #[inline]
-    pub(crate) fn get(&self, index: usize) -> Option<ValueRef<'a>> {
+    pub fn get(&self, index: usize) -> Option<ValueRef<'a>> {
         GcRef::map_value_opt(self, |this| this.items.get(index))
     }
 
     #[inline]
-    pub(crate) fn iter(&self) -> ListIter<'a> {
+    pub fn iter(&self) -> ListIter<'a> {
         ListIter {
             list: *self,
             index: 0,
@@ -127,6 +127,7 @@ impl<'a> GcRefMut<'a, List> {
     /// Append `value` to the list.
     #[inline]
     pub fn push(&mut self, value: ValueRoot<'_>) {
+        // unrooted pointer is transitively rooted by `self`
         self.items.push(value.raw());
     }
 
@@ -146,8 +147,6 @@ impl<'a> GcRefMut<'a, List> {
     }
 
     /// Set `self[index]` to `value`.
-    ///
-    /// Assumes that `value` is alive, and that `index` is a valid index.
     ///
     /// ## Safety
     ///
