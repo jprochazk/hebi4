@@ -63,10 +63,7 @@ impl Heap {
     ///
     /// The object itself may be initialized in-place in the `init` callback.
     #[inline]
-    pub(crate) fn alloc_no_gc<T: Trace + 'static>(
-        &self,
-        init: impl FnOnce(*mut MaybeUninit<T>),
-    ) -> GcPtr<T> {
+    pub(crate) fn alloc_no_gc<T: Trace>(&self, init: impl FnOnce(*mut MaybeUninit<T>)) -> GcPtr<T> {
         // We do manual piece-wise init, because allocation failure should _not_
         // cause the value to be dropped! Therefore it must be constructed _after_
         // we have a place to put it.
@@ -256,12 +253,15 @@ impl<T: Sized + 'static> GcPtr<T> {
     /// ## Safety
     /// - The pointer must have been produced by `Gc::into_raw`.
     #[inline]
-    pub(crate) unsafe fn from_raw(ptr: *mut T) -> GcPtr<T> {
+    pub(crate) unsafe fn from_raw(ptr: NonNull<T>) -> GcPtr<T> {
         let offset = core::mem::offset_of!(GcBox<T>, value);
         // CAST: `GcBox` is a `repr(C)` struct with `T` as its 2nd field
         let ptr = ptr.cast::<u8>().sub(offset).cast::<GcBox<T>>();
-        let ptr = NonNull::new_unchecked(ptr);
 
+        GcPtr { ptr }
+    }
+
+    pub(crate) unsafe fn from_raw_gcbox(ptr: NonNull<GcBox<T>>) -> GcPtr<T> {
         GcPtr { ptr }
     }
 
@@ -565,8 +565,12 @@ impl GcAnyPtr {
 
     /// Cast to a `GcPtr<T>` after checking that `self`
     /// actually points to a `T`.
+    ///
+    /// ## Safety
+    ///
+    /// - Object must be live.
     #[inline]
-    pub fn cast<T: Trace>(self) -> Option<GcPtr<T>> {
+    pub unsafe fn cast<T: Trace>(self) -> Option<GcPtr<T>> {
         if !self.is::<T>() {
             return None;
         }
@@ -581,6 +585,7 @@ impl GcAnyPtr {
     /// ## Safety
     ///
     /// - This pointer must point to an instance of `T`.
+    /// - Object must be live.
     #[inline]
     pub unsafe fn cast_unchecked<T: Trace>(self) -> GcPtr<T> {
         GcPtr {
@@ -588,12 +593,16 @@ impl GcAnyPtr {
         }
     }
 
+    /// Returns `true` if `self` is an instance of `T`.
+    ///
+    /// ## Safety
+    ///
+    /// - Object must be live.
     #[inline]
-    pub fn is<T: Trace>(self) -> bool {
-        // SAFETY:
+    pub unsafe fn is<T: Trace>(self) -> bool {
         // VTables are static, so comparing them for equality
         // is the same as comparing the types' `TypeId`s.
-        let vt = unsafe { self.vt() };
+        let vt = self.vt();
         core::ptr::eq(vt, T::vtable())
     }
 
@@ -658,6 +667,9 @@ impl GcAnyPtr {
         header.read().marked()
     }
 
+    /// ## Safety
+    ///
+    /// - Object must be live.
     #[inline]
     unsafe fn trace(self, tracer: &Tracer) {
         (self.vt().trace)(self.into_raw().as_ptr().cast_const(), tracer);
@@ -966,7 +978,7 @@ impl<'a, T: Trace> GcRoot<'a, T> {
     /// a0.as_mut(heap).push(a1.as_any().into());
     /// ```
     #[inline]
-    pub fn as_ref<'v>(&self, heap: &'v Heap) -> GcRef<'v, T> {
+    pub fn as_ref<'v>(&'v self, heap: &'v Heap) -> GcRef<'v, T> {
         #[cfg(debug_assertions)]
         debug_assert!(heap.id() == self.heap_id);
 
@@ -989,7 +1001,7 @@ impl<'a, T: Trace> GcRoot<'a, T> {
 
     /// Dereference the pointer, yielding a direct _unique_ reference to the object.
     #[inline]
-    pub fn as_mut<'v>(&self, heap: &'v mut Heap) -> GcRefMut<'v, T> {
+    pub fn as_mut<'v>(&'v self, heap: &'v mut Heap) -> GcRefMut<'v, T> {
         #[cfg(debug_assertions)]
         debug_assert!(heap.id() == self.heap_id);
 
@@ -1105,9 +1117,11 @@ impl<'a> GcAnyRoot<'a> {
         core::mem::transmute(self)
     }
 
+    /// Returns `true` if `self` is an instance of `T`.
     #[inline]
     pub fn is<T: Trace>(&self) -> bool {
-        self.as_ptr().is::<T>()
+        // SAFETY: rooted
+        unsafe { self.as_ptr().is::<T>() }
     }
 
     /// Retrieve the stored pointer.
@@ -1147,6 +1161,97 @@ impl std::fmt::Debug for GcAnyRoot<'_> {
     }
 }
 
+// In order to represent uninit roots, we have two options:
+//
+// A. Wrap the `GcPtr` in `StackRoot` in `Option`
+// B. Always point at some object, which the GC can somehow deal with
+//
+// Major downside of (A) is that it transforms what is currently two branches into
+// _three_ branches:
+//
+// 1. Check if the pointer is `Some`
+// 2. Check if it is already marked
+// 3. Trace the object (indirect branch)
+//
+// Instead of that, we choose to do (B). The idea is:
+// - Uninit roots are initialized to `Gc<Empty>`.
+// - `Empty` is an _empty object_, consisting only of its `GcHeader`, and its
+//   trace function does nothing.
+// - `Empty` is still a real object, with a real location in memory, which can be
+//   traced in case the `StackRoot` is uninitialized at the time of GC.
+// - We don't actually allocate `Empty`, it lives in thread-local memory.
+//   - The only way to use an uninit root is to initialize it with a different object
+//     type, so there is no fear of these `Empty` objects appearing elsewhere in the VM.
+// - We ensure that instances of `Empty` are never freed by not including them
+//   in any sweep lists.
+// - Because instances of `Empty` are never swept, once they are marked, they will
+//   forever stay marked, so the cost of tracing them is actually a bit lower than
+//   most objects.
+//
+// It shoul be fairly rare to run a GC with any uninitialized roots in the root list,
+// so the additional cost of supporting uninitialized roots should be close to zero
+// in case there are none.
+
+/// An uninitialized root. Before using it, it must be initialized to something.
+#[repr(transparent)]
+pub struct GcUninitRoot<'a>(GcRoot<'a, __Empty>);
+
+impl<'a> GcUninitRoot<'a> {
+    /// Internal API
+    #[doc(hidden)]
+    #[inline]
+    pub unsafe fn __new(heap: &Heap, place: Pin<&'a mut StackRoot<__Empty>>) -> Self {
+        Self(GcRoot::__new(heap, place))
+    }
+
+    /// Initialize the root with `ptr`.
+    #[inline]
+    pub fn init<T: Trace>(self, heap: &mut Heap, ptr: impl Rooted<T>) -> GcRoot<'a, T> {
+        self.0.set(heap, ptr)
+    }
+}
+
+/// Internal API
+#[doc(hidden)]
+#[repr(transparent)]
+pub struct __Empty {
+    _marker: PhantomData<()>,
+}
+
+impl __Empty {
+    /// Internal API
+    #[doc(hidden)]
+    pub unsafe fn __get() -> GcPtr<__Empty> {
+        // NOTE: not part of any sweep list, so will never be freed.
+        thread_local! {
+            static MEMORY: std::cell::UnsafeCell<GcBox<__Empty>> = std::cell::UnsafeCell::new(GcBox {
+                header: UnsafeCell::new(GcHeader::new(__Empty::vtable(), None)),
+                value: UnsafeCell::new(__Empty {
+                    _marker: PhantomData,
+                }),
+            })
+        }
+
+        // The resulting pointer will never be transferred between threads.
+        MEMORY.with(|memory| unsafe {
+            let memory = NonNull::new_unchecked(UnsafeCell::get(memory));
+            GcPtr::from_raw_gcbox(memory)
+        })
+    }
+}
+
+unsafe impl Trace for __Empty {
+    vtable!(__Empty);
+
+    unsafe fn trace(&self, _tracer: &Tracer) {}
+}
+
+impl std::fmt::Debug for GcRef<'_, __Empty> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Empty")
+    }
+}
+
 /// A shared reference to a GC-managed `T`.
 ///
 /// This type is used to certify that the reference comes from a live root,
@@ -1164,6 +1269,7 @@ impl<'a, T> Clone for GcRef<'a, T> {
 impl<'a, T> Copy for GcRef<'a, T> {}
 
 impl<'a, T: Trace> GcRef<'a, T> {
+    /// Project the rootedness of a `T` to its field.
     #[inline]
     pub fn map<U: Trace>(
         this: &Self,
@@ -1173,6 +1279,9 @@ impl<'a, T: Trace> GcRef<'a, T> {
         unsafe { ptr.as_ref() }
     }
 
+    /// Project the rootedness of a `T` to its field.
+    ///
+    /// This function can map optional fields.
     #[inline]
     pub fn map_opt<U: Trace>(
         this: &Self,
@@ -1228,26 +1337,34 @@ impl<'a> GcAnyRef<'a> {
         Self(ptr, PhantomData)
     }
 
+    /// Cast to a `GcRef<T>` after checking that `self`
+    /// actually points to a `T`.
     #[inline]
     pub fn cast<T: Trace>(self) -> Option<GcRef<'a, T>> {
-        let this = self.0.cast()?;
+        // SAFETY: rooted
+        let this = unsafe { self.0.cast()? };
         Some(GcRef(this, PhantomData))
     }
 
+    /// Cast to a `GcRef<T>` without checking that `self`
+    /// actually points to a `T`.
     #[inline]
     pub unsafe fn cast_unchecked<T: Trace>(self) -> GcRef<'a, T> {
+        // SAFETY: rooted, type safety guaranteed by caller
         let this = unsafe { self.0.cast_unchecked() };
         GcRef(this, PhantomData)
     }
 
+    /// Returns `true` if `self` is an instance of `T`.
     #[inline]
     pub fn is<T: Trace>(&self) -> bool {
-        self.0.is::<T>()
+        // SAFETY: rooted
+        unsafe { self.0.is::<T>() }
     }
 
     #[inline]
     pub fn type_name(&self) -> &'static str {
-        // SAFETY: `self` is rooted and guaranteed to be live
+        // SAFETY: rooted
         unsafe { self.0.type_name() }
     }
 
@@ -1279,6 +1396,7 @@ impl std::fmt::Debug for GcAnyRef<'_> {
 pub struct GcRefMut<'a, T: 'static>(GcPtr<T>, PhantomData<&'a mut T>);
 
 impl<'a, T: Trace> GcRefMut<'a, T> {
+    /// Project the rootedness of a `T` to its field.
     #[inline]
     pub fn map<U: Trace>(
         this: &mut Self,
@@ -1343,21 +1461,29 @@ impl<'a> GcAnyRefMut<'a> {
         Self(ptr, PhantomData)
     }
 
+    /// Cast to a `GcRefMut<T>` after checking that `self`
+    /// actually points to a `T`.
     #[inline]
     pub fn cast<T: Trace>(self) -> Option<GcRefMut<'a, T>> {
-        let this = self.0.cast()?;
+        // SAFETY: rooted
+        let this = unsafe { self.0.cast()? };
         Some(GcRefMut(this, PhantomData))
     }
 
+    /// Cast to a `GcRefMut<T>` without checking that `self`
+    /// actually points to a `T`.
     #[inline]
     pub unsafe fn cast_unchecked<T: Trace>(self) -> GcRefMut<'a, T> {
+        // SAFETY: rooted, type safety guaranteed by caller
         let this = unsafe { self.0.cast_unchecked() };
         GcRefMut(this, PhantomData)
     }
 
+    /// Returns `true` if `self` is an instance of `T`.
     #[inline]
     pub fn is<T: Trace>(&self) -> bool {
-        self.0.is::<T>()
+        // SAFETY: rooted
+        unsafe { self.0.is::<T>() }
     }
 
     #[inline]
@@ -1523,6 +1649,9 @@ impl ValueRaw {
 }
 
 impl<'a, T: Trace> GcRef<'a, T> {
+    /// Project the rootedness of a `T` to its field.
+    ///
+    /// This function deals with dynamic values instead of objects.
     #[inline]
     pub fn map_value(
         this: &Self,
@@ -1532,6 +1661,9 @@ impl<'a, T: Trace> GcRef<'a, T> {
         unsafe { value.as_ref() }
     }
 
+    /// Project the rootedness of a `T` to its field.
+    ///
+    /// This function deals with optional dynamic values instead of objects.
     #[inline]
     pub fn map_value_opt(
         this: &Self,
@@ -1549,6 +1681,10 @@ mod private {
     pub trait Sealed {}
 }
 
+/// Represents a rooted pointer.
+///
+/// Used as a marker for [`GcRoot`] and a shared reference to it
+/// for use in rooting macros.
 pub trait Rooted<T>: private::Sealed {
     fn as_ptr(&self) -> GcPtr<T>;
 }
@@ -1599,7 +1735,7 @@ macro_rules! __let_root_unchecked {
     };
 }
 
-/// Create a root on the stack.
+/// Create a root on the stack from a raw `GcPtr`.
 ///
 /// ```rust
 /// # use hebi4::{gc::{Heap, let_root_unchecked}, value::List};
@@ -1624,6 +1760,32 @@ pub use crate::__let_root_unchecked as let_root_unchecked;
 
 #[macro_export]
 #[doc(hidden)]
+macro_rules! __let_root {
+    (in $heap:ident; $place:ident) => {
+        let ptr = unsafe { $crate::gc::__Empty::__get() };
+        let mut place = unsafe { $crate::gc::StackRoot::from_heap_ptr($heap, ptr) };
+        let mut $place = unsafe {
+            $crate::gc::GcUninitRoot::__new($heap, ::core::pin::Pin::new_unchecked(&mut place))
+        };
+    };
+}
+
+/// Create an uninitialized root on the stack.
+///
+/// ```rust
+/// # use hebi4::{gc::{Heap, let_root}, value::list};
+/// # let heap = unsafe { &mut Heap::__testing() };
+/// # list!(in heap; list = 0);
+/// let_root!(in heap; obj);
+/// let obj = obj.init(heap, &list);
+/// ```
+///
+/// This operation is always safe, because the root is initialized to
+/// a valid sentinel value, and cannot be used in any until initialized.
+pub use crate::__let_root as let_root;
+
+#[macro_export]
+#[doc(hidden)]
 macro_rules! __reroot {
     (in $heap:ident; mut $place:ident = $ptr:expr) => {
         let ptr = $crate::gc::Rooted::as_ptr(&$ptr);
@@ -1637,10 +1799,9 @@ macro_rules! __reroot {
 
 /// Create a root on the stack from an existing root.
 ///
-/// Anything "rooted" may be used as the target pointer:
-/// - [`GcRef`]
-/// - [`GcRefMut`]
-/// - [`Root`]
+/// Any `GcRoot` or `&GcRoot` is a valid target for re-rooting.
+///
+/// Note that the type must be known, `GcAnyRoot` is not a valid target.
 ///
 /// ```rust
 /// # use hebi4::{gc::{Heap, reroot}, value::list};
