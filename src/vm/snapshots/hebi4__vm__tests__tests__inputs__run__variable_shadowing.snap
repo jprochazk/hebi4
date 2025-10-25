@@ -2,5 +2,11 @@
 source: src/vm/tests.rs
 expression: snapshot
 ---
+SOURCE
+let a = 0
+let a = 1
+a
+
+
 OK
 Int(1)

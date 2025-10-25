@@ -2,6 +2,28 @@
 source: src/parser/tests.rs
 expression: snapshot
 ---
+SOURCE
+##parse
+
+x = 0
+
+x.a = 0
+
+x[0] = 0
+
+x.a[0] = 0
+
+x[0].a = 0
+
+x.a.b.c[0][1][2] = 0
+
+
+x += 1
+x -= 1
+x *= 1
+x /= 1
+
+
 OK
 Root(
     [

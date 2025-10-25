@@ -2,6 +2,14 @@
 source: src/parser/tests.rs
 expression: snapshot
 ---
+SOURCE
+##parse
+
+let empty = fn() {}
+let args = fn(a, b, c) {}
+let args_tc = fn(a, b, c, ) {}
+
+
 OK
 Root(
     [

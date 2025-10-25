@@ -2,6 +2,15 @@
 source: src/codegen/tests.rs
 expression: snapshot
 ---
+SOURCE
+let a = 5
+let b = 3
+
+if a + b { return 1 }
+if a - 5 { return 2 }
+if a * 0 { return 3 }
+
+
 OK
 .fn @main
   params 0

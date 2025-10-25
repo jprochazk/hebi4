@@ -2,5 +2,19 @@
 source: src/vm/tests.rs
 expression: snapshot
 ---
+SOURCE
+let a = 1
+let b = 2
+let result = 0
+
+if (a<b) and (a<b)       { result+=1 }
+if not ((a<b) and (a<b)) {}            else { result+=1 }
+if (a<b) or (a<b)        { result+=1 } else {}
+if not ((a<b) or (a<b))  {}            else { result+=1 }
+
+result
+
+
+
 OK
 Int(4)

@@ -2,5 +2,10 @@
 source: src/vm/tests.rs
 expression: snapshot
 ---
+SOURCE
+let v = 1
+not v
+
+
 OK
 Bool(false)

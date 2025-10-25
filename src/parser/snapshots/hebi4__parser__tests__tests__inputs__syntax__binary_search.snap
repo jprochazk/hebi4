@@ -2,6 +2,33 @@
 source: src/parser/tests.rs
 expression: snapshot
 ---
+SOURCE
+##parse
+
+fn binary_search(arr, target) {
+  let low  = 0
+  let high = len(arr) - 1
+
+  loop {
+    if low > high { break }
+
+    let mid = (low + high) / 2
+    let v   = arr[mid]
+
+    if v == target { return mid }
+
+    if v < target {
+      low = mid + 1
+    } else {
+      high = mid - 1
+    }
+  }
+
+  return -1
+}
+
+
+
 OK
 Root(
     [

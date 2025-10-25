@@ -2,6 +2,19 @@
 source: src/codegen/tests.rs
 expression: snapshot
 ---
+SOURCE
+let a = 0
+let b = 1
+
+if a < b {}        # islt
+else if a > b {}   # isgt
+else if a <= b {}  # islt
+else if a >= b {}  # isgt
+else if a == b {}  # iseq
+else if a != b {}  # isne
+
+
+
 OK
 .fn @main
   params 0

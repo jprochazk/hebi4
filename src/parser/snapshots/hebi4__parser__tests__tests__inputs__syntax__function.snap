@@ -2,6 +2,16 @@
 source: src/parser/tests.rs
 expression: snapshot
 ---
+SOURCE
+##parse
+
+fn test() {}
+
+fn test(a, b, c) {}
+
+fn test(a, b, c,) {}
+
+
 OK
 Root(
     [

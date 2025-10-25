@@ -2,6 +2,19 @@
 source: src/codegen/tests.rs
 expression: snapshot
 ---
+SOURCE
+let x = 1
+let result = 0
+
+if x {
+    result = 10
+} else {
+    result = 20
+}
+
+result
+
+
 OK
 .fn @main
   params 0

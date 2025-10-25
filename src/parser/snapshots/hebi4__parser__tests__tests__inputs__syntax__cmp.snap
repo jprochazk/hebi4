@@ -2,6 +2,17 @@
 source: src/parser/tests.rs
 expression: snapshot
 ---
+SOURCE
+##parse
+
+0 < 1
+1 > 0
+1 >= 0
+0 <= 1
+1 == 1
+0 != 1
+
+
 OK
 Root(
     [

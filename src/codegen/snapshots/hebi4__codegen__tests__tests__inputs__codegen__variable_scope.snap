@@ -2,6 +2,14 @@
 source: src/codegen/tests.rs
 expression: snapshot
 ---
+SOURCE
+do {
+  let a = 1
+  do { a }
+}
+
+
+
 OK
 .fn @main
   params 0

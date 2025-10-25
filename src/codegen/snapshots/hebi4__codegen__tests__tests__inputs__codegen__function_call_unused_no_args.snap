@@ -2,6 +2,16 @@
 source: src/codegen/tests.rs
 expression: snapshot
 ---
+SOURCE
+fn f() {}
+
+let a = 0
+let b = 1
+
+# no args means `dst` can be used without a `mov`
+a = f()
+
+
 OK
 .fn @main
   params 0

@@ -2,5 +2,20 @@
 source: src/vm/tests.rs
 expression: snapshot
 ---
+SOURCE
+let result = 10
+let a = 10
+let b = 10
+
+# note: integer division
+result /= a  / b  # 10 / (10 / 10) = 10
+result /= 10 / b  # 10 / (10 / 10) = 10
+result /= a  / 10 # 10 / (10 / 10) = 10
+
+result #=10
+
+
+
+
 OK
 Int(10)

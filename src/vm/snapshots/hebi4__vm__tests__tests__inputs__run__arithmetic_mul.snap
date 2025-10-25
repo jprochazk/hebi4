@@ -2,5 +2,19 @@
 source: src/vm/tests.rs
 expression: snapshot
 ---
+SOURCE
+let result = 1
+let a = 2
+let b = 2
+
+result *= a * b  # 1 * 2 * 2 = 4
+result *= 1 * b  # 4 * 1 * 2 = 8
+result *= a * 1  # 8 * 2 * 1 = 16
+
+result  #=16
+
+
+
+
 OK
 Int(16)

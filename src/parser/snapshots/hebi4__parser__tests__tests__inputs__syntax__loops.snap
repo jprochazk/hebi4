@@ -2,6 +2,15 @@
 source: src/parser/tests.rs
 expression: snapshot
 ---
+SOURCE
+##parse
+
+loop {
+  continue
+  break
+}
+
+
 OK
 Root(
     [

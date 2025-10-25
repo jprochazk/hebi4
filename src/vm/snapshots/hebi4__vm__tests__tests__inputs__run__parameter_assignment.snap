@@ -2,5 +2,16 @@
 source: src/vm/tests.rs
 expression: snapshot
 ---
+SOURCE
+fn f(v) {
+  v = 1
+  v
+}
+
+let v = 0
+v = f(v)
+v
+
+
 OK
 Int(1)

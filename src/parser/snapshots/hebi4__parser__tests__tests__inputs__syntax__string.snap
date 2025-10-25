@@ -2,6 +2,20 @@
 source: src/parser/tests.rs
 expression: snapshot
 ---
+SOURCE
+##parse
+
+let simple = "test"
+
+let laughing_face = "\u{1F602}"
+
+let newline = "\x0A"
+
+let newline_tab = "\n\t"
+
+let escaped_quote = "\""
+
+
 OK
 Root(
     [

@@ -2,6 +2,32 @@
 source: src/parser/tests.rs
 expression: snapshot
 ---
+SOURCE
+##parse
+
+fn is_prime(n) {
+  if n < 2 {
+    return false
+  }
+
+  let i = 2
+  loop {
+    if i * i > n {
+      break
+    }
+
+    if n / i * i == n {
+      return false
+    }
+
+    i = i + 1
+  }
+
+  return true
+}
+
+
+
 OK
 Root(
     [

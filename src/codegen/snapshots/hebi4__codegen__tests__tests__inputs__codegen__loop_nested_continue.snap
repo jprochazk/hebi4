@@ -2,6 +2,19 @@
 source: src/codegen/tests.rs
 expression: snapshot
 ---
+SOURCE
+loop {
+  let v = 0
+  loop {
+    let v = 1
+    continue
+    let v = 2
+  }
+  continue
+  let v = 3
+}
+
+
 OK
 .fn @main
   params 0

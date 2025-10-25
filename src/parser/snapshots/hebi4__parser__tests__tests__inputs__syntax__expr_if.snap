@@ -2,6 +2,26 @@
 source: src/parser/tests.rs
 expression: snapshot
 ---
+SOURCE
+##parse
+
+let simple =
+  if true { 0 } else { -1 }
+
+let ternary =
+  if true { 1 } else { 0 }
+
+let multi_one =
+  if true { 0 }
+  else if true { 1 }
+  else { -1 }
+
+let mutli_one_else =
+  if true { 0 }
+  else if true { 1 }
+  else { 2 }
+
+
 OK
 Root(
     [

@@ -2,5 +2,9 @@
 source: src/vm/tests.rs
 expression: snapshot
 ---
+SOURCE
+0
+
+
 OK
 Int(0)

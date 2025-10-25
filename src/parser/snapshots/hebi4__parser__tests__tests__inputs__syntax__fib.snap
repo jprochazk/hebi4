@@ -2,6 +2,36 @@
 source: src/parser/tests.rs
 expression: snapshot
 ---
+SOURCE
+##parse
+
+fn fib_rec(n) {
+  if n < 2 {
+    n
+  } else {
+    fib(n-1) + fib(n-2)
+  }
+}
+
+fn fib_iter(n) {
+  if n < 2 { return n }
+
+  let prev = 0
+  let curr = 1
+  let i = 2
+  loop {
+    if i > n { break }
+    i += 1
+
+    let next = prev + curr
+    prev = curr
+    curr = next
+  }
+
+  return curr
+}
+
+
 OK
 Root(
     [

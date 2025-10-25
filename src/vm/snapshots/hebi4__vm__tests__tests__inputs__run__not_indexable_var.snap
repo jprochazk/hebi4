@@ -2,6 +2,12 @@
 source: src/vm/tests.rs
 expression: snapshot
 ---
+SOURCE
+let v = 0
+let i = 0
+v[i]
+
+
 ERROR
 this type cannot be indexed
 3 |  v[i]

@@ -2,6 +2,16 @@
 source: src/codegen/tests.rs
 expression: snapshot
 ---
+SOURCE
+fn f(a, b, c) {}
+
+# unused value with args, that means the call expr
+# doesn't receive a register, and must allocate all
+f(0, 1, 2)
+
+nil
+
+
 OK
 .fn @main
   params 0

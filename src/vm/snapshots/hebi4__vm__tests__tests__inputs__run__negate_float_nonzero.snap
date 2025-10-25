@@ -2,5 +2,9 @@
 source: src/vm/tests.rs
 expression: snapshot
 ---
+SOURCE
+not 1.0
+
+
 OK
 Bool(false)

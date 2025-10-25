@@ -2,6 +2,12 @@
 source: src/codegen/tests.rs
 expression: snapshot
 ---
+SOURCE
+let v = 0
+
+v()()
+
+
 OK
 .fn @main
   params 0

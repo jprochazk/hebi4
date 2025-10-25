@@ -2,5 +2,14 @@
 source: src/vm/tests.rs
 expression: snapshot
 ---
+SOURCE
+let v = 0
+loop {
+  if v == 10 { break }
+  v += 1
+}
+v
+
+
 OK
 Int(10)

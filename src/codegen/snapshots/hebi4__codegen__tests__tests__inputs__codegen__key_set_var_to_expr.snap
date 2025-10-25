@@ -2,6 +2,13 @@
 source: src/codegen/tests.rs
 expression: snapshot
 ---
+SOURCE
+let a = {foo:0}
+let k = "foo"
+let v = 1
+a[k] = v + v
+
+
 OK
 .fn @main
   params 0

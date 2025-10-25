@@ -2,6 +2,15 @@
 source: src/parser/tests.rs
 expression: snapshot
 ---
+SOURCE
+##parse
+
+test()
+test(1)
+test(1, 2, 3)
+test(1, 2, 3, )
+
+
 OK
 Root(
     [

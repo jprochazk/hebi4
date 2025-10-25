@@ -2,6 +2,12 @@
 source: src/parser/tests.rs
 expression: snapshot
 ---
+SOURCE
+##parse
+
+fn () {}
+
+
 ERROR
 expected function name
 3 |  fn () {}

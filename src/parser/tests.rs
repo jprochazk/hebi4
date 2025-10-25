@@ -10,8 +10,11 @@ fn parser(path: &Path) {
 
     let tokens = tokenize(&input);
     let (snapshot, failure) = match parse(&tokens) {
-        Ok(ast) => (format!("OK\n{ast:#?}"), false),
-        Err(err) => (format!("ERROR\n{}", err.render(&input)), true),
+        Ok(ast) => (format!("SOURCE\n{input}\n\nOK\n{ast:#?}"), false),
+        Err(err) => (
+            format!("SOURCE\n{input}\n\nERROR\n{}", err.render(&input)),
+            true,
+        ),
     };
 
     #[cfg(not(miri))]

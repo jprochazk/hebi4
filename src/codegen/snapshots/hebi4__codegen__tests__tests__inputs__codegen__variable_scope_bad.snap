@@ -2,6 +2,14 @@
 source: src/codegen/tests.rs
 expression: snapshot
 ---
+SOURCE
+do {
+  let a = 1
+}
+
+a
+
+
 ERROR
 could not resolve name
 5 |  a

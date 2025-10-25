@@ -31,10 +31,13 @@ fn run(path: &Path) {
         // run each code snippet twice using the same VM,
         // ensuring it has the same result.
         let (snapshot, failure) = match r.run(&loaded_module) {
-            Ok(value) => (format!("OK\n{:?}", unsafe { value.as_ref() }), false),
+            Ok(value) => (
+                format!("SOURCE\n{input}\n\nOK\n{:?}", unsafe { value.as_ref() }),
+                false,
+            ),
             Err(err) => (
                 format!(
-                    "ERROR\n{}\n\nDISASM:\n\n{}",
+                    "SOURCE\n{input}\n\nERROR\n{}\n\nDISASM:\n\n{}",
                     err.render(&input),
                     module.disasm(&input)
                 ),
@@ -43,10 +46,13 @@ fn run(path: &Path) {
         };
 
         let (snapshot2, failure2) = match r.run(&loaded_module) {
-            Ok(value) => (format!("OK\n{:?}", unsafe { value.as_ref() }), false),
+            Ok(value) => (
+                format!("SOURCE\n{input}\n\nOK\n{:?}", unsafe { value.as_ref() }),
+                false,
+            ),
             Err(err) => (
                 format!(
-                    "ERROR\n{}\n\nDISASM:\n\n{}",
+                    "SOURCE\n{input}\n\nERROR\n{}\n\nDISASM:\n\n{}",
                     err.render(&input),
                     module.disasm(&input)
                 ),

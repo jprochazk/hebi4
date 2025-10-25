@@ -2,6 +2,20 @@
 source: src/token/tests.rs
 expression: snapshot
 ---
+SOURCE
+##tokenize
+
+# random unsupported symbols
+
+$ @ ~ ! & ^ \ | '
+
+0a       # ident
+
+01       # int
+0. 0.1e  # float
+
+
+TOKENS
 [
     Error("$", 42..43),
     Error("@", 44..45),

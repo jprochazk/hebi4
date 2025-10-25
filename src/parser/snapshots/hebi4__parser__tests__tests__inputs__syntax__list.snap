@@ -2,6 +2,18 @@
 source: src/parser/tests.rs
 expression: snapshot
 ---
+SOURCE
+##parse
+
+let empty = []
+
+let single = [0]
+let single_tc = [0,]
+
+let multi = [0, 1, 2]
+let multi_tc = [0, 1, 2,]
+
+
 OK
 Root(
     [

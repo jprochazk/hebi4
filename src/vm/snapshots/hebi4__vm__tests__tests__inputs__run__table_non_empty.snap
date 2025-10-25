@@ -2,5 +2,9 @@
 source: src/vm/tests.rs
 expression: snapshot
 ---
+SOURCE
+{a:1, b:2, c:3}
+
+
 OK
 {"a": Int(1), "b": Int(2), "c": Int(3)}

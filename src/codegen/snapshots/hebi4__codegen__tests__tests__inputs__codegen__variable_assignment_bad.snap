@@ -2,6 +2,10 @@
 source: src/codegen/tests.rs
 expression: snapshot
 ---
+SOURCE
+a = 2
+
+
 ERROR
 could not resolve name
 1 |  a = 2

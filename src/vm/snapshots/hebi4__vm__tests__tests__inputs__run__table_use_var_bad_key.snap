@@ -2,6 +2,13 @@
 source: src/vm/tests.rs
 expression: snapshot
 ---
+SOURCE
+let v = {a:100}
+let k = 0
+v[k]
+
+
+
 ERROR
 value is not a valid table key
 3 |  v[k]

@@ -2,6 +2,10 @@
 source: src/codegen/tests.rs
 expression: snapshot
 ---
+SOURCE
+false
+
+
 OK
 .fn @main
   params 0

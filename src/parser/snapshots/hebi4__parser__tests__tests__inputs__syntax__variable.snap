@@ -2,6 +2,13 @@
 source: src/parser/tests.rs
 expression: snapshot
 ---
+SOURCE
+##parse
+
+let x = 0
+let y = 1
+
+
 OK
 Root(
     [

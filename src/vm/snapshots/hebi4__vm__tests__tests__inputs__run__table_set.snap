@@ -2,5 +2,11 @@
 source: src/vm/tests.rs
 expression: snapshot
 ---
+SOURCE
+let v = {}
+v["a"] = 100
+v["a"]
+
+
 OK
 Int(100)

@@ -2,6 +2,43 @@
 source: src/parser/tests.rs
 expression: snapshot
 ---
+SOURCE
+##parse
+
+fn selection_sort(arr) {
+  let n = len(arr)
+  let i = 0
+  loop {
+    if i >= n - 1 {
+      break
+    }
+
+    let min_idx = i
+    let j = i + 1
+    loop {
+      if j >= n {
+        break
+      }
+      if arr[j] < arr[min_idx] {
+        min_idx = j
+      }
+      j = j + 1
+    }
+
+    if min_idx != i {
+      let tmp = arr[i]
+      arr[i] = arr[min_idx]
+      arr[min_idx] = tmp
+    }
+
+    i = i + 1
+  }
+
+  return arr
+}
+
+
+
 OK
 Root(
     [

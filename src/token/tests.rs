@@ -8,7 +8,7 @@ fn tokenizer(path: &Path) {
     let emit_snapshot =
         input.starts_with("##") && input.lines().next().unwrap().contains("tokenize");
 
-    let snapshot = format!("{:#?}", tokenize(&input));
+    let snapshot = format!("SOURCE\n{input}\n\nTOKENS\n{:#?}", tokenize(&input));
 
     #[cfg(not(miri))]
     if emit_snapshot {

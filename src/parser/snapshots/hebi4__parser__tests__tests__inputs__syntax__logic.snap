@@ -2,6 +2,16 @@
 source: src/parser/tests.rs
 expression: snapshot
 ---
+SOURCE
+##parse
+
+true or false and true or false
+
+let b = ((true or (false and true)) or false)
+
+let c = not true and not false
+
+
 OK
 Root(
     [

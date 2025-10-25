@@ -14,8 +14,14 @@ fn emitter(path: &Path) {
         }
     };
     let (snapshot, failure) = match emit("test".into(), &ast) {
-        Ok(m) => (format!("OK\n{}", m.disasm(&input)), false),
-        Err(err) => (format!("ERROR\n{}", err.render(&input)), true),
+        Ok(m) => (
+            format!("SOURCE\n{input}\n\nOK\n{}", m.disasm(&input)),
+            false,
+        ),
+        Err(err) => (
+            format!("SOURCE\n{input}\n\nERROR\n{}", err.render(&input)),
+            true,
+        ),
     };
 
     #[cfg(not(miri))]

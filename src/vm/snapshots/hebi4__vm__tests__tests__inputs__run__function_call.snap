@@ -2,5 +2,11 @@
 source: src/vm/tests.rs
 expression: snapshot
 ---
+SOURCE
+fn f() { 100 }
+
+f()
+
+
 OK
 Int(100)

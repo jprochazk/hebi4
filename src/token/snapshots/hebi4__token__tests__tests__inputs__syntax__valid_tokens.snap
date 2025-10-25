@@ -2,6 +2,47 @@
 source: src/token/tests.rs
 expression: snapshot
 ---
+SOURCE
+##tokenize
+
+let
+fn
+do
+loop
+return
+break
+continue
+if
+else
+
+({[]})
+
+.,
+
+= += -= *= /=
++ - * /
+
+or and not
+
+== != > >= < <=
+
+_abcdefghijklmnopqrstuvwxyz_ABCDEFGHIJKLMNOPQRSTUVWXYZ_0123456789_
+
+0 123456789 1_0
+
+0.0 123456789.123456789 1e100 1.1e100 1.1e-100 1.1e+100
+
+"asdf" "\n" "\t" "\x00" "\u{0000}"
+
+"\""
+
+true false nil
+
+# comments
+#! comments
+
+
+TOKENS
 [
     Let("let", 12..15),
     Fn("fn", 16..18),

@@ -2,6 +2,10 @@
 source: src/codegen/tests.rs
 expression: snapshot
 ---
+SOURCE
+1 / 0
+
+
 ERROR
 evaluation would fail: cannot divide by zero
 1 |  1 / 0

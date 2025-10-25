@@ -2,6 +2,19 @@
 source: src/codegen/tests.rs
 expression: snapshot
 ---
+SOURCE
+fn f(v) {}
+
+let a = 0
+let b = 1
+
+# dst is `r1`, and arg must go into `r2`,
+# but `r2` is already taken, so we have
+# to allocate including `dst` and then `mov`.
+a = f(1)
+
+
+
 OK
 .fn @main
   params 0

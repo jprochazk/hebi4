@@ -2,6 +2,12 @@
 source: src/parser/tests.rs
 expression: snapshot
 ---
+SOURCE
+##parse
+
+return  # no value
+
+
 OK
 Root(
     [

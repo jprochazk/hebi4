@@ -2,6 +2,11 @@
 source: src/codegen/tests.rs
 expression: snapshot
 ---
+SOURCE
+let a = 1
+a = 2
+
+
 OK
 .fn @main
   params 0
