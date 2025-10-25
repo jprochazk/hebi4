@@ -1,0 +1,25 @@
+---
+source: src/vm/tests.rs
+expression: snapshot
+---
+ERROR
+value is not a valid table key
+3 |  v[k]
+  |   ^^^
+
+
+DISASM:
+
+.fn @main
+  params 0
+  stack 3
+  .locals
+    v = r1
+    k = r2
+  .code
+  0  ltable r1, 1
+  1  lsmi r2, 100
+  2  skeyc r1, "a", r2
+  3  lsmi r2, 0
+  4  lidx r0, r1, r2
+  5  ret

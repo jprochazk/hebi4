@@ -1,0 +1,3 @@
+let v = 0
+let k = "a"
+v[k]

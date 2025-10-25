@@ -48,6 +48,7 @@ impl AsStr for GcRef<'_, String> {
 }
 
 impl<'a> GcRef<'a, Table> {
+    // TODO: string interning, pre-hashing
     #[inline]
     pub fn get<K>(&self, key: K) -> Option<ValueRef<'a>>
     where

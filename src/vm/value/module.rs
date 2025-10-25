@@ -192,6 +192,7 @@ fn canonicalize_function(
     let code = function.code().into();
     let literals = canonicalize_literals(heap, function.literals());
     let module = module.as_ptr();
+    let dbg = function.dbg().cloned();
 
     let_root_unchecked!(unsafe in heap; function = heap.alloc_no_gc(|ptr| unsafe {
         (*ptr).write(FunctionProto {
@@ -201,7 +202,7 @@ fn canonicalize_function(
             code,
             literals,
             module,
-            dbg: None,
+            dbg,
         });
     }));
 

@@ -21,13 +21,13 @@ lcap dst:reg src:cap;
 /* Store register `src` to current closure's capture `dst`. */
 scap dst:cap src:reg;
 
-/* Load index `idx` (register) from `target` (array) to register `dst`. */
+/* Load index `idx` (register) from `target` (array or table) to register `dst`. */
 lidx dst:reg target:reg idx:reg;
 
 /* Load index `idx` (literal) from `target` (array) to register `dst`. */
 lidxn dst:reg target:reg idx:lit8;
 
-/* Store value from `src` into `idx` (register) in `target` (array). */
+/* Store value from `src` into `idx` (register) in `target` (array or table). */
 sidx target:reg idx:reg src:reg;
 
 /* Store value from `src` into `idx` (register) in `target` (array). */
@@ -39,6 +39,8 @@ lkey dst:reg target:reg key:reg;
 /* Load `key` (literal) from `target` (object) to register `dst` (object). */
 lkeyc dst:reg target:reg key:lit8;
 
+# `sidx` is emitted for `a[k] = v`, `skey` only exists for cases where
+# a constant field key can't be emitted as a literal
 /* Store value from `src` into `key` (register) in `target` (object). */
 skey target:reg key:reg src:reg;
 

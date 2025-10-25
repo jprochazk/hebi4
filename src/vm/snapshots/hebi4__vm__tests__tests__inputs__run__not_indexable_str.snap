@@ -1,0 +1,21 @@
+---
+source: src/vm/tests.rs
+expression: snapshot
+---
+ERROR
+not a table
+2 |  v["a"]
+  |   ^^^^^
+
+
+DISASM:
+
+.fn @main
+  params 0
+  stack 2
+  .locals
+    v = r1
+  .code
+  0  lsmi r1, 0
+  1  lkeyc r0, r1, "a"
+  2  ret

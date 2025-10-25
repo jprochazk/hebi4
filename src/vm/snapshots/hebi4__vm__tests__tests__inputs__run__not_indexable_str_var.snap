@@ -1,0 +1,23 @@
+---
+source: src/vm/tests.rs
+expression: snapshot
+---
+ERROR
+this type cannot be indexed
+3 |  v[k]
+  |   ^^^
+
+
+DISASM:
+
+.fn @main
+  params 0
+  stack 3
+  .locals
+    v = r1
+    k = r2
+  .code
+  0  lsmi r1, 0
+  1  lstr r2, "a"
+  2  lidx r0, r1, r2
+  3  ret

@@ -346,6 +346,8 @@ pub enum VmError {
     IndexOutOfBounds,
     NotATable,
     InvalidTableKey,
+    MissingKey,
+    NotIndexable,
 }
 
 impl VmError {
@@ -362,6 +364,8 @@ impl VmError {
             Self::IndexOutOfBounds => error("index out of bounds", span),
             Self::NotATable => error("not a table", span),
             Self::InvalidTableKey => error("value is not a valid table key", span),
+            Self::MissingKey => error("missing key", span),
+            Self::NotIndexable => error("this type cannot be indexed", span),
         }
     }
 
@@ -376,7 +380,9 @@ impl VmError {
             | Self::InvalidArrayIndex
             | Self::IndexOutOfBounds
             | Self::NotATable
-            | Self::InvalidTableKey => false,
+            | Self::InvalidTableKey
+            | Self::MissingKey
+            | Self::NotIndexable => false,
         }
     }
 }
@@ -571,12 +577,59 @@ unsafe fn scap(vm: Vm, jt: Jt, ip: Ip, args: Scap, sp: Sp, lp: Lp) -> Control {
 
 #[inline(always)]
 unsafe fn lidx(vm: Vm, jt: Jt, ip: Ip, args: Lidx, sp: Sp, lp: Lp) -> Control {
-    todo!()
+    let dst = sp.at(args.dst());
+    let target = *sp.at(args.target());
+    let idx = *sp.at(args.idx());
+
+    if let Some(list) = target.into_object::<List>() {
+        let ValueRaw::Int(idx) = idx else {
+            return invalid_array_index_error(ip, vm);
+        };
+        let idx = idx as usize;
+
+        // UNROOTED: reachable through the stack
+        let Some(value) = list.as_ref().get(idx) else {
+            return index_out_of_bounds_error(ip, vm);
+        };
+
+        *dst = value.raw();
+    } else if let Some(table) = target.into_object::<Table>() {
+        let Some(key) = idx.into_object::<String>() else {
+            return invalid_table_key_error(ip, vm);
+        };
+
+        // UNROOTED: reachable through the stack
+        // TODO: inline caching
+        let Some(value) = table.as_ref().get(key.as_ref()) else {
+            return missing_key_error(ip, vm);
+        };
+
+        *dst = value.raw();
+    } else {
+        return not_indexable_error(ip, vm);
+    };
+
+    dispatch_next(vm, jt, ip, sp, lp)
 }
 
 #[inline(always)]
 unsafe fn lidxn(vm: Vm, jt: Jt, ip: Ip, args: Lidxn, sp: Sp, lp: Lp) -> Control {
-    todo!()
+    let dst = sp.at(args.dst());
+    let list = *sp.at(args.target());
+    let idx = lp.int_unchecked(args.idx()) as usize;
+
+    let Some(list) = list.into_object::<List>() else {
+        return not_a_list_error(ip, vm);
+    };
+
+    // UNROOTED: reachable through the stack
+    let Some(value) = list.as_ref().get(idx) else {
+        return index_out_of_bounds_error(ip, vm);
+    };
+
+    *dst = value.raw();
+
+    dispatch_next(vm, jt, ip, sp, lp)
 }
 
 #[inline(always)]
@@ -585,24 +638,37 @@ unsafe fn sidx(vm: Vm, jt: Jt, ip: Ip, args: Sidx, sp: Sp, lp: Lp) -> Control {
     let idx = *sp.at(args.idx());
     let src = *sp.at(args.src());
 
-    let Some(list) = target.into_object::<List>() else {
-        return not_a_list_error(ip, vm);
+    if let Some(list) = target.into_object::<List>() {
+        let ValueRaw::Int(idx) = idx else {
+            return invalid_array_index_error(ip, vm);
+        };
+        let idx = idx as usize;
+
+        // UNROOTED: reachable through the stack
+        let len = list.as_ref().len();
+        if idx >= len {
+            return index_out_of_bounds_error(ip, vm);
+        }
+
+        list.as_mut().set_raw_unchecked(idx, src);
+    } else if let Some(table) = target.into_object::<Table>() {
+        let Some(key) = idx.into_object::<String>() else {
+            return invalid_table_key_error(ip, vm);
+        };
+
+        // UNROOTED: reachable through the stack
+        // TODO: inline caching
+        table.as_mut().insert_raw(key, src);
+    } else {
+        return not_indexable_error(ip, vm);
     };
-
-    let ValueRaw::Int(idx) = idx else {
-        return invalid_array_index_error(ip, vm);
-    };
-    let idx = idx as usize;
-
-    // UNROOTED: reachable through the stack
-    let len = list.as_ref().len();
-    if idx >= len {
-        return index_out_of_bounds_error(ip, vm);
-    }
-
-    list.as_mut().set_raw_unchecked(idx, src);
 
     dispatch_next(vm, jt, ip, sp, lp)
+}
+
+#[cold]
+unsafe fn not_indexable_error(ip: Ip, vm: Vm) -> Control {
+    vm_exit!(vm, ip, NotIndexable);
 }
 
 #[cold]
@@ -612,8 +678,8 @@ unsafe fn invalid_array_index_error(ip: Ip, vm: Vm) -> Control {
 
 #[inline(always)]
 unsafe fn sidxn(vm: Vm, jt: Jt, ip: Ip, args: Sidxn, sp: Sp, lp: Lp) -> Control {
-    let idx = lp.int_unchecked(args.idx()) as usize;
     let list = *sp.at(args.target());
+    let idx = lp.int_unchecked(args.idx()) as usize;
     let src = *sp.at(args.src());
 
     let Some(list) = list.into_object::<List>() else {
@@ -643,12 +709,53 @@ unsafe fn index_out_of_bounds_error(ip: Ip, vm: Vm) -> Control {
 
 #[inline(always)]
 unsafe fn lkey(vm: Vm, jt: Jt, ip: Ip, args: Lkey, sp: Sp, lp: Lp) -> Control {
-    todo!()
+    let dst = sp.at(args.dst());
+    let target = *sp.at(args.target());
+    let key = *sp.at(args.key());
+
+    let Some(table) = target.into_object::<Table>() else {
+        return not_a_table_error(ip, vm);
+    };
+
+    let Some(key) = key.into_object::<String>() else {
+        return invalid_table_key_error(ip, vm);
+    };
+
+    // UNROOTED: reachable through the stack
+    // TODO: inline caching
+    let Some(value) = table.as_ref().get(key.as_ref()) else {
+        return missing_key_error(ip, vm);
+    };
+
+    *dst = value.raw();
+
+    dispatch_next(vm, jt, ip, sp, lp)
 }
 
 #[inline(always)]
 unsafe fn lkeyc(vm: Vm, jt: Jt, ip: Ip, args: Lkeyc, sp: Sp, lp: Lp) -> Control {
-    todo!()
+    let dst = sp.at(args.dst());
+    let target = *sp.at(args.target());
+    let key = lp.str_unchecked(args.key());
+
+    let Some(table) = target.into_object::<Table>() else {
+        return not_a_table_error(ip, vm);
+    };
+
+    // UNROOTED: reachable through the stack
+    // TODO: inline caching
+    let Some(value) = table.as_ref().get(key.as_ref()) else {
+        return missing_key_error(ip, vm);
+    };
+
+    *dst = value.raw();
+
+    dispatch_next(vm, jt, ip, sp, lp)
+}
+
+#[cold]
+unsafe fn missing_key_error(ip: Ip, vm: Vm) -> Control {
+    vm_exit!(vm, ip, MissingKey);
 }
 
 #[inline(always)]
@@ -666,6 +773,7 @@ unsafe fn skey(vm: Vm, jt: Jt, ip: Ip, args: Skey, sp: Sp, lp: Lp) -> Control {
     };
 
     // UNROOTED: reachable through the stack
+    // TODO: inline caching
     table.as_mut().insert_raw(key, src);
 
     dispatch_next(vm, jt, ip, sp, lp)
@@ -692,6 +800,7 @@ unsafe fn skeyc(vm: Vm, jt: Jt, ip: Ip, args: Skeyc, sp: Sp, lp: Lp) -> Control 
     };
 
     // UNROOTED: reachable through the stack
+    // TODO: inline caching
     table.as_mut().insert_raw(key, src);
 
     dispatch_next(vm, jt, ip, sp, lp)

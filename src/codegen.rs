@@ -1709,18 +1709,15 @@ fn eval_expr_get_index<'a>(
     let parent = eval_expr_reuse(m, node.parent(), node.parent_span(), out)?;
     let parent = value_to_reg_reuse(m, parent, out)?;
 
-    let key = eval_expr(m, node.key(), node.key_span())?;
-    let key = match key.kind {
-        ValueKind::Int(idx) => int_to_operand(m, idx, node.key_span(), None)?,
-        _ => Operand::Reg(value_to_reg(m, key)?),
+    let idx = eval_idx(m, node.key(), node.key_span())?;
+    let insn = match idx {
+        Idx::Str(idx) => asm::lkeyc(out, parent, idx),
+        Idx::Int(idx) => asm::lidxn(out, parent, idx),
+        Idx::Reg(idx) => asm::lidx(out, parent, idx),
     };
+    m.emit(insn, span);
 
-    match key {
-        Operand::Reg(idx) => m.emit(asm::lidx(out, parent, idx), span),
-        Operand::Const(idx) => m.emit(asm::lidxn(out, parent, idx), span),
-    }
-
-    free_operand(m, key);
+    free_idx(m, idx);
     free_reg(m, parent);
 
     Ok(Value::dynamic(out, span))
@@ -1743,25 +1740,63 @@ fn eval_expr_set_index<'a>(
     let parent = eval_expr(m, node.base().parent(), node.base().parent_span())?;
     let parent = value_to_reg(m, parent)?;
 
-    let key = eval_expr(m, node.base().key(), node.base().key_span())?;
-    let key = match key.kind {
-        ValueKind::Int(idx) => int_to_operand(m, idx, node.base().key_span(), None)?,
-        _ => Operand::Reg(value_to_reg(m, key)?),
-    };
-
     let value = eval_expr(m, node.value(), node.value_span())?;
     let value = value_to_reg(m, value)?;
 
-    match key {
-        Operand::Reg(idx) => m.emit(asm::sidx(parent, idx, value), span),
-        Operand::Const(idx) => m.emit(asm::sidxn(parent, idx, value), span),
-    }
+    let idx = eval_idx(m, node.base().key(), node.base().key_span())?;
+
+    let insn = match idx {
+        Idx::Str(idx) => asm::skeyc(parent, idx, value),
+        Idx::Int(idx) => asm::sidxn(parent, idx, value),
+        Idx::Reg(idx) => asm::sidx(parent, idx, value),
+    };
+    m.emit(insn, span);
 
     free_reg(m, value);
-    free_operand(m, key);
+    free_idx(m, idx);
     free_reg(m, parent);
 
     Ok(Value::nil(span))
+}
+
+enum Idx {
+    Str(Lit8),
+    Int(Lit8),
+    Reg(Reg),
+}
+
+fn free_idx(m: &mut State<'_>, idx: Idx) {
+    match idx {
+        Idx::Str(_) => {}
+        Idx::Int(_) => {}
+        Idx::Reg(reg) => free_reg(m, reg),
+    }
+}
+
+fn eval_idx<'a>(m: &mut State<'a>, idx: Node<'a, ast::Expr>, span: Span) -> Result<Idx> {
+    let idx = eval_expr(m, idx, span)?;
+    let idx = match idx.kind {
+        ValueKind::Int(idx) => {
+            let idx = int_to_operand(m, idx, span, None)?;
+
+            match idx {
+                Operand::Const(idx) => Idx::Int(idx),
+                Operand::Reg(idx) => Idx::Reg(idx),
+            }
+        }
+        ValueKind::Str(idx) => {
+            let idx = str_to_operand(m, idx, span, None)?;
+            match idx {
+                Operand::Const(idx) => Idx::Str(idx),
+                Operand::Reg(idx) => Idx::Reg(idx),
+            }
+        }
+        _ => {
+            let idx = value_to_reg(m, idx)?;
+            Idx::Reg(idx)
+        }
+    };
+    Ok(idx)
 }
 
 // TODO: specialize "method" calls (get prop -> call in a single instruction)

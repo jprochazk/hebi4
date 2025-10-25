@@ -1,0 +1,16 @@
+---
+source: src/codegen/tests.rs
+expression: snapshot
+---
+OK
+.fn @main
+  params 0
+  stack 3
+  .locals
+    a = r1
+  .code
+  0  ltable r1, 1
+  1  lsmi r2, 0
+  2  skeyc r1, "foo", r2
+  3  lkeyc r0, r1, "foo"
+  4  ret

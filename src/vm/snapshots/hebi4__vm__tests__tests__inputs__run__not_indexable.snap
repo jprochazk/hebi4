@@ -1,0 +1,21 @@
+---
+source: src/vm/tests.rs
+expression: snapshot
+---
+ERROR
+not a list
+2 |  v[0]
+  |   ^^^
+
+
+DISASM:
+
+.fn @main
+  params 0
+  stack 2
+  .locals
+    v = r1
+  .code
+  0  lsmi r1, 0
+  1  lidxn r0, r1, 0
+  2  ret
