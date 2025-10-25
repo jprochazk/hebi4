@@ -1,4 +1,4 @@
-let a = {foo=0}
+let a = {foo:0}
 let k = "foo"
 let v = 1
 a[k] = v + v

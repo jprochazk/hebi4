@@ -217,6 +217,7 @@ macro_rules! t {
     ("]") => ($crate::token::TokenKind::BracketR);
     (.) => ($crate::token::TokenKind::Dot);
     (,) => ($crate::token::TokenKind::Comma);
+    (:) => ($crate::token::TokenKind::Colon);
     (=) => ($crate::token::TokenKind::Eq);
     (+=) => ($crate::token::TokenKind::PlusEq);
     (-=) => ($crate::token::TokenKind::MinusEq);
@@ -354,6 +355,8 @@ pub enum TokenKind {
     Dot,
     #[token(",")]
     Comma,
+    #[token(":")]
+    Colon,
 
     #[token("=")]
     Eq,
@@ -441,6 +444,7 @@ impl TokenKind {
             TokenKind::BracketR => "]",
             TokenKind::Dot => ".",
             TokenKind::Comma => ",",
+            TokenKind::Colon => ":",
             TokenKind::Eq => "=",
             TokenKind::PlusEq => "+=",
             TokenKind::MinusEq => "-=",

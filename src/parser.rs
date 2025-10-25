@@ -638,7 +638,7 @@ fn parse_table_entry(p: &mut State, buf: &Bump) -> Result<Spanned<ast::TableEntr
 
             let key = str_from_lexeme_span(p, lexeme, span);
 
-            let value: Spanned<Expr> = if p.eat(t![=]) {
+            let value: Spanned<Expr> = if p.eat(t![:]) {
                 parse_expr(p, buf)?
             } else {
                 Spanned::new(
@@ -655,7 +655,7 @@ fn parse_table_entry(p: &mut State, buf: &Bump) -> Result<Spanned<ast::TableEntr
         }
         t![str] => {
             let key = parse_str(p, buf)?;
-            p.must(t![=])?;
+            p.must(t![:])?;
             let value = parse_expr(p, buf)?;
 
             (key, value)

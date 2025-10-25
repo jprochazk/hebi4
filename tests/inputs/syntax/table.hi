@@ -2,24 +2,24 @@
 
 let empty = {}
 
-let single_arg = {a=b}
-let single_arg_tc = {a=b,}
+let single_arg = {a:b}
+let single_arg_tc = {a:b,}
 
-let multi_arg = {a=0, b=1}
-let multi_arg_tc = {a=0, b=1,}
+let multi_arg = {a:0, b:1}
+let multi_arg_tc = {a:0, b:1,}
 
 let single_arg_inline = {a}
 let single_arg_inline_tc = {a,}
 
-let multi_arg_mixed = {a=0, b}
-let multi_arg_mixed_tc = {a=0, b,}
+let multi_arg_mixed = {a:0, b}
+let multi_arg_mixed_tc = {a:0, b,}
 
-let multi_arg_mixed2 = {a, b=0}
-let multi_arg_mixed2_tc = {a, b=0,}
+let multi_arg_mixed2 = {a, b:0}
+let multi_arg_mixed2_tc = {a, b:0,}
 
-let string_key = {"a"=0}
-let string_key_tc = {"a"=0,}
+let string_key = {"a":0}
+let string_key_tc = {"a":0,}
 
-let string_key_multi = {"a"=0, "b"=1}
-let string_key_multi_tc = {"a"=0, "b"=1,}
+let string_key_multi = {"a":0, "b":1}
+let string_key_multi_tc = {"a":0, "b":1,}
 
