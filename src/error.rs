@@ -24,6 +24,7 @@ pub fn error(message: impl Into<Cow<'static, str>>, span: impl Into<Span>) -> Er
 }
 
 impl Error {
+    #[inline]
     pub fn render<'error, 'src>(&'error self, src: &'src str) -> ErrorDisplay<'error, 'src> {
         ErrorDisplay {
             error: &self.0,
@@ -31,6 +32,17 @@ impl Error {
         }
     }
 
+    #[inline]
+    pub fn span(&self) -> Span {
+        self.0.span
+    }
+
+    #[inline]
+    pub fn message(&self) -> &str {
+        &self.0.message
+    }
+
+    #[inline]
     pub fn with_help(mut self, help: impl Into<Cow<'static, str>>) -> Self {
         self.0.help = Some(help.into());
         self
