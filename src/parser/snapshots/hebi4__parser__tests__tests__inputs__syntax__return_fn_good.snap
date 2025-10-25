@@ -1,0 +1,28 @@
+---
+source: src/parser/tests.rs
+expression: snapshot
+---
+SOURCE
+##parse
+
+return (fn(){})
+
+
+OK
+Root(
+    [
+        StmtExpr(
+            Return(
+                Some(
+                    FuncAnon(
+                        None,
+                        Block(
+                            [],
+                        ),
+                        [],
+                    ),
+                ),
+            ),
+        ),
+    ],
+)

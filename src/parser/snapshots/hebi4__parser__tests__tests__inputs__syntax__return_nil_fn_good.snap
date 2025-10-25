@@ -1,0 +1,32 @@
+---
+source: src/parser/tests.rs
+expression: snapshot
+---
+SOURCE
+##parse
+
+return nil
+fn f(){}
+
+
+OK
+Root(
+    [
+        StmtExpr(
+            Return(
+                Some(
+                    Nil,
+                ),
+            ),
+        ),
+        FuncDecl(
+            Ident(
+                "f",
+            ),
+            Block(
+                [],
+            ),
+            [],
+        ),
+    ],
+)

@@ -238,6 +238,13 @@ fn parse_expr_top_level(p: &mut State, buf: &Bump) -> Result<Spanned<Expr>> {
 fn parse_expr_return(p: &mut State, buf: &Bump) -> Result<Spanned<Expr>> {
     let node = p.open_at(t![return])?;
 
+    // Check for ambiguous `return fn`
+    if p.at(t![fn]) {
+        return error("ambiguous", p.span())
+            .with_help("disambiguate with `return (fn ...)` or `return nil fn ...`")
+            .into();
+    }
+
     let value: Spanned<Opt<Expr>> = if can_begin_expr(p) {
         parse_expr(p, buf)?.map(Opt::some)
     } else {

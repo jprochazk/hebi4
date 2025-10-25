@@ -1,0 +1,16 @@
+---
+source: src/parser/tests.rs
+expression: snapshot
+---
+SOURCE
+##parse
+
+return fn(){}
+
+
+ERROR
+ambiguous
+3 |  return fn(){}
+  |         ^^
+  |
+  > help: disambiguate with `return (fn ...)` or `return nil fn ...`

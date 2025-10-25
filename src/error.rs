@@ -7,16 +7,19 @@ pub type Result<T, E = Error> = std::result::Result<T, E>;
 #[derive(Clone, Debug)]
 pub struct Error(Box<ErrorRepr>);
 
+#[repr(align(16))]
 #[derive(Clone, Debug)]
 struct ErrorRepr {
     span: Span,
     message: Cow<'static, str>,
+    help: Option<Cow<'static, str>>,
 }
 
 pub fn error(message: impl Into<Cow<'static, str>>, span: impl Into<Span>) -> Error {
     Error(Box::new(ErrorRepr {
         span: span.into(),
         message: message.into(),
+        help: None,
     }))
 }
 
@@ -26,6 +29,11 @@ impl Error {
             error: &self.0,
             src,
         }
+    }
+
+    pub fn with_help(mut self, help: impl Into<Cow<'static, str>>) -> Self {
+        self.0.help = Some(help.into());
+        self
     }
 }
 
@@ -51,7 +59,13 @@ impl std::fmt::Display for ErrorDisplay<'_, '_> {
 
         writeln!(f, "{}", self.error.message)?;
         writeln!(f, "{ln} |  {line}")?;
-        writeln!(f, "{:lw$} |  {:pos$}{:^<len$}", "", "", "^")
+        writeln!(f, "{:lw$} |  {:pos$}{:^<len$}", "", "", "^")?;
+        if let Some(help) = &self.error.help {
+            writeln!(f, "{:lw$} |", "")?;
+            writeln!(f, "{:lw$} > help: {help}", "")?;
+        }
+
+        Ok(())
     }
 }
 
