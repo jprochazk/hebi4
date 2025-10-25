@@ -1686,7 +1686,22 @@ fn eval_expr_get_field<'a>(
     span: Span,
     dst: Option<Reg>,
 ) -> Result<Value<'a>> {
-    todo!()
+    let out = maybe_reuse_reg(m, span, dst)?;
+
+    let parent = eval_expr_reuse(m, node.parent(), node.parent_span(), out)?;
+    let parent = value_to_reg_reuse(m, parent, out)?;
+
+    let idx = str_to_operand(m, node.key().get(), node.key_span(), None)?;
+    let insn = match idx {
+        Operand::Reg(idx) => asm::lkey(out, parent, idx),
+        Operand::Const(idx) => asm::lkeyc(out, parent, idx),
+    };
+    m.emit(insn, span);
+
+    free_operand(m, idx);
+    free_reg(m, parent);
+
+    Ok(Value::dynamic(out, span))
 }
 
 fn eval_expr_set_field<'a>(
@@ -1695,7 +1710,32 @@ fn eval_expr_set_field<'a>(
     span: Span,
     dst: Option<Reg>,
 ) -> Result<Value<'a>> {
-    todo!()
+    // TODO: support `op`
+    if *node.op() != ast::AssignOp::None {
+        todo!()
+    }
+
+    let out = maybe_reuse_reg(m, span, dst)?;
+
+    let parent = eval_expr_reuse(m, node.base().parent(), node.base().parent_span(), out)?;
+    let parent = value_to_reg_reuse(m, parent, out)?;
+
+    let idx = str_to_operand(m, node.base().key().get(), node.base().key_span(), None)?;
+
+    let value = eval_expr(m, node.value(), node.value_span())?;
+    let value = value_to_reg(m, value)?;
+
+    let insn = match idx {
+        Operand::Reg(idx) => asm::skey(parent, idx, value),
+        Operand::Const(idx) => asm::skeyc(parent, idx, value),
+    };
+    m.emit(insn, span);
+
+    free_reg(m, value);
+    free_operand(m, idx);
+    free_reg(m, parent);
+
+    Ok(Value::dynamic(out, span))
 }
 
 fn eval_expr_get_index<'a>(
@@ -1740,10 +1780,10 @@ fn eval_expr_set_index<'a>(
     let parent = eval_expr(m, node.base().parent(), node.base().parent_span())?;
     let parent = value_to_reg(m, parent)?;
 
+    let idx = eval_idx(m, node.base().key(), node.base().key_span())?;
+
     let value = eval_expr(m, node.value(), node.value_span())?;
     let value = value_to_reg(m, value)?;
-
-    let idx = eval_idx(m, node.base().key(), node.base().key_span())?;
 
     let insn = match idx {
         Idx::Str(idx) => asm::skeyc(parent, idx, value),

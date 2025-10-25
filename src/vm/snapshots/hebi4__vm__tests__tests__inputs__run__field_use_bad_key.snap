@@ -1,0 +1,23 @@
+---
+source: src/vm/tests.rs
+expression: snapshot
+---
+ERROR
+missing key
+2 |  v.b
+  |   ^^
+
+
+DISASM:
+
+.fn @main
+  params 0
+  stack 3
+  .locals
+    v = r1
+  .code
+  0  ltable r1, 1
+  1  lsmi r2, 100
+  2  skeyc r1, "a", r2
+  3  lkeyc r0, r1, "b"
+  4  ret

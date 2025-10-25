@@ -5,14 +5,15 @@ expression: snapshot
 OK
 .fn @main
   params 0
-  stack 3
+  stack 4
   .locals
     a = r1
+    v = r2
   .code
   0  ltable r1, 1
   1  lsmi r2, 0
   2  skeyc r1, "foo", r2
   3  lsmi r2, 1
-  4  skeyc r1, "foo", r2
-  5  lnil r0
+  4  add r3, r2, r2
+  5  skeyc r1, "foo", r3
   6  ret

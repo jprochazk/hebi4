@@ -14,5 +14,4 @@ OK
   2  skeyc r1, "foo", r2
   3  lsmi r2, 1
   4  skeyc r1, "foo", r2
-  5  lnil r0
-  6  ret
+  5  ret
