@@ -5,13 +5,14 @@ expression: snapshot
 SOURCE
 ##parse
 
-svc = http.service()
+let svc = http.service()
 
 svc.GET("/hello/:name", fn(req, res) {
   res.status(200)
   res.header("Content-Type", "text/plain")
-  body = fmt("Hello, {name}!", { name: req.params.name })
-  res.body(body)
+  res.body(
+    fmt("Hello, {name}!", { name: req.params.name })
+  )
 })
 
 http.serve(svc)
@@ -21,27 +22,22 @@ http.serve(svc)
 OK
 Root(
     [
-        StmtExpr(
-            SetVar(
-                None,
-                GetVar(
-                    Ident(
-                        "svc",
-                    ),
-                ),
-                Call(
-                    GetField(
-                        GetVar(
-                            Ident(
-                                "http",
-                            ),
-                        ),
+        Var(
+            Ident(
+                "svc",
+            ),
+            Call(
+                GetField(
+                    GetVar(
                         Ident(
-                            "service",
+                            "http",
                         ),
                     ),
-                    [],
+                    Ident(
+                        "service",
+                    ),
                 ),
+                [],
             ),
         ),
         StmtExpr(
@@ -106,52 +102,6 @@ Root(
                                     ),
                                 ),
                                 StmtExpr(
-                                    SetVar(
-                                        None,
-                                        GetVar(
-                                            Ident(
-                                                "body",
-                                            ),
-                                        ),
-                                        Call(
-                                            GetVar(
-                                                Ident(
-                                                    "fmt",
-                                                ),
-                                            ),
-                                            [
-                                                Str(
-                                                    "Hello, {name}!",
-                                                ),
-                                                Table(
-                                                    [
-                                                        TableEntry(
-                                                            Str(
-                                                                "name",
-                                                            ),
-                                                            GetField(
-                                                                GetField(
-                                                                    GetVar(
-                                                                        Ident(
-                                                                            "req",
-                                                                        ),
-                                                                    ),
-                                                                    Ident(
-                                                                        "params",
-                                                                    ),
-                                                                ),
-                                                                Ident(
-                                                                    "name",
-                                                                ),
-                                                            ),
-                                                        ),
-                                                    ],
-                                                ),
-                                            ],
-                                        ),
-                                    ),
-                                ),
-                                StmtExpr(
                                     Call(
                                         GetField(
                                             GetVar(
@@ -164,10 +114,41 @@ Root(
                                             ),
                                         ),
                                         [
-                                            GetVar(
-                                                Ident(
-                                                    "body",
+                                            Call(
+                                                GetVar(
+                                                    Ident(
+                                                        "fmt",
+                                                    ),
                                                 ),
+                                                [
+                                                    Str(
+                                                        "Hello, {name}!",
+                                                    ),
+                                                    Table(
+                                                        [
+                                                            TableEntry(
+                                                                Str(
+                                                                    "name",
+                                                                ),
+                                                                GetField(
+                                                                    GetField(
+                                                                        GetVar(
+                                                                            Ident(
+                                                                                "req",
+                                                                            ),
+                                                                        ),
+                                                                        Ident(
+                                                                            "params",
+                                                                        ),
+                                                                    ),
+                                                                    Ident(
+                                                                        "name",
+                                                                    ),
+                                                                ),
+                                                            ),
+                                                        ],
+                                                    ),
+                                                ],
                                             ),
                                         ],
                                     ),

@@ -1,12 +1,13 @@
 ##parse
 
-svc = http.service()
+let svc = http.service()
 
 svc.GET("/hello/:name", fn(req, res) {
   res.status(200)
   res.header("Content-Type", "text/plain")
-  body = fmt("Hello, {name}!", { name: req.params.name })
-  res.body(body)
+  res.body(
+    fmt("Hello, {name}!", { name: req.params.name })
+  )
 })
 
 http.serve(svc)
