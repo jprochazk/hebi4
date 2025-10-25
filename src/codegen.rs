@@ -1094,6 +1094,18 @@ impl<'a> Value<'a> {
             span,
         }
     }
+
+    #[inline]
+    fn coerce_bool(self) -> bool {
+        match self.kind {
+            ValueKind::Nil => false,
+            ValueKind::Bool(v) => v,
+            ValueKind::Int(v) => v != 0,
+            ValueKind::Float(v) => v.get() != 0.0,
+            ValueKind::Str(v) => true,
+            ValueKind::Dynamic(reg) => unreachable!("ICE: coerce_bool on a register"),
+        }
+    }
 }
 
 enum Place {
@@ -1974,7 +1986,7 @@ fn eval_expr_infix<'a>(
         let lhs = value_to_operand_reuse(m, lhs, dst)?;
         let rhs = value_to_operand(m, rhs)?;
 
-        let instruction = match *node.op() {
+        let insn = match *node.op() {
             ast::InfixOp::Add => match (lhs, rhs) {
                 (Operand::Reg(lhs), Operand::Reg(rhs)) => asm::addvv(dst, lhs, rhs),
                 (Operand::Reg(lhs), Operand::Const(rhs)) => asm::addvn(dst, lhs, rhs),
@@ -2002,7 +2014,7 @@ fn eval_expr_infix<'a>(
             op => unreachable!("ICE: invalid op in emit_infix: {op:?}"),
         };
 
-        m.emit(instruction, span);
+        m.emit(insn, span);
 
         free_operand(m, rhs);
         if lhs != dst {
@@ -2091,7 +2103,69 @@ fn eval_expr_prefix<'a>(
     span: Span,
     dst: Option<Reg>,
 ) -> Result<Value<'a>> {
-    todo!()
+    let dst = maybe_reuse_reg(m, span, dst)?;
+    let rhs = eval_expr_reuse(m, node.rhs(), node.rhs_span(), dst)?;
+
+    let result = if rhs.is_const() {
+        const_eval_expr_prefix(*node.op(), rhs, span)?
+    } else {
+        let rhs = value_to_reg_reuse(m, rhs, dst)?;
+
+        let insn = match *node.op() {
+            ast::PrefixOp::Minus => asm::unm(dst, rhs),
+
+            ast::PrefixOp::Not => asm::not(dst, rhs),
+        };
+
+        m.emit(insn, span);
+
+        if rhs != dst {
+            free_reg(m, rhs);
+        }
+
+        Value::dynamic(dst, span)
+    };
+
+    Ok(result)
+}
+
+fn const_eval_expr_prefix<'a>(op: ast::PrefixOp, rhs: Value<'a>, span: Span) -> Result<Value<'a>> {
+    use ValueKind as V;
+    use ast::PrefixOp as Op;
+
+    assert!(rhs.is_const());
+
+    let result = match op {
+        Op::Minus => match rhs.kind {
+            V::Nil => {
+                return error(
+                    format!("evaluation would fail with a type error: cannot invert nil"),
+                    span,
+                )
+                .into();
+            }
+            V::Bool(_) => {
+                return error(
+                    format!("evaluation would fail with a type error: cannot invert bool"),
+                    span,
+                )
+                .into();
+            }
+            V::Int(v) => Value::int(-v, span),
+            V::Float(v) => Value::float(f64n::new(-v.get()), span),
+            V::Str(_) => {
+                return error(
+                    format!("evaluation would fail with a type error: cannot invert str"),
+                    span,
+                )
+                .into();
+            }
+            V::Dynamic(reg) => unreachable!("ICE: const eval on a register"),
+        },
+        Op::Not => Value::bool(!rhs.coerce_bool(), span),
+    };
+
+    Ok(result)
 }
 
 fn eval_expr_list<'a>(
