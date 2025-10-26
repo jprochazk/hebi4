@@ -1,30 +1,44 @@
-import { EditorView, basicSetup } from "codemirror";
+// @ts-check
+
+import {
+  EditorView, lineNumbers, highlightActiveLineGutter, highlightSpecialChars,
+  drawSelection, dropCursor, rectangularSelection, crosshairCursor,
+  highlightActiveLine, keymap
+} from "@codemirror/view";
 import { EditorState } from "@codemirror/state";
-import { keymap } from "@codemirror/view";
+import {
+  foldGutter, indentOnInput, syntaxHighlighting, defaultHighlightStyle,
+  bracketMatching, foldKeymap
+} from "@codemirror/language";
+import { history, historyKeymap, defaultKeymap } from "@codemirror/commands";
+import { searchKeymap, highlightSelectionMatches } from "@codemirror/search";
+import { autocompletion, completionKeymap, closeBrackets, closeBracketsKeymap } from "@codemirror/autocomplete";
+import { lintKeymap } from "@codemirror/lint";
 import { examples } from "./examples.js";
 import init, { parse, disassemble, run } from "./pkg/hebi4_playground.js";
 
+/** @type {EditorView} */
 let editor;
 let wasmReady = false;
 
-// Initialize WASM
 async function initWasm() {
   try {
     await init();
     wasmReady = true;
-    console.log("Hebi4 WASM initialized");
+    console.log("Hebi4 Wasm initialized");
     updateAllOutputs();
   } catch (err) {
-    console.error("Failed to initialize WASM:", err);
-    showError("run", "Failed to initialize WebAssembly module");
+    console.error("Failed to initialize Wasm:", err);
+    showError("run", "Failed to initialize Wasm module");
   }
 }
 
-// Create CodeMirror editor
 function createEditor() {
-  const defaultCode = getCodeFromUrl() || examples.welcome.code;
+  const defaultCode = getCodeFromUrl() || loadCodeFromStorage() || examples.welcome.code;
 
-  const runCommand = () => {
+  let updateTimer;
+
+  const runCommand = (view) => {
     updateAllOutputs();
     return true;
   };
@@ -32,7 +46,34 @@ function createEditor() {
   const state = EditorState.create({
     doc: defaultCode,
     extensions: [
-      basicSetup,
+      lineNumbers(),
+      highlightActiveLineGutter(),
+      highlightSpecialChars(),
+      history(),
+      foldGutter(),
+      drawSelection(),
+      dropCursor(),
+      EditorState.allowMultipleSelections.of(true),
+      indentOnInput(),
+      syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
+      bracketMatching(),
+      closeBrackets(),
+      autocompletion(),
+      rectangularSelection(),
+      crosshairCursor(),
+      highlightActiveLine(),
+      highlightSelectionMatches(),
+      keymap.of([
+        { key: "Ctrl-Enter", run: runCommand },
+        { key: "Cmd-Enter", run: runCommand },
+        ...closeBracketsKeymap,
+        ...defaultKeymap,
+        ...searchKeymap,
+        ...historyKeymap,
+        ...foldKeymap,
+        ...completionKeymap,
+        ...lintKeymap
+      ]),
       EditorView.theme({
         "&": { height: "100%", backgroundColor: "#1e1e1e" },
         ".cm-content": { caretColor: "#528bff" },
@@ -46,15 +87,10 @@ function createEditor() {
           border: "none"
         }
       }, { dark: true }),
-      keymap.of([
-        { key: "Ctrl-Enter", run: runCommand },
-        { key: "Cmd-Enter", run: runCommand }
-      ]),
       EditorView.updateListener.of((update) => {
         if (update.docChanged) {
-          // Debounce updates
-          clearTimeout(window.updateTimer);
-          window.updateTimer = setTimeout(() => {
+          clearTimeout(updateTimer);
+          updateTimer = setTimeout(() => {
             saveCodeToStorage();
           }, 1000);
         }
@@ -64,21 +100,18 @@ function createEditor() {
 
   editor = new EditorView({
     state,
-    parent: document.getElementById("editor")
+    parent: document.getElementById("editor") ?? undefined
   });
 }
 
-// Get current code from editor
 function getCode() {
   return editor.state.doc.toString();
 }
 
-// Get optimization setting
 function getOptimize() {
-  return document.getElementById("optimize").checked;
+  return /** @type {HTMLInputElement} */(document.getElementById("optimize"))?.checked;
 }
 
-// Update all outputs
 function updateAllOutputs() {
   if (!wasmReady) {
     return;
@@ -86,18 +119,14 @@ function updateAllOutputs() {
 
   const code = getCode();
   const optimize = getOptimize();
-
-  // Update AST
   updateAst(code);
-
-  // Update Disassembly
   updateDisasm(code, optimize);
-
-  // Update Run output
   updateRun(code, optimize);
 }
 
-// Update AST output
+/**
+ * @param {string} code
+ */
 function updateAst(code) {
   const output = document.getElementById("output-ast");
 
@@ -130,7 +159,10 @@ function updateAst(code) {
   }
 }
 
-// Update Disassembly output
+/**
+ * @param {string} code
+ * @param {boolean} optimize
+ */
 function updateDisasm(code, optimize) {
   const output = document.getElementById("output-disasm");
 
@@ -163,7 +195,10 @@ function updateDisasm(code, optimize) {
   }
 }
 
-// Update Run output
+/**
+ * @param {string} code
+ * @param {boolean} optimize
+ */
 function updateRun(code, optimize) {
   const output = document.getElementById("output-run");
 
@@ -196,7 +231,10 @@ function updateRun(code, optimize) {
   }
 }
 
-// Show error in output
+/**
+ * @param {string} tab
+ * @param {string} message
+ */
 function showError(tab, message) {
   const output = document.getElementById(`output-${tab}`);
   output.textContent = message;
@@ -206,36 +244,30 @@ function showError(tab, message) {
   }
 }
 
-// Get current active tab
 function getCurrentTab() {
-  const activeTab = document.querySelector(".tab.active");
+  const activeTab = /** @type {HTMLElement} */(document.querySelector(".tab.active"));
   return activeTab ? activeTab.dataset.tab : "run";
 }
 
-// Setup tabs
 function setupTabs() {
   const tabs = document.querySelectorAll(".tab");
   const outputs = document.querySelectorAll(".output");
 
   tabs.forEach(tab => {
     tab.addEventListener("click", () => {
-      // Remove active class from all tabs and outputs
       tabs.forEach(t => t.classList.remove("active"));
       outputs.forEach(o => o.classList.remove("active"));
 
-      // Add active class to clicked tab and corresponding output
       tab.classList.add("active");
-      const tabName = tab.dataset.tab;
+      const tabName = /** @type {HTMLElement} */(tab).dataset.tab;
       document.getElementById(`output-${tabName}`).classList.add("active");
     });
   });
 }
 
-// Setup examples dropdown
 function setupExamples() {
   const select = document.getElementById("examples");
 
-  // Populate dropdown
   Object.entries(examples).forEach(([key, example]) => {
     const option = document.createElement("option");
     option.value = key;
@@ -243,19 +275,20 @@ function setupExamples() {
     select.appendChild(option);
   });
 
-  // Handle selection
   select.addEventListener("change", (e) => {
-    const exampleKey = e.target.value;
+    const target = /** @type {HTMLSelectElement} */(e.target);
+    const exampleKey = target.value;
     if (exampleKey && examples[exampleKey]) {
       setCode(examples[exampleKey].code);
       updateAllOutputs();
     }
-    // Reset dropdown
-    e.target.value = "";
+    target.value = "";
   });
 }
 
-// Set code in editor
+/**
+ * @param {string} code
+ */
 function setCode(code) {
   editor.dispatch({
     changes: {
@@ -266,21 +299,18 @@ function setCode(code) {
   });
 }
 
-// Setup Run button
 function setupRunButton() {
   document.getElementById("run").addEventListener("click", () => {
     updateAllOutputs();
   });
 }
 
-// Setup Optimize checkbox
 function setupOptimizeCheckbox() {
   document.getElementById("optimize").addEventListener("change", () => {
     updateAllOutputs();
   });
 }
 
-// Setup Share button
 function setupShareButton() {
   document.getElementById("share").addEventListener("click", async () => {
     const code = getCode();
@@ -302,7 +332,6 @@ function setupShareButton() {
   });
 }
 
-// Get code from URL hash
 function getCodeFromUrl() {
   const hash = window.location.hash.slice(1);
   if (hash.startsWith("code=")) {
@@ -317,7 +346,6 @@ function getCodeFromUrl() {
   return null;
 }
 
-// Save code to localStorage
 function saveCodeToStorage() {
   try {
     localStorage.setItem("hebi4-playground-code", getCode());
@@ -326,7 +354,6 @@ function saveCodeToStorage() {
   }
 }
 
-// Load code from localStorage
 function loadCodeFromStorage() {
   try {
     return localStorage.getItem("hebi4-playground-code");
@@ -336,7 +363,6 @@ function loadCodeFromStorage() {
   }
 }
 
-// Initialize playground
 async function init_playground() {
   createEditor();
   setupTabs();
@@ -345,7 +371,6 @@ async function init_playground() {
   setupOptimizeCheckbox();
   setupShareButton();
 
-  // Show loading state
   document.querySelectorAll(".output").forEach(output => {
     output.textContent = "Loading WASM module...";
     output.className = "output loading";
@@ -354,5 +379,4 @@ async function init_playground() {
   await initWasm();
 }
 
-// Start the playground
 init_playground();

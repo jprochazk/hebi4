@@ -465,12 +465,12 @@ static JT: JumpTable = jump_table! {
     stop,
 };
 
-#[cfg(not(debug_assertions))]
+#[cfg(not(any(debug_assertions, target_arch = "wasm32")))]
 #[derive(Clone, Copy)]
 #[repr(transparent)]
 pub(crate) struct Control(u8);
 
-#[cfg(not(debug_assertions))]
+#[cfg(not(any(debug_assertions, target_arch = "wasm32")))]
 impl Control {
     #[inline]
     fn stop() -> Control {
@@ -498,7 +498,7 @@ impl Control {
     }
 }
 
-#[cfg(debug_assertions)]
+#[cfg(any(debug_assertions, target_arch = "wasm32"))]
 #[derive(Clone, Copy)]
 #[repr(C)]
 pub(crate) enum Control {
@@ -507,7 +507,7 @@ pub(crate) enum Control {
     Continue(Sp, Lp, Ip),
 }
 
-#[cfg(debug_assertions)]
+#[cfg(any(debug_assertions, target_arch = "wasm32"))]
 impl Control {
     #[inline]
     fn stop() -> Control {
@@ -523,12 +523,12 @@ impl Control {
 /// Dispatch instruction at `ip`
 #[inline(always)]
 unsafe fn dispatch_current(vm: Vm, jt: Jt, ip: Ip, sp: Sp, lp: Lp) -> Control {
-    #[cfg(debug_assertions)]
+    #[cfg(any(debug_assertions, target_arch = "wasm32"))]
     {
         Control::Continue(sp, lp, ip)
     }
 
-    #[cfg(not(debug_assertions))]
+    #[cfg(not(any(debug_assertions, target_arch = "wasm32")))]
     {
         let insn = ip.get();
         let op = jt.at(insn);
@@ -1616,11 +1616,11 @@ impl<'vm> Runtime<'vm> {
             let lp: Lp = Lp::from_fn(vm.current_frame().callee());
             let ip: Ip = Ip::from_fn(vm.current_frame().callee());
 
-            // In debug mode, fall back to loop+match.
+            // In debug mode and Wasm, fall back to loop+match.
             //
             // Each instruction will return `Control::Continue`
             // instead of tail-calling the next handler.
-            #[cfg(debug_assertions)]
+            #[cfg(any(debug_assertions, target_arch = "wasm32"))]
             {
                 let mut sp: Sp = sp;
                 let mut lp: Lp = lp;
@@ -1637,7 +1637,7 @@ impl<'vm> Runtime<'vm> {
                         }
                         Control::Error(err) => return Err(err.annotate(vm)),
 
-                        #[cfg(debug_assertions)]
+                        #[cfg(any(debug_assertions, target_arch = "wasm32"))]
                         Control::Continue(new_sp, new_lp, new_ip) => {
                             sp = new_sp;
                             lp = new_lp;
@@ -1648,7 +1648,7 @@ impl<'vm> Runtime<'vm> {
                 }
             }
 
-            #[cfg(not(debug_assertions))]
+            #[cfg(not(any(debug_assertions, target_arch = "wasm32")))]
             {
                 let ctrl = dispatch_current(vm, jt, ip, sp, lp);
 
