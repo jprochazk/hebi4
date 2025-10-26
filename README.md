@@ -6,6 +6,17 @@ Heavily inspired by other languages in the same category: Lua, Python, and JavaS
 
 Working in this repository only requires a recent version of the Rust compiler and Cargo.
 
+### Local usage
+
+```
+# Install `hebi4` cli
+cargo install --locked --path ./cli
+```
+
+```
+hebi4 --help
+```
+
 ### Testing
 
 Run tests:

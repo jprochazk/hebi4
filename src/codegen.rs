@@ -121,14 +121,6 @@ use crate::{
     vm::{Control, VmState, value::ValueRaw},
 };
 
-// TODO: basic optimizations (configurable)
-// - peephole
-// - jump chaining
-//    - jump-to-jump should forward the address
-// - dead code elimination
-//   - mark bb exit (break, return, continue, if),
-//     any emitted code is discarded until the exit label is bound
-
 macro_rules! f {
     (&$m:expr) => {
         unsafe {
