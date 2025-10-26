@@ -1,4 +1,4 @@
-# callee _must_ exist, either as a variable,
-# some kind of value, or as a function decl.
+// callee _must_ exist, either as a variable,
+// some kind of value, or as a function decl.
 
 f()

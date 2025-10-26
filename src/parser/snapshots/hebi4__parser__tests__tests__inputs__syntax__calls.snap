@@ -3,7 +3,7 @@ source: src/parser/tests.rs
 expression: snapshot
 ---
 SOURCE
-##parse
+//parse
 
 test()
 test(1)

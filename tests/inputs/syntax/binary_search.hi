@@ -1,4 +1,4 @@
-##parse
+//parse
 
 fn binary_search(arr, target) {
   let low  = 0

@@ -1,4 +1,4 @@
-##parse
+//parse
 
 let simple =
   if true { 0 } else { -1 }

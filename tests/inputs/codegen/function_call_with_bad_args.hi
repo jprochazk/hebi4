@@ -1,12 +1,12 @@
-# the compiler can do some basic arity checking
-# in case the callee is a function declaration,
-# and it's clear syntactically:
+// the compiler can do some basic arity checking
+// in case the callee is a function declaration,
+// and it's clear syntactically:
 
 fn f(a, b, c) { }
 
-# we could choose to just emit a `dyn` call and
-# let this explode at runtime, and this is somewhat
-# unusual for a mostly runtime-checked language,
-# but it's useful so this will error at compile time:
+// we could choose to just emit a `dyn` call and
+// let this explode at runtime, and this is somewhat
+// unusual for a mostly runtime-checked language,
+// but it's useful so this will error at compile time:
 
 f(0)

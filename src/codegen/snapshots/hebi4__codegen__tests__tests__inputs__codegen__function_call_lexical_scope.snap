@@ -4,8 +4,8 @@ expression: snapshot
 ---
 SOURCE
 
-# due to lexical scoping, a function may be called
-# before it's been defined
+// due to lexical scoping, a function may be called
+// before it's been defined
 
 f()
 

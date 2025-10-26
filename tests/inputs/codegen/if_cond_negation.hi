@@ -1,9 +1,9 @@
 let a = 0
 let b = 1
 
-if not (a < b) {}   # isge
-if not (a > b) {}   # isle
-if not (a <= b) {}  # isgt
-if not (a >= b) {}  # islt
-if not (a == b) {}  # isne
-if not (a != b) {}  # iseq
+if not (a < b) {}   // isge
+if not (a > b) {}   // isle
+if not (a <= b) {}  // isgt
+if not (a >= b) {}  // islt
+if not (a == b) {}  // isne
+if not (a != b) {}  // iseq

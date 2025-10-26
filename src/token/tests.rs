@@ -6,7 +6,7 @@ use crate::token::tokenize;
 fn tokenizer(path: &Path) {
     let input = read_to_string(path).unwrap();
     let emit_snapshot =
-        input.starts_with("##") && input.lines().next().unwrap().contains("tokenize");
+        input.starts_with("//") && input.lines().next().unwrap().contains("tokenize");
 
     let snapshot = format!("SOURCE\n{input}\n\nTOKENS\n{:#?}", tokenize(&input));
 

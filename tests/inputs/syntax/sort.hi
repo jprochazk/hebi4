@@ -1,4 +1,4 @@
-##parse
+//parse
 
 fn selection_sort(arr) {
   let n = len(arr)

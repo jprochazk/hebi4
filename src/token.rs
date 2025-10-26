@@ -415,7 +415,7 @@ pub enum TokenKind {
     #[regex(r"[ \r\n\f]+", logos::skip)]
     Whitespace,
 
-    #[regex(r"#[^\n]*", logos::skip)]
+    #[regex(r"//[^\n]*", logos::skip)]
     Comment,
     #[regex(r"#![^\n]*", logos::skip)]
     Shebang,

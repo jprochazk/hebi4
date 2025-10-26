@@ -6,12 +6,12 @@ SOURCE
 let a = 0
 let b = 1
 
-if a < b {}        # islt
-else if a > b {}   # isgt
-else if a <= b {}  # islt
-else if a >= b {}  # isgt
-else if a == b {}  # iseq
-else if a != b {}  # isne
+if a < b {}        // islt
+else if a > b {}   // isgt
+else if a <= b {}  // islt
+else if a >= b {}  // isgt
+else if a == b {}  // iseq
+else if a != b {}  // isne
 
 
 

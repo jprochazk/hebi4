@@ -3,7 +3,7 @@ source: src/token/tests.rs
 expression: snapshot
 ---
 SOURCE
-##tokenize
+//tokenize
 
 let
 fn
@@ -38,8 +38,8 @@ _abcdefghijklmnopqrstuvwxyz_ABCDEFGHIJKLMNOPQRSTUVWXYZ_0123456789_
 
 true false nil
 
-# comments
-#! comments
+// comments
+//! comments
 
 
 TOKENS

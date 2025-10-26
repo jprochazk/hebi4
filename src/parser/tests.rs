@@ -6,7 +6,7 @@ use crate::token::tokenize;
 #[glob_test::glob("../../tests/inputs/syntax/*.hi")]
 fn parser(path: &Path) {
     let input = read_to_string(path).unwrap();
-    let emit_snapshot = input.starts_with("##") && input.lines().next().unwrap().contains("parse");
+    let emit_snapshot = input.starts_with("//") && input.lines().next().unwrap().contains("parse");
 
     let tokens = tokenize(&input);
     let (snapshot, failure) = match parse(&tokens) {

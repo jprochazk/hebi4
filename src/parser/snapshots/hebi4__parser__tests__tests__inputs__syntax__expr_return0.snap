@@ -3,9 +3,9 @@ source: src/parser/tests.rs
 expression: snapshot
 ---
 SOURCE
-##parse
+//parse
 
-return  # no value
+return  // no value
 
 
 OK

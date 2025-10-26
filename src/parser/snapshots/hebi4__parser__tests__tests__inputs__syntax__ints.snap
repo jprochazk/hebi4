@@ -3,7 +3,7 @@ source: src/parser/tests.rs
 expression: snapshot
 ---
 SOURCE
-##parse
+//parse
 
 let zero = 0
 let one = 1

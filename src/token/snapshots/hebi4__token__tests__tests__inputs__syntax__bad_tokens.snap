@@ -3,35 +3,35 @@ source: src/token/tests.rs
 expression: snapshot
 ---
 SOURCE
-##tokenize
+//tokenize
 
-# random unsupported symbols
+// random unsupported symbols
 
 $ @ ~ ! & ^ \ | '
 
-0a       # ident
+0a       // ident
 
-01       # int
-0. 0.1e  # float
+01       // int
+0. 0.1e  // float
 
 
 TOKENS
 [
-    Error("$", 42..43),
-    Error("@", 44..45),
-    Error("~", 46..47),
-    Error("!", 48..49),
-    Error("&", 50..51),
-    Error("^", 52..53),
-    Error("\\", 54..55),
-    Error("|", 56..57),
-    Error("'", 58..59),
-    Integer("0", 61..62),
-    Ident("a", 62..63),
-    Integer("0", 79..80),
-    Integer("1", 80..81),
-    Integer("0", 94..95),
-    Dot(".", 95..96),
-    Float("0.1", 97..100),
-    Ident("e", 100..101),
+    Error("$", 43..44),
+    Error("@", 45..46),
+    Error("~", 47..48),
+    Error("!", 49..50),
+    Error("&", 51..52),
+    Error("^", 53..54),
+    Error("\\", 55..56),
+    Error("|", 57..58),
+    Error("'", 59..60),
+    Integer("0", 62..63),
+    Ident("a", 63..64),
+    Integer("0", 81..82),
+    Integer("1", 82..83),
+    Integer("0", 97..98),
+    Dot(".", 98..99),
+    Float("0.1", 100..103),
+    Ident("e", 103..104),
 ]

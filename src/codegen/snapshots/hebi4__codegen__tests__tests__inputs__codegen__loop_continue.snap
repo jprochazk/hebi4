@@ -3,7 +3,7 @@ source: src/codegen/tests.rs
 expression: snapshot
 ---
 SOURCE
-##
+//
 loop {
   let v = 0
   continue

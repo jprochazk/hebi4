@@ -1,7 +1,7 @@
-##parse
+//parse
 
 do {
   return
 }
 
-100 # not return value
+100 // not return value

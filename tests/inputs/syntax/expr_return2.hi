@@ -1,4 +1,4 @@
-##parse
+//parse
 
 return
-100  # return value
+100  // return value

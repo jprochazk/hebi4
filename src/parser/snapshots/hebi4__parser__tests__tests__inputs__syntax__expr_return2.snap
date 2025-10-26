@@ -3,10 +3,10 @@ source: src/parser/tests.rs
 expression: snapshot
 ---
 SOURCE
-##parse
+//parse
 
 return
-100  # return value
+100  // return value
 
 
 OK

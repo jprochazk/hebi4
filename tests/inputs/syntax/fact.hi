@@ -1,4 +1,4 @@
-##parse
+//parse
 
 fn factorial(n) {
   if n <= 1 {

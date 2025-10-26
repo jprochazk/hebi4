@@ -19,8 +19,8 @@ fn parse_options(options: &str) -> EmitOptions {
 #[glob_test::glob("../../tests/inputs/codegen/*.hi")]
 fn emitter(path: &Path) {
     let input = read_to_string(path).unwrap();
-    let options = if input.starts_with("##") {
-        let first_line = input.lines().next().unwrap();
+    let options = if input.starts_with("//") {
+        let first_line = input.lines().next().unwrap().trim_start_matches("//");
         parse_options(first_line)
     } else {
         Default::default()

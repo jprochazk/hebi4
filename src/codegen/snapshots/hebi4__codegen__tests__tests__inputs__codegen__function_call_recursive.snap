@@ -3,8 +3,8 @@ source: src/codegen/tests.rs
 expression: snapshot
 ---
 SOURCE
-# functions can statically call themselves,
-# as they are declared _before_ they are emitted.
+// functions can statically call themselves,
+// as they are declared _before_ they are emitted.
 fn f() { f() }
 
 

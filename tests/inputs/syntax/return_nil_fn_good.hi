@@ -1,4 +1,4 @@
-##parse
+//parse
 
 return nil
 fn f(){}

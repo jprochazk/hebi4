@@ -1,4 +1,4 @@
-##emit
+//emit
 
 fn test(a, b, c) {
     print(a, b, c)
