@@ -146,8 +146,7 @@ impl CommandExt for std::process::Command {
 
 #[cfg(unix)]
 mod imp {
-    use std::os::unix::process::CommandExt;
-    use std::process::Command;
+    use std::{os::unix::process::CommandExt, process::Command};
 
     pub fn exec_replace(mut command: Command) {
         eprintln!("{}", command.exec());

@@ -1,10 +1,11 @@
-use argh::FromArgValue;
-use hebi4::EmitOptions;
 use std::{
     fs::read_to_string,
     io::{BufWriter, StdoutLock, Write, stdout},
     path::Path,
 };
+
+use argh::FromArgValue;
+use hebi4::EmitOptions;
 
 fn main() {
     let args: Args = argh::from_env();
