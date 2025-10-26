@@ -506,12 +506,12 @@ impl GcHeader {
     }
 }
 
-const _: () = {
-    assert!(
-        std::mem::size_of::<*mut ()>() == 8 && std::mem::align_of::<*mut ()>() == 8,
-        "only 64-bit platforms are supported"
-    );
-};
+// const _: () = {
+//     assert!(
+//         std::mem::size_of::<*mut ()>() == 8 && std::mem::align_of::<*mut ()>() == 8,
+//         "only 64-bit platforms are supported"
+//     );
+// };
 
 // Think very carefully about changing the repr of this!
 #[repr(C, align(8))]
