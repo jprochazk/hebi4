@@ -38,7 +38,7 @@ function createEditor() {
 
   let updateTimer;
 
-  const runCommand = (view) => {
+  const runCommand = () => {
     updateAllOutputs();
     return true;
   };
