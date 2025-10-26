@@ -11,6 +11,7 @@ fn main() {
         "miri" => miri(&args[1..]),
         "check-tco" => check_tco(),
         "sort-imports" => sort_imports(),
+        "playground" => playground(),
         _ => help(),
     }
 }
@@ -32,6 +33,10 @@ fn miri(args: &[String]) {
 fn sort_imports() {
     cargo("+nightly fmt -- --unstable-features --config imports_granularity=Crate,group_imports=StdExternalCrate")
         .run();
+}
+
+fn playground() {
+    cmd("npm --prefix playground run dev").exec();
 }
 
 fn help() {
@@ -68,6 +73,7 @@ fn cmd(cmd: impl AsRef<str>) -> std::process::Command {
 
 trait CommandExt {
     fn run(self);
+    fn exec(self);
     fn output(self) -> Vec<u8>;
     fn output_utf8(self) -> String;
     fn with_envs<I, K, V>(self, envs: I) -> Self
@@ -89,11 +95,15 @@ impl CommandExt for std::process::Command {
             .spawn()
             .expect("failed to spawn cmd")
             .wait()
-            .expect("faield to run command");
+            .expect("failed to run command");
         if !status.success() {
             eprintln!("command exited with non-zero exit code");
             std::process::exit(1);
         }
+    }
+
+    fn exec(self) {
+        imp::exec_replace(self);
     }
 
     fn output(mut self) -> Vec<u8> {
@@ -131,5 +141,23 @@ impl CommandExt for std::process::Command {
     {
         self.args(args);
         self
+    }
+}
+
+#[cfg(unix)]
+mod imp {
+    use std::os::unix::process::CommandExt;
+    use std::process::Command;
+
+    pub fn exec_replace(mut command: Command) {
+        eprintln!("{}", command.exec());
+    }
+}
+
+#[cfg(windows)]
+mod imp {
+    pub fn exec_replace(command: Command) {
+        // Just execute the process as normal.
+        process_builder.run()
     }
 }

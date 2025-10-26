@@ -24,4 +24,4 @@ insta = { version = "1.43.1" }
 glob_test = { version = "0.1" }
 
 [workspace]
-members = ["asmgen", "astgen", "xtask", "cli"]
+members = ["asmgen", "astgen", "xtask", "cli", "playground"]

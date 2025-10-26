@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🐍 Hebi4</title>
+    <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+    <div class="playground">
+        <header class="toolbar">
+            <div class="toolbar-left">
+                <h1>🐍 Hebi4</h1>
+            </div>
+            <div class="toolbar-right">
+                <select id="examples" class="btn">
+                    <option value="">Examples...</option>
+                </select>
+                <button id="share" class="btn" title="Copy shareable link">Share</button>
+                <a href="https://github.com/jprochazk/hebi4" target="_blank" class="btn">GitHub</a>
+            </div>
+        </header>
+
+        <div class="content">
+            <div class="editor-panel">
+                <div class="panel-header">
+                    <span>Editor</span>
+                    <div class="panel-actions">
+                        <button id="run" class="btn btn-primary" title="Ctrl+Enter">Run</button>
+                    </div>
+                </div>
+                <div id="editor"></div>
+            </div>
+
+            <div class="output-panel">
+                <div class="tabs">
+                    <button class="tab active" data-tab="run">Run</button>
+                    <button class="tab" data-tab="disasm">Disassembly</button>
+                    <button class="tab" data-tab="ast">AST</button>
+                    <label class="checkbox-label tabs-extra">
+                        <input type="checkbox" id="optimize">
+                        <span>DCE</span>
+                    </label>
+                </div>
+                <div class="tab-content">
+                    <pre id="output-run" class="output active"></pre>
+                    <pre id="output-disasm" class="output"></pre>
+                    <pre id="output-ast" class="output"></pre>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script type="module" src="/main.js"></script>
+</body>
+</html>

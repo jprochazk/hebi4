@@ -1,0 +1,11 @@
+# Build output
+dist/
+pkg/
+
+# Node
+node_modules/
+package-lock.json
+
+# Rust build artifacts
+target/
+Cargo.lock
