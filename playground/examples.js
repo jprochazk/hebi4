@@ -5,11 +5,11 @@ export const examples = {
 // The examples selector on the top right contains some code samples.
 // Try selecting different output modes: Run, Disassembly, AST
 
-fn greet(name) {
-  "Hello, world!"
+fn greet() {
+  "Hello, chat"
 }
 
-greet("World")`
+greet()`
   },
 
   "fibonacci": {
