@@ -4,10 +4,11 @@ use rustc_hash::FxBuildHasher;
 use super::{FunctionProto, ValueRaw};
 use crate::{
     codegen::opcodes::{FnId, Insn, Reg, asm},
+    gc::GcUninitRoot,
     module::{FuncInfo, Literal, Module},
     value::string,
     vm::{
-        gc::{GcPtr, GcRef, GcRefMut, GcRoot, Heap, Trace, let_root_unchecked},
+        gc::{GcPtr, GcRef, GcRefMut, GcRoot, Heap, Trace, let_root, let_root_unchecked},
         value::String,
     },
 };
@@ -119,12 +120,14 @@ impl ModuleRegistry {
     pub(crate) fn add(&mut self, heap: &mut Heap, module: &Module) -> GcPtr<ModuleProto> {
         let id = ModuleId(self.modules.len() as u32);
         let name = module.name().to_owned();
-        let module = canonicalize(heap, module, id);
 
-        self.modules.push(module);
+        let_root!(in heap; module_root);
+        let module = canonicalize(heap, module_root, module, id);
+
+        self.modules.push(module.as_ptr());
         self.by_name.insert(name, id);
 
-        module
+        module.as_ptr()
     }
 
     pub(crate) fn iter(&self) -> impl Iterator<Item = GcPtr<ModuleProto>> {
@@ -151,19 +154,29 @@ const ENTRYPOINT: [Insn; 2] = unsafe {
     ]
 };
 
-fn canonicalize(heap: &mut Heap, info: &Module, id: ModuleId) -> GcPtr<ModuleProto> {
+fn canonicalize<'a>(
+    heap: &mut Heap,
+    root: GcUninitRoot<'a>,
+    info: &Module,
+    id: ModuleId,
+) -> GcRoot<'a, ModuleProto> {
     string!(in heap; name = info.name());
 
-    let_root_unchecked!(unsafe in heap; module = heap.alloc_no_gc(|ptr| unsafe {
-        (*ptr).write(ModuleProto {
-            name: name.as_ptr(),
-            module_id: id,
-            entrypoint: None,
-            functions: Box::new([]),
-            // TODO: module vars
-            module_vars: Box::new([ValueRaw::Nil; 0]),
-        });
-    }));
+    let module = unsafe {
+        root.init_raw(
+            heap,
+            heap.alloc_no_gc(|ptr| {
+                (*ptr).write(ModuleProto {
+                    name: name.as_ptr(),
+                    module_id: id,
+                    entrypoint: None,
+                    functions: Box::new([]),
+                    // TODO: module vars
+                    module_vars: Box::new([ValueRaw::Nil; 0]),
+                });
+            }),
+        )
+    };
 
     let entrypoint = generate_entrypoint(heap, info.name(), &module);
     module.as_mut(heap).entrypoint = Some(entrypoint);
@@ -178,7 +191,7 @@ fn canonicalize(heap: &mut Heap, info: &Module, id: ModuleId) -> GcPtr<ModulePro
 
     module.as_mut(heap).functions = functions;
 
-    module.as_ptr()
+    module
 }
 
 fn canonicalize_function(

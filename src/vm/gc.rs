@@ -1209,6 +1209,12 @@ impl<'a> GcUninitRoot<'a> {
     pub fn init<T: Trace>(self, heap: &mut Heap, ptr: impl Rooted<T>) -> GcRoot<'a, T> {
         self.0.set(heap, ptr)
     }
+
+    /// Initialize the root with `ptr`.
+    #[inline]
+    pub unsafe fn init_raw<T: Trace>(self, heap: &mut Heap, ptr: GcPtr<T>) -> GcRoot<'a, T> {
+        self.0.set_raw(ptr)
+    }
 }
 
 /// Internal API
@@ -1761,10 +1767,17 @@ pub use crate::__let_root_unchecked as let_root_unchecked;
 #[macro_export]
 #[doc(hidden)]
 macro_rules! __let_root {
-    (in $heap:ident; $place:ident) => {
+    (in $heap:ident; mut $place:ident) => {
         let ptr = unsafe { $crate::gc::__Empty::__get() };
         let mut place = unsafe { $crate::gc::StackRoot::from_heap_ptr($heap, ptr) };
         let mut $place = unsafe {
+            $crate::gc::GcUninitRoot::__new($heap, ::core::pin::Pin::new_unchecked(&mut place))
+        };
+    };
+    (in $heap:ident; $place:ident) => {
+        let ptr = unsafe { $crate::gc::__Empty::__get() };
+        let mut place = unsafe { $crate::gc::StackRoot::from_heap_ptr($heap, ptr) };
+        let $place = unsafe {
             $crate::gc::GcUninitRoot::__new($heap, ::core::pin::Pin::new_unchecked(&mut place))
         };
     };
