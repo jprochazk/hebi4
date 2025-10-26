@@ -4,7 +4,7 @@ use beef::lean::Cow;
 
 use crate::{
     codegen::{
-        emit,
+        EmitOptions, emit,
         opcodes::{FnId, Insn, Reg},
     },
     error::Result,
@@ -71,13 +71,21 @@ impl Module {
     ///
     /// The resulting error can be rendered using [`Error::render`][error::Error::render].
     pub fn compile(name: Option<Cow<'static, str>>, src: &str) -> Result<Self> {
+        Self::compile_with(name, src, Default::default())
+    }
+
+    pub fn compile_with(
+        name: Option<Cow<'static, str>>,
+        src: &str,
+        options: EmitOptions,
+    ) -> Result<Self> {
         let tokens = tokenize(&src);
         let ast = parse(&tokens)?;
         let name = name.unwrap_or_else(|| {
             let src_hash = StringHasher::default().hash_str(src);
             format!("anon#{src_hash}").into()
         });
-        emit(name, &ast)
+        emit(name, &ast, options)
     }
 }
 

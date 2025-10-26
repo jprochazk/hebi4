@@ -30,6 +30,7 @@ mod vm;
 
 mod disasm;
 
+pub use codegen::EmitOptions;
 pub use module::Module;
 pub use vm::{Hebi, gc, value};
 

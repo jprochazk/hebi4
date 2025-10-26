@@ -147,9 +147,31 @@ macro_rules! f {
 
 const NO_SPAN: Span = Span::empty();
 
-pub fn emit(name: Cow<'static, str>, ast: &Ast) -> Result<Module> {
+#[derive(Clone)]
+pub struct EmitOptions {
+    pub dead_code_elimination: bool,
+}
+
+impl EmitOptions {
+    pub fn empty() -> Self {
+        Self {
+            dead_code_elimination: false,
+        }
+    }
+}
+
+impl Default for EmitOptions {
+    fn default() -> Self {
+        Self {
+            dead_code_elimination: true,
+        }
+    }
+}
+
+pub fn emit(name: Cow<'static, str>, ast: &Ast, options: EmitOptions) -> Result<Module> {
     let buf = &Bump::new();
     let mut m = State {
+        options,
         buf,
         func_stack: vec![in buf],
         func_table: FunctionTable::new(buf),
@@ -178,6 +200,8 @@ pub fn emit(name: Cow<'static, str>, ast: &Ast) -> Result<Module> {
 }
 
 struct State<'a> {
+    options: EmitOptions,
+
     buf: &'a Bump,
     func_stack: Vec<'a, FunctionState<'a>>,
     func_table: FunctionTable<'a>,
@@ -248,12 +272,17 @@ impl<'a> FunctionTable<'a> {
 }
 
 struct FunctionState<'a> {
+    options: EmitOptions,
+
     name: Cow<'a, str>,
     scopes: Vec<'a, Scope<'a>>,
     ra: RegAlloc,
     code: Vec<'a, Insn>,
     literals: Literals<'a>,
     loop_: Option<Loop<'a>>,
+
+    /// Tracking basic block boundaries
+    in_block: bool,
 
     dbg: FunctionDebug<'a>,
 }
@@ -671,11 +700,17 @@ impl<'a> ForwardLabel<'a> {
         }
     }
 
-    fn add_target(&mut self, pos: usize) {
+    fn add_target(&mut self, m: &mut State<'a>, pos: usize) {
+        assert!(matches!(
+            f!(m).code.get(pos).map(|i| i.op()),
+            Some(Opcode::Jmp)
+        ));
         self.patch_targets.push(pos);
     }
 
     fn bind(self, f: &mut FunctionState<'a>) -> Result<()> {
+        f.enter_basic_block();
+
         let pos = f.code.len();
         let span = *f.dbg.spans.last().unwrap();
         for target in self.patch_targets {
@@ -685,7 +720,7 @@ impl<'a> ForwardLabel<'a> {
             let span = f.dbg.spans[target];
             let insn = &mut f.code[target];
             let Opcode::Jmp = insn.op() else {
-                return error("invalid label referree", span).into();
+                unreachable!("ICE: invalid label referree ({:?})", insn.op());
             };
             *insn = asm::jmp(unsafe { Imm24s::new_unchecked(offset) });
         }
@@ -703,15 +738,21 @@ impl BasicForwardLabel {
         Self { patch_target: None }
     }
 
-    fn set_target(&mut self, pos: usize) {
+    fn set_target(&mut self, m: &mut State<'_>, pos: usize) {
+        assert!(matches!(
+            f!(m).code.get(pos).map(|i| i.op()),
+            Some(Opcode::Jmp)
+        ));
         self.patch_target = Some(pos);
     }
 
     fn bind(self, f: &mut FunctionState<'_>) -> Result<()> {
+        f.enter_basic_block();
+
         let pos = f.code.len();
         let span = *f.dbg.spans.last().unwrap();
         let Some(target) = self.patch_target else {
-            unreachable!("ICE: basic forward label bound without patch target");
+            return Ok(());
         };
 
         let offset = i24::try_from((pos - target) as isize)
@@ -720,7 +761,7 @@ impl BasicForwardLabel {
         let span = f.dbg.spans[target];
         let insn = &mut f.code[target];
         let Opcode::Jmp = insn.op() else {
-            return error("invalid label referree", span).into();
+            unreachable!("ICE: invalid label referree ({:?})", insn.op());
         };
         *insn = asm::jmp(unsafe { Imm24s::new_unchecked(offset) });
 
@@ -746,14 +787,17 @@ impl BackwardLabel {
 }
 
 impl<'a> FunctionState<'a> {
-    fn new(name: Cow<'a, str>, buf: &'a Bump) -> Self {
+    fn new(options: EmitOptions, name: Cow<'a, str>, buf: &'a Bump) -> Self {
         Self {
+            options,
+
             name,
             scopes: vec![in buf],
             ra: RegAlloc::new(),
             code: vec![in buf],
             literals: Literals::new(buf),
             loop_: None,
+            in_block: true,
 
             dbg: FunctionDebug {
                 spans: vec![in buf],
@@ -838,10 +882,40 @@ impl<'a> FunctionState<'a> {
         None
     }
 
-    fn emit(&mut self, insn: Insn, span: Span) {
+    fn emit(&mut self, insn: Insn, span: Span) -> Option<usize> {
+        if self.in_dead_code() {
+            return None;
+        }
+
+        if let Some(prev_insn) = self.code.last().copied() {
+            let prev_insn_index = self.code.len() - 1;
+
+            if is_basic_block_exit(prev_insn, insn) {
+                self.leave_basic_block();
+            }
+
+            if let Some(insn) = peephole(prev_insn, insn) {
+                self.code[prev_insn_index] = insn;
+                return None;
+            }
+        }
+
+        let index = self.code.len();
         self.code.push(insn);
         self.dbg.spans.push(span);
-        // TODO(opt): peep-opt
+        Some(index)
+    }
+
+    fn in_dead_code(&self) -> bool {
+        self.options.dead_code_elimination && !self.in_block
+    }
+
+    fn enter_basic_block(&mut self) {
+        self.in_block = true;
+    }
+
+    fn leave_basic_block(&mut self) {
+        self.in_block = false;
     }
 }
 
@@ -884,7 +958,7 @@ impl<'a> State<'a> {
         None
     }
 
-    fn emit(&mut self, insn: Insn, span: Span) {
+    fn emit(&mut self, insn: Insn, span: Span) -> Option<usize> {
         f!(self).emit(insn, span)
     }
 
@@ -906,6 +980,14 @@ impl<'a> State<'a> {
     /// Define an function once that it's been emitted
     fn define_function(&mut self, id: FnId, f: FuncInfo) {
         self.func_table.define(id, f);
+    }
+
+    fn enter_basic_block(&mut self) {
+        f!(self).enter_basic_block();
+    }
+
+    fn leave_basic_block(&mut self) {
+        f!(self).leave_basic_block();
     }
 }
 
@@ -950,7 +1032,7 @@ fn emit_func<'a>(
         .into();
     }
 
-    let f = FunctionState::new(name, m.buf);
+    let f = FunctionState::new(m.options.clone(), name, m.buf);
     m.func_stack.push(f);
 
     {
@@ -1311,25 +1393,20 @@ fn eval_expr_return<'a>(
     Ok(Value::nil(span))
 }
 
-const PLACEHOLDER: Imm24s = unsafe { Imm24s::new_unchecked(i24::ZERO) };
-
 fn eval_expr_break<'a>(
     m: &mut State<'a>,
     brk: Node<'a, ast::Break>,
     span: Span,
     dst: Option<Reg>,
 ) -> Result<Value<'a>> {
-    let f = f!(m);
-    let Some(mut loop_) = f.loop_.take() else {
+    let Some(mut loop_) = f!(m).loop_.take() else {
         return error("cannot use `break` outside of loop", span).into();
     };
 
     // break = unconditional jump to loop exit
-    let pos = f.code.len();
-    f.emit(asm::jmp(PLACEHOLDER), span);
-    loop_.exit.add_target(pos);
+    emit_forward_jmp(m, span, &mut loop_.exit);
 
-    f.loop_ = Some(loop_);
+    f!(m).loop_ = Some(loop_);
 
     Ok(Value::nil(span))
 }
@@ -1388,9 +1465,7 @@ fn eval_expr_if<'a>(
 
             // if the condition is true, execute `body`. otherwise, `jmp` to `tail`.
             emit_if_cond(m, node.cond(), node.cond_span(), out, &mut targets)?;
-            let pos = f!(m).code.len();
-            m.emit(asm::jmp(PLACEHOLDER), node.cond_span());
-            targets.next.add_target(pos);
+            emit_forward_jmp(m, span, &mut targets.next);
 
             targets.body.bind(f!(m))?;
 
@@ -1401,9 +1476,7 @@ fn eval_expr_if<'a>(
 
             // if `tail` exists and we execute `body`, we should skip `tail`.
             if node.tail().is_some() {
-                let pos = f!(m).code.len();
-                m.emit(asm::jmp(PLACEHOLDER), node.cond_span());
-                exit.add_target(pos);
+                emit_forward_jmp(m, span, &mut exit);
             }
 
             targets.next.bind(f!(m))?;
@@ -1428,9 +1501,7 @@ fn eval_expr_if<'a>(
 
                 // if the condition is true, execute `body`. otherwise, `jmp` to `tail`.
                 emit_if_cond(m, branch.cond(), branch.cond_span(), out, &mut targets)?;
-                let pos = f!(m).code.len();
-                m.emit(asm::jmp(PLACEHOLDER), branch.cond_span());
-                targets.next.add_target(pos);
+                emit_forward_jmp(m, span, &mut targets.next);
 
                 targets.body.bind(f!(m))?;
 
@@ -1441,9 +1512,7 @@ fn eval_expr_if<'a>(
 
                 let has_next = branches.peek().is_some() || node.tail().is_some();
                 if has_next {
-                    let pos = f!(m).code.len();
-                    m.emit(asm::jmp(PLACEHOLDER), branch.cond_span());
-                    exit.add_target(pos);
+                    emit_forward_jmp(m, span, &mut exit);
                 }
 
                 targets.next.bind(f!(m))?;
@@ -1489,10 +1558,7 @@ fn emit_if_cond_inner<'a>(
         ast::ExprKind::Infix(node) if node.op().is_logical() => match (*node.op(), negated) {
             (Op::And, false) => {
                 emit_if_cond_inner(m, node.lhs(), node.lhs_span(), dst, false, targets)?;
-                let pos = f!(m).code.len();
-                m.emit(asm::jmp(PLACEHOLDER), node.lhs_span());
-                targets.next.add_target(pos);
-
+                emit_forward_jmp(m, span, &mut targets.next);
                 emit_if_cond_inner(m, node.rhs(), node.rhs_span(), dst, false, targets)?;
                 // `rhs` jmp is emitted by caller
 
@@ -1505,10 +1571,7 @@ fn emit_if_cond_inner<'a>(
                 //   else if not(rhs) do body()
                 //   end
                 emit_if_cond_inner(m, node.lhs(), node.lhs_span(), dst, false, targets)?;
-                let pos = f!(m).code.len();
-                m.emit(asm::jmp(PLACEHOLDER), node.lhs_span());
-                targets.body.add_target(pos);
-
+                emit_forward_jmp(m, span, &mut targets.body);
                 emit_if_cond_inner(m, node.rhs(), node.rhs_span(), dst, true, targets)?;
                 // `rhs` jmp is emitted by caller
 
@@ -1521,10 +1584,7 @@ fn emit_if_cond_inner<'a>(
                 //   else if rhs do body()
                 //   end
                 emit_if_cond_inner(m, node.lhs(), node.lhs_span(), dst, true, targets)?;
-                let pos = f!(m).code.len();
-                m.emit(asm::jmp(PLACEHOLDER), node.lhs_span());
-                targets.body.add_target(pos);
-
+                emit_forward_jmp(m, span, &mut targets.body);
                 emit_if_cond_inner(m, node.rhs(), node.rhs_span(), dst, false, targets)?;
                 // `rhs` jmp is emitted by caller
 
@@ -1537,10 +1597,7 @@ fn emit_if_cond_inner<'a>(
                 //     if not(rhs) do body() end
                 //   end
                 emit_if_cond_inner(m, node.lhs(), node.lhs_span(), dst, true, targets)?;
-                let pos = f!(m).code.len();
-                m.emit(asm::jmp(PLACEHOLDER), node.lhs_span());
-                targets.next.add_target(pos);
-
+                emit_forward_jmp(m, span, &mut targets.next);
                 emit_if_cond_inner(m, node.rhs(), node.rhs_span(), dst, true, targets)?;
                 // `rhs` jmp is emitted by caller
 
@@ -2195,7 +2252,7 @@ fn eval_expr_list<'a>(
         match idx {
             Operand::Reg(idx) => m.emit(asm::sidx(dst, idx, value), span),
             Operand::Const(idx) => m.emit(asm::sidxn(dst, idx, value), span),
-        }
+        };
 
         free_operand(m, idx);
         free_reg(m, value);
@@ -2228,7 +2285,7 @@ fn eval_expr_table<'a>(
         match key {
             Operand::Reg(key) => m.emit(asm::skey(dst, key, value), span),
             Operand::Const(key) => m.emit(asm::skeyc(dst, key, value), span),
-        }
+        };
 
         free_operand(m, key);
         free_reg(m, value);
@@ -2337,7 +2394,7 @@ fn bool_to_reg<'a>(m: &mut State<'a>, value: bool, span: Span, dst: Option<Reg>)
     match value {
         true => m.emit(asm::ltrue(dst), span),
         false => m.emit(asm::lfalse(dst), span),
-    }
+    };
     Ok(dst)
 }
 
@@ -2482,6 +2539,167 @@ fn value_force_reg<'a>(m: &mut State<'a>, value: Value<'a>, dst: Reg) -> Result<
         m.emit(asm::mov(dst, src), value.span);
     }
     Ok(())
+}
+
+fn emit_forward_jmp<'a>(m: &mut State<'a>, span: Span, label: &mut ForwardLabel<'a>) {
+    const PLACEHOLDER: Imm24s = unsafe { Imm24s::new_unchecked(i24::ZERO) };
+    if let Some(pos) = m.emit(asm::jmp(PLACEHOLDER), span) {
+        label.add_target(m, pos);
+    }
+}
+
+fn is_basic_block_exit(prev: Insn, insn: Insn) -> bool {
+    match insn.op() {
+        Opcode::Jmp if is_jump_condition(prev) => false,
+        Opcode::Jmp => true,
+
+        Opcode::Ret | Opcode::Stop => true,
+
+        Opcode::Nop
+        | Opcode::Mov
+        | Opcode::Lmvar
+        | Opcode::Smvar
+        | Opcode::Lcap
+        | Opcode::Scap
+        | Opcode::Lidx
+        | Opcode::Lidxn
+        | Opcode::Sidx
+        | Opcode::Sidxn
+        | Opcode::Lkey
+        | Opcode::Lkeyc
+        | Opcode::Skey
+        | Opcode::Skeyc
+        | Opcode::Lnil
+        | Opcode::Lsmi
+        | Opcode::Ltrue
+        | Opcode::Lfalse
+        | Opcode::Lint
+        | Opcode::Lnum
+        | Opcode::Lstr
+        | Opcode::Lclosure
+        | Opcode::Lfunc
+        | Opcode::Llist
+        | Opcode::Ltable
+        | Opcode::Istrue
+        | Opcode::Isfalse
+        | Opcode::Istruec
+        | Opcode::Isfalsec
+        | Opcode::Islt
+        | Opcode::Isle
+        | Opcode::Isgt
+        | Opcode::Isge
+        | Opcode::Iseq
+        | Opcode::Isne
+        | Opcode::Iseqs
+        | Opcode::Isnes
+        | Opcode::Iseqn
+        | Opcode::Isnen
+        | Opcode::Iseqp
+        | Opcode::Isnep
+        | Opcode::Isltv
+        | Opcode::Islev
+        | Opcode::Isgtv
+        | Opcode::Isgev
+        | Opcode::Iseqv
+        | Opcode::Isnev
+        | Opcode::Addvv
+        | Opcode::Addvn
+        | Opcode::Addnv
+        | Opcode::Subvv
+        | Opcode::Subvn
+        | Opcode::Subnv
+        | Opcode::Mulvv
+        | Opcode::Mulvn
+        | Opcode::Mulnv
+        | Opcode::Divvv
+        | Opcode::Divvn
+        | Opcode::Divnv
+        | Opcode::Unm
+        | Opcode::Not
+        | Opcode::Call
+        | Opcode::Fastcall => false,
+    }
+}
+
+fn is_jump_condition(insn: Insn) -> bool {
+    match insn.op() {
+        Opcode::Istrue
+        | Opcode::Isfalse
+        | Opcode::Istruec
+        | Opcode::Isfalsec
+        | Opcode::Islt
+        | Opcode::Isle
+        | Opcode::Isgt
+        | Opcode::Isge
+        | Opcode::Iseq
+        | Opcode::Isne
+        | Opcode::Iseqs
+        | Opcode::Isnes
+        | Opcode::Iseqn
+        | Opcode::Isnen
+        | Opcode::Iseqp
+        | Opcode::Isnep => true,
+
+        Opcode::Nop
+        | Opcode::Mov
+        | Opcode::Lmvar
+        | Opcode::Smvar
+        | Opcode::Lcap
+        | Opcode::Scap
+        | Opcode::Lidx
+        | Opcode::Lidxn
+        | Opcode::Sidx
+        | Opcode::Sidxn
+        | Opcode::Lkey
+        | Opcode::Lkeyc
+        | Opcode::Skey
+        | Opcode::Skeyc
+        | Opcode::Lnil
+        | Opcode::Lsmi
+        | Opcode::Ltrue
+        | Opcode::Lfalse
+        | Opcode::Lint
+        | Opcode::Lnum
+        | Opcode::Lstr
+        | Opcode::Lclosure
+        | Opcode::Lfunc
+        | Opcode::Llist
+        | Opcode::Ltable
+        | Opcode::Jmp
+        | Opcode::Isltv
+        | Opcode::Islev
+        | Opcode::Isgtv
+        | Opcode::Isgev
+        | Opcode::Iseqv
+        | Opcode::Isnev
+        | Opcode::Addvv
+        | Opcode::Addvn
+        | Opcode::Addnv
+        | Opcode::Subvv
+        | Opcode::Subvn
+        | Opcode::Subnv
+        | Opcode::Mulvv
+        | Opcode::Mulvn
+        | Opcode::Mulnv
+        | Opcode::Divvv
+        | Opcode::Divvn
+        | Opcode::Divnv
+        | Opcode::Unm
+        | Opcode::Not
+        | Opcode::Call
+        | Opcode::Fastcall
+        | Opcode::Ret
+        | Opcode::Stop => false,
+    }
+}
+
+fn peephole(prev_insn: Insn, insn: Insn) -> Option<Insn> {
+    use Opcode as Op;
+
+    match (prev_insn.op(), insn.op()) {
+        (Op::Ret, Op::Ret) => Some(prev_insn),
+        _ => None,
+    }
 }
 
 #[cfg(test)]

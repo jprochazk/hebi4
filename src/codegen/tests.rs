@@ -1,11 +1,31 @@
 use std::{fs::read_to_string, path::Path};
 
 use super::emit;
-use crate::{parser::parse, token::tokenize};
+use crate::{codegen::EmitOptions, parser::parse, token::tokenize};
+
+fn parse_options(options: &str) -> EmitOptions {
+    let mut o = EmitOptions::empty();
+
+    for opt in options.split(',') {
+        match opt {
+            "dce" => o.dead_code_elimination = true,
+            _ => {}
+        }
+    }
+
+    o
+}
 
 #[glob_test::glob("../../tests/inputs/codegen/*.hi")]
 fn emitter(path: &Path) {
     let input = read_to_string(path).unwrap();
+    let options = if input.starts_with("##") {
+        let first_line = input.lines().next().unwrap();
+        parse_options(first_line)
+    } else {
+        Default::default()
+    };
+
     let tokens = tokenize(&input);
     let ast = match parse(&tokens) {
         Ok(ast) => ast,
@@ -13,7 +33,7 @@ fn emitter(path: &Path) {
             panic!("{}", err.render(&input));
         }
     };
-    let (snapshot, failure) = match emit("test".into(), &ast) {
+    let (snapshot, failure) = match emit("test".into(), &ast, options) {
         Ok(m) => (
             format!("SOURCE\n{input}\n\nOK\n{}", m.disasm(&input)),
             false,

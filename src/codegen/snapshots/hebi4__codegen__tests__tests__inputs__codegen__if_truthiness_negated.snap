@@ -21,13 +21,10 @@ OK
    0  lsmi r1, 1
    1  lsmi r2, 0
    2  isfalse r1
-   3  jmp 4   ; to 7
+   3  jmp 3   ; to 6
    4  lsmi r0, 1
    5  ret
-   6  lnil r3
-   7  isfalse r2
-   8  jmp 4   ; to 12
-   9  lsmi r0, 2
-  10  ret
-  11  lnil r0
-  12  ret
+   6  isfalse r2
+   7  jmp 3   ; to 10
+   8  lsmi r0, 2
+   9  ret

@@ -11,7 +11,7 @@ fn module(input: &str) -> Module {
             panic!("{}", err.render(&input));
         }
     };
-    let module = match crate::codegen::emit("test".into(), &ast) {
+    let module = match crate::codegen::emit("test".into(), &ast, Default::default()) {
         Ok(m) => m,
         Err(err) => panic!("{}", err.render(&input)),
     };
