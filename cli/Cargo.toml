@@ -1,0 +1,12 @@
+[package]
+name = "hebi4-cli"
+version = "0.1.0"
+edition = "2024"
+
+[[bin]]
+name = "hebi4"
+path = "src/main.rs"
+
+[dependencies]
+argh = "0.1.13"
+hebi4 = { path = "../" }

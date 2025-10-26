@@ -13,6 +13,7 @@ beef = "0.5.2"
 [profile.release]
 panic = "abort"
 lto = "fat"
+codegen-units = 1
 
 [profile.release-perf]
 inherits = "release"
@@ -23,4 +24,4 @@ insta = { version = "1.43.1" }
 glob_test = { version = "0.1" }
 
 [workspace]
-members = ["asmgen", "astgen", "xtask"]
+members = ["asmgen", "astgen", "xtask", "cli"]
