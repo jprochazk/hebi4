@@ -1,6 +1,7 @@
 # Build output
 dist/
 pkg/
+public/tree-sitter-hebi.wasm
 
 # Node
 node_modules/
