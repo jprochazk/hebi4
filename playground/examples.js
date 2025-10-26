@@ -1,11 +1,12 @@
 export const examples = {
   "welcome": {
     name: "Welcome to Hebi4",
-    code: `// Welcome to the Hebi4 Playground!
-// Click "Run" or press Ctrl+Enter to execute code
+    code: `// Welcome to the Hebi4 playground
+// The examples selector on the top right contains some code samples.
+// Try selecting different output modes: Run, Disassembly, AST
 
 fn greet(name) {
-  "Hello, " + name + "!"
+  "Hello, world!"
 }
 
 greet("World")`
@@ -73,38 +74,16 @@ quot`
     code: `let person = {
   name: "Alice",
   age: 30,
-  greet: fn() {
-    "Hello, I'm " + person.name
-  }
 }
 
-person.greet()`
+person.name`
   },
 
   "lists": {
     name: "Lists (Arrays)",
     code: `let numbers = [1, 2, 3, 4, 5]
-let sum = 0
 
-// Note: This is a simple example
-// Full iteration features may vary
 numbers[0] + numbers[4]`
-  },
-
-  "closure": {
-    name: "Closures",
-    code: `fn makeCounter() {
-  let count = 0
-  fn() {
-    count = count + 1
-    count
-  }
-}
-
-let counter = makeCounter()
-counter()
-counter()
-counter()`
   },
 
   "factorial": {
