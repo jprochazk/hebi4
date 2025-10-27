@@ -33,7 +33,7 @@ New tests can be created by adding a `.hi` file to [`tests/inputs`](./tests/inpu
 
 Files in `tests/inputs` are passed through the tokenize and parse stages.
 
-They may begin with a comment (`##`) to filter the stages it will be tested against:
+They may begin with a comment (`//`) to filter the stages it will be tested against:
 - `tokenize` for [`src/token.rs`](./src/token.rs)
 - `parse` for [`src/parser.rs`](./src/parser.rs)
 
@@ -51,6 +51,8 @@ Files in `tests/inputs/run` are passed through the runtime, end-to-end.
 Try to keep tests minimal and to the point as much as possible. Separate tests should be written
 for each stage where the behavior may have changed. If a change in codegen may result in different
 runtime behavior, it should have both a `codegen` test and a `run` test.
+
+To get syntax highlighting in tests, see [tree-sitter-hebi](https://github.com/jprochazk/tree-sitter-hebi).
 
 ### Codegen
 
