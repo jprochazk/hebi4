@@ -74,7 +74,7 @@ stmt =
 a variable must always be initialized to some value
 ```
 stmt_var =
-    "var" IDENT "=" expr
+    "let" IDENT "=" expr
 ```
 
 a function has list of parameters, its body is a list of statements,
@@ -237,15 +237,11 @@ expr_suffix =
 
 suffix =
     suffix_call
-    suffix_call_table
     suffix_index
     suffix_field
 
 suffix_call =
     "(" expr,* ")"
-
-suffix_call_table =
-    "{" table_entry,* "}"
 
 suffix_index =
     "[" expr "]"
@@ -283,15 +279,15 @@ expr_table =
     "{" table_entry,* "}"
 ```
 
-table entries are key-value pairs separated by an equals sign.
+table entries are key-value pairs separated by a colon sign.
 a key may be either an identifier or a string. numeric keys are not allowed.
 one entry in an table may be a standalone identifier,
 which is shorthand for `IDENT = IDENT`.
 ```
 table_entry =
-    IDENT "=" expr
+    IDENT ":" expr
     expr_use
-    expr_string "=" expr
+    expr_string ":" expr
     expr_string
 ```
 
@@ -303,25 +299,34 @@ expr_number =
     expr_float
 ```
 
-an integer is a signed value up to ~52 bits.
+an integer is a signed 64-bit integer.
 ```
 expr_int =
     INTEGER
 ```
 
-a float is a IEEE754 floating-point number, except that due to the use of NaN-boxing
-in the VM, it may not be one special kind of NaN.
+a float is a IEEE754 64-bit (double) floating-point number.
 ```
 expr_float =
     FLOAT
+```
 
+a boolean is either `true` or `false`.
+```
 expr_bool =
     "true"
     "false"
+```
 
+strings are utf8-encoded sequences of characters. they may
+also contain escape sequences like `\u{0000}`.
+```
 expr_string =
     STRING
+```
 
+and finally, `nil` is used to represent the absence of a value.
+```
 expr_nil =
     "nil"
 ```
@@ -338,15 +343,15 @@ fn fib_rec(n) {
 
 fn fib_iter(n) {
     if n < 2 { return n }
-    var prev = 0
-    var curr = 1
+    let prev = 0
+    let curr = 1
 
-    var i = 2
+    let i = 2
     loop {
         if i > n { break }
         i += 1
 
-        var next = prev + curr
+        let next = prev + curr
         prev = curr
         curr = next
     }
@@ -380,7 +385,7 @@ fn is_prime(n) {
     return false
   }
 
-  var i = 2
+  let i = 2
   loop
     if i * i > n {
       break
@@ -397,15 +402,15 @@ fn is_prime(n) {
 }
 
 fn selection_sort(arr) {
-  var n = len(arr)
-  var i = 0
+  let n = len(arr)
+  let i = 0
   loop
     if i >= n - 1 {
       break
     }
 
-    var min_idx = i
-    var j = i + 1
+    let min_idx = i
+    let j = i + 1
     loop
       if j >= n {
         break
@@ -417,7 +422,7 @@ fn selection_sort(arr) {
     }
 
     if min_idx != i {
-      var tmp = arr[i]
+      let tmp = arr[i]
       arr[i] = arr[min_idx]
       arr[min_idx] = tmp
     }
@@ -429,16 +434,16 @@ fn selection_sort(arr) {
 }
 
 fn binary_search(arr, target) {
-  var low  = 0
-  var high = len(arr) - 1
+  let low  = 0
+  let high = len(arr) - 1
 
   loop
     if low > high {
       break
     }
 
-    var mid = (low + high) / 2
-    var v   = arr[mid]
+    let mid = (low + high) / 2
+    let v   = arr[mid]
 
     if v == target {
       return mid
@@ -456,12 +461,12 @@ fn binary_search(arr, target) {
 ```
 
 ```
-svc = http.service()
+let svc = http.service()
 
-svc.GET("/hello/{name}", fn(req, res) {
+svc.GET("/hello/:name", fn(req, res) {
   res.status(200)
   res.header("Content-Type", "text/plain")
-  res.body("Hello, {req.params.name}!")
+  res.body(fmt("Hello, {name}!", { name: req.params.name }))
 })
 
 http.serve(svc)
