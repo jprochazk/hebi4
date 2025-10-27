@@ -191,6 +191,9 @@ struct CallFrame {
     return_addr: u32,
 }
 
+const _: () =
+    assert!(core::mem::size_of::<Option<CallFrame>>() == core::mem::size_of::<CallFrame>());
+
 #[derive(Clone, Copy)]
 struct CallFramePtr(*mut CallFrame);
 
@@ -219,10 +222,6 @@ impl CallFramePtr {
 impl Vm {
     #[inline]
     unsafe fn current_frame(self) -> CallFramePtr {
-        // for the code below to be safe, this must be true:
-        const _: () =
-            assert!(core::mem::size_of::<Option<CallFrame>>() == core::mem::size_of::<CallFrame>());
-
         let ptr = (*self.0.as_ptr()).frames.top_unchecked();
         CallFramePtr(ptr)
     }
@@ -1546,7 +1545,6 @@ impl gc::ExternalRoots for VmRoots {
             }
         }
 
-        // TODO: iterate over module registry
         for module in this!().registry.iter() {
             tracer.visit(module);
         }
