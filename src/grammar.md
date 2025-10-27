@@ -299,7 +299,7 @@ expr_number =
     expr_float
 ```
 
-an integer is a signed 64-bit integer.
+the language has full 64-bit integers.
 ```
 expr_int =
     INTEGER
