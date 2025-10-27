@@ -33,9 +33,13 @@ New tests can be created by adding a `.hi` file to [`tests/inputs`](./tests/inpu
 
 Files in `tests/inputs` are passed through the tokenize and parse stages.
 
-They may begin with a comment (`//`) to filter the stages it will be tested against:
-- `tokenize` for [`src/token.rs`](./src/token.rs)
-- `parse` for [`src/parser.rs`](./src/parser.rs)
+They may begin with a comment (`//`) to control how it will be tested:
+- `//tokenize` will only go through the tokenizer ([`src/token.rs`](./src/token.rs))
+- `//parse` will only go through the parser ([`src/parser.rs`](./src/parser.rs))
+- By default, `codegen` and `run` tests have all optimizations enabled.
+  - Available optimizations are: `dce` (dead code elimination)
+  - `//` (empty comment) in _codegen_ and _run_ tests will disable all optimizations
+  - `//a,b,c` will enable optimizations `a`, `b`, `c`.
 
 This can also be used to completely disable test files. Adding an empty comment to the top of
 the file will cause it to not be tested against _any_ stage.
