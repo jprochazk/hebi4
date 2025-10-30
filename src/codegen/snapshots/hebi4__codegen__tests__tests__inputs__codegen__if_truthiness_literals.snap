@@ -52,3 +52,4 @@ OK
   32  jmp 3   ; to 35
   33  lsmi r0, 7
   34  ret
+  35  ret

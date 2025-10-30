@@ -17,5 +17,3 @@ OK
   .code
   0  lsmi r1, 1
   1  jmp -1   ; to 0
-  2  lnil r0
-  3  ret

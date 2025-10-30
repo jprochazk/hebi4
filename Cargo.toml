@@ -19,6 +19,13 @@ codegen-units = 1
 inherits = "release"
 debug = true
 
+[profile.release-small]
+inherits = "release"
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+
 [dev-dependencies]
 insta = { version = "1.43.1" }
 glob_test = { version = "0.1" }

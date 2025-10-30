@@ -36,3 +36,4 @@ OK
   12  jmp 3   ; to 15
   13  lsmi r0, 3
   14  ret
+  15  ret

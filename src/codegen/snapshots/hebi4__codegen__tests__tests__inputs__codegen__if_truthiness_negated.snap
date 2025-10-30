@@ -28,3 +28,4 @@ OK
    7  jmp 3   ; to 10
    8  lsmi r0, 2
    9  ret
+  10  ret

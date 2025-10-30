@@ -701,7 +701,11 @@ impl<'a> ForwardLabel<'a> {
     }
 
     fn bind(self, f: &mut FunctionState<'a>) -> Result<()> {
-        f.enter_basic_block();
+        // if the label is unused, that means no `jmp` targets it,
+        // therefore it is not actually a basic block entry.
+        if !self.patch_targets.is_empty() {
+            f.enter_basic_block();
+        }
 
         let pos = f.code.len();
         let span = *f.dbg.spans.last().unwrap();
@@ -739,7 +743,11 @@ impl BasicForwardLabel {
     }
 
     fn bind(self, f: &mut FunctionState<'_>) -> Result<()> {
-        f.enter_basic_block();
+        // if the label is unused, that means no `jmp` targets it,
+        // therefore it is not actually a basic block entry.
+        if self.patch_target.is_some() {
+            f.enter_basic_block();
+        }
 
         let pos = f.code.len();
         let span = *f.dbg.spans.last().unwrap();
@@ -875,6 +883,7 @@ impl<'a> FunctionState<'a> {
     }
 
     fn emit(&mut self, insn: Insn, span: Span) -> Option<usize> {
+        // TODO: dce should also affect regalloc
         if self.in_dead_code() {
             return None;
         }
@@ -886,10 +895,11 @@ impl<'a> FunctionState<'a> {
                 self.leave_basic_block();
             }
 
-            if let Some(insn) = peephole(prev_insn, insn) {
-                self.code[prev_insn_index] = insn;
-                return None;
-            }
+            // TODO: what if it's a jump target?
+            // if let Some(insn) = peephole(prev_insn, insn) {
+            //     self.code[prev_insn_index] = insn;
+            //     return None;
+            // }
         }
 
         let index = self.code.len();

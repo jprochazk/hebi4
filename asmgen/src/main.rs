@@ -648,7 +648,7 @@ fn emit_instruction_enum(o: &mut String, is: &Instructions) {
     ml!(
         o,
         "
-        #[derive(Debug, Clone, Copy)]
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
         #[repr(u8)]
         pub enum Opcode {{
             {variants}
