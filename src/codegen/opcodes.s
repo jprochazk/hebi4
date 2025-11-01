@@ -89,15 +89,8 @@ lstr dst:reg id:lit;
  */
 lclosure dst:reg id:lit;
 
-/*
- * Load function by `id` into register `dst`.
- *
- * `id` holds a FuncInfo.
- *
- * This implies no captures, but the resulting object
- * is still a `Closure`.
- */
-lfunc dst:reg id:lit;
+/* Load function by `id` into register `dst`. */
+lfunc dst:reg id:fnid;
 
 # TODO: constant lists/tables don't need to use stack space at all
 /*
@@ -302,6 +295,11 @@ fastcall dst:reg id:fnid;
  * Return from the current call.
  */
 ret;
+
+/*
+ * Return from the current call, using value from `src`.
+ */
+retv src:reg;
 
 /*
  * Stop execution, and yield to the VM's caller.

@@ -8,7 +8,7 @@ let i = 0
 v[i]
 
 ERROR
-this type cannot be indexed
+this value cannot be indexed
 3 |  v[i]
   |   ^^^
 

@@ -1,0 +1,17 @@
+---
+source: src/vm/tests.rs
+expression: snapshot
+---
+SOURCE
+fn a(f) {
+  f()
+}
+
+fn b() {
+  "ok"
+}
+
+a(b)
+
+OK
+"ok"

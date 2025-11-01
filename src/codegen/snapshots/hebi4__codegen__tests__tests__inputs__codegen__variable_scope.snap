@@ -16,5 +16,4 @@ OK
     a = r1
   .code
   0  lsmi r1, 1
-  1  mov r0, r1
-  2  ret
+  1  retv r1

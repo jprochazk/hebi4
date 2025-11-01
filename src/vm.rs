@@ -60,6 +60,7 @@ use crate::{
     error::{Error, Result, error},
     module,
     span::Span,
+    value::Closure,
     vm::value::{FunctionProto, ValueRaw, module::ModuleRegistry},
 };
 
@@ -67,6 +68,11 @@ impl Sp {
     #[inline(always)]
     pub unsafe fn at(self, r: Reg) -> *mut ValueRaw {
         self.0.offset(r.sz()).as_ptr()
+    }
+
+    #[inline(always)]
+    pub unsafe fn ret(self) -> *mut ValueRaw {
+        self.0.as_ptr()
     }
 }
 
@@ -348,9 +354,17 @@ pub enum VmError {
     InvalidTableKey,
     MissingKey,
     NotIndexable,
+    ArityMismatch,
+    NotCallable,
 }
 
 impl VmError {
+    // TODO: additional error context, somehow?
+    //       for example, try reading the current `ip`, reading the operands,
+    //       and checking values and other things. assuming that failures
+    //       happen before any writes.
+    //       or maybe there's a smarter way to transfer context, without
+    //       too much overhead.
     // NOTE: assumes `vm.saved_ip` is set
     unsafe fn annotate(&self, vm: Vm) -> Error {
         let span = vm.get_span_for_saved_ip().unwrap_or_default();
@@ -366,7 +380,9 @@ impl VmError {
             Self::NotATable => error("not a table", span),
             Self::InvalidTableKey => error("value is not a valid table key", span),
             Self::MissingKey => error("missing key", span),
-            Self::NotIndexable => error("this type cannot be indexed", span),
+            Self::NotIndexable => error("this value cannot be indexed", span),
+            Self::ArityMismatch => error("invalid number of arguments", span),
+            Self::NotCallable => error("this value cannot be called", span),
         }
     }
 
@@ -384,7 +400,9 @@ impl VmError {
             | Self::NotATable
             | Self::InvalidTableKey
             | Self::MissingKey
-            | Self::NotIndexable => false,
+            | Self::NotIndexable
+            | Self::ArityMismatch
+            | Self::NotCallable => false,
         }
     }
 }
@@ -464,6 +482,7 @@ static JT: JumpTable = jump_table! {
     call,
     fastcall,
     ret,
+    retv,
     stop,
 };
 
@@ -864,7 +883,12 @@ unsafe fn lclosure(vm: Vm, jt: Jt, ip: Ip, args: Lclosure, sp: Sp, lp: Lp) -> Co
 
 #[inline(always)]
 unsafe fn lfunc(vm: Vm, jt: Jt, ip: Ip, args: Lfunc, sp: Sp, lp: Lp) -> Control {
-    todo!()
+    let dst = sp.at(args.dst());
+    let func = vm.get_function_in_current_module(args.id());
+
+    *dst = ValueRaw::Object(func.as_any());
+
+    dispatch_next(vm, jt, ip, sp, lp)
 }
 
 #[inline(always)]
@@ -1545,8 +1569,33 @@ unsafe fn not(vm: Vm, jt: Jt, ip: Ip, args: Not, sp: Sp, lp: Lp) -> Control {
 
 #[inline(always)]
 unsafe fn call(vm: Vm, jt: Jt, ip: Ip, args: Call, sp: Sp, lp: Lp) -> Control {
-    // need closures before this can be implemented
-    todo!()
+    let ret = args.dst();
+    let callee = *sp.at(ret);
+    let nargs = args.args().zx();
+
+    if let Some(callee) = callee.into_object::<FunctionProto>() {
+        if callee.as_ref().nparams as usize != nargs {
+            return arity_mismatch_error(ip, vm);
+        }
+
+        let (sp, lp, ip) = do_call(callee, ret, ip, vm);
+
+        dispatch_current(vm, jt, ip, sp, lp)
+    } else if let Some(callee) = callee.into_object::<Closure>() {
+        todo!("closure call")
+    } else {
+        not_callable_error(ip, vm)
+    }
+}
+
+#[cold]
+unsafe fn arity_mismatch_error(ip: Ip, vm: Vm) -> Control {
+    vm_exit!(vm, ip, ArityMismatch)
+}
+
+#[cold]
+unsafe fn not_callable_error(ip: Ip, vm: Vm) -> Control {
+    vm_exit!(vm, ip, NotCallable)
 }
 
 #[inline(always)]
@@ -1561,6 +1610,15 @@ unsafe fn fastcall(vm: Vm, jt: Jt, ip: Ip, args: Fastcall, sp: Sp, lp: Lp) -> Co
 
 #[inline(always)]
 unsafe fn ret(vm: Vm, jt: Jt, ip: Ip, args: Ret, sp: Sp, lp: Lp) -> Control {
+    let (sp, lp, ip) = return_from_call(vm);
+
+    dispatch_current(vm, jt, ip, sp, lp)
+}
+
+#[inline(always)]
+unsafe fn retv(vm: Vm, jt: Jt, ip: Ip, args: Retv, sp: Sp, lp: Lp) -> Control {
+    *sp.ret() = *sp.at(args.src());
+
     let (sp, lp, ip) = return_from_call(vm);
 
     dispatch_current(vm, jt, ip, sp, lp)

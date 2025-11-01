@@ -22,6 +22,5 @@ OK
   .locals
     c = r1
   .code
-  0  mov r0, r1
-  1  call r0, 0   ; dyn
-  2  ret
+  0  call r1, 0   ; dyn
+  1  retv r1

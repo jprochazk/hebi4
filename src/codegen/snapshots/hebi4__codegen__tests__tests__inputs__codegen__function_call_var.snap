@@ -1,0 +1,39 @@
+---
+source: src/codegen/tests.rs
+expression: snapshot
+---
+SOURCE
+fn a(f) {
+  f()
+}
+
+fn b() {
+  "ok"
+}
+
+a(b)
+
+OK
+.fn @main
+  params 0
+  stack 2
+  .code
+  0  lfunc r1, fn2
+  1  call r0, fn1   ; fn1=a
+  2  ret
+
+.fn a
+  params 1
+  stack 2
+  .locals
+    f = r1
+  .code
+  0  call r1, 0   ; dyn
+  1  retv r1
+
+.fn b
+  params 0
+  stack 1
+  .code
+  0  lstr r0, "ok"
+  1  ret

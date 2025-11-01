@@ -233,6 +233,7 @@ where
                     name = module.function_at(id).name(),
                 )?,
                 I::Ret {} => writeln!(f, "ret")?,
+                I::Retv { src } => writeln!(f, "retv {src}")?,
                 I::Stop {} => writeln!(f, "stop")?,
             }
         }

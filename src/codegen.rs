@@ -1048,10 +1048,15 @@ fn emit_func<'a>(
             m.declare_local(param.get(), dst, span);
         }
 
-        let ret_val = eval_block(m, body, Some(r0))?;
-        value_force_reg(m, ret_val, r0)?;
+        let ret = eval_block(m, body, Some(r0))?;
+        let ret = value_to_reg_reuse(m, ret, r0)?;
 
-        m.emit(asm::ret(), NO_SPAN);
+        if ret != r0 {
+            m.emit(asm::retv(ret), NO_SPAN);
+        } else {
+            m.emit(asm::ret(), NO_SPAN);
+        }
+
         m.end_scope();
     }
     let f = m.func_stack.pop().expect("function stack is empty");
@@ -1390,19 +1395,23 @@ fn eval_expr_return<'a>(
     span: Span,
     _dst: Option<Reg>,
 ) -> Result<Value<'a>> {
+    let dst = R0;
+
     // TODO(opt): `ret src` instruction
     if let Some(value) = node.value().as_option() {
-        let value = eval_expr_reuse(m, value, node.value_span(), R0)?;
-        value_force_reg(m, value, R0)?;
+        let value = eval_expr_reuse(m, value, node.value_span(), dst)?;
+        let value = value_to_reg_reuse(m, value, dst)?;
 
-        if !value.is_in(R0) {
-            free_value(m, value);
+        if value != R0 {
+            free_reg(m, value);
+            m.emit(asm::retv(value), span);
+        } else {
+            m.emit(asm::ret(), span);
         }
     } else {
         value_force_reg(m, Value::nil(span), R0)?;
+        m.emit(asm::ret(), span);
     }
-
-    m.emit(asm::ret(), span);
 
     Ok(Value::nil(span))
 }
@@ -1735,14 +1744,28 @@ fn eval_expr_get_var<'a>(
     span: Span,
     dst: Option<Reg>,
 ) -> Result<Value<'a>> {
+    let span = get.name_span();
+
+    enum Id {
+        Var(Reg),
+        Func(FnId),
+    }
+
     // variable must exist at this point
-    match m
+    let id = match m
         .resolve(get.name().get())
-        .ok_or_else(|| error("could not resolve name", get.name_span()))?
+        .ok_or_else(|| error("could not resolve name", span))?
     {
-        Symbol::Local { reg, .. } => Ok(Value::dynamic(*reg, get.name_span())),
-        Symbol::Function { id, .. } => {
-            todo!("function to variable")
+        Symbol::Local { reg, .. } => Id::Var(*reg),
+        Symbol::Function { id, .. } => Id::Func(*id),
+    };
+
+    match id {
+        Id::Var(reg) => Ok(Value::dynamic(reg, span)),
+        Id::Func(id) => {
+            let dst = maybe_reuse_reg(m, span, dst)?;
+            m.emit(asm::lfunc(dst, id), span);
+            Ok(Value::dynamic(dst, span))
         }
     }
 }
@@ -2024,7 +2047,7 @@ fn eval_expr_call<'a>(
         }
     };
 
-    if let ast::ExprKind::GetVar(node) = call.callee().kind()
+    let out = if let ast::ExprKind::GetVar(node) = call.callee().kind()
         && let Some(Symbol::Function { id, arity, .. }) = m.resolve(node.name().get())
     {
         // Fastcall optimization: If the symbol is syntactically a function, then
@@ -2048,24 +2071,31 @@ fn eval_expr_call<'a>(
         }
 
         m.emit(asm::fastcall(dst, id), span);
+
+        dst
     } else {
         // maybe callable? only VM can know for sure
 
         let nargs = call.args().len() as u8;
         let callee = eval_expr_reuse(m, call.callee(), call.callee_span(), dst)?;
-        value_force_reg(m, callee, dst)?;
+        let callee = value_to_reg_reuse(m, callee, dst)?;
 
         for ((reg, value), &span) in args.into_iter().zip(call.args()).zip(call.args_spans()) {
             let value = eval_expr_reuse(m, value, span, reg)?;
             value_force_reg(m, value, reg)?;
         }
 
-        m.emit(asm::call(dst, unsafe { Imm8::new_unchecked(nargs) }), span);
-    }
+        m.emit(
+            asm::call(callee, unsafe { Imm8::new_unchecked(nargs) }),
+            span,
+        );
+
+        callee
+    };
 
     free_reg_range(m, args);
 
-    Ok(Value::dynamic(dst, span))
+    Ok(Value::dynamic(out, span))
 }
 
 trait ExprInfo {
@@ -2833,7 +2863,7 @@ fn is_basic_block_exit(prev: Insn, insn: Insn) -> bool {
         Opcode::Jmp if is_jump_condition(prev) => false,
         Opcode::Jmp => true,
 
-        Opcode::Ret | Opcode::Stop => true,
+        Opcode::Ret | Opcode::Retv | Opcode::Stop => true,
 
         Opcode::Nop
         | Opcode::Mov
@@ -2969,6 +2999,7 @@ fn is_jump_condition(insn: Insn) -> bool {
         | Opcode::Call
         | Opcode::Fastcall
         | Opcode::Ret
+        | Opcode::Retv
         | Opcode::Stop => false,
     }
 }

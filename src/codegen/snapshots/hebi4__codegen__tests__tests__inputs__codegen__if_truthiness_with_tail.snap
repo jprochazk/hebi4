@@ -31,5 +31,4 @@ OK
    6  jmp 3   ; to 9
    7  lsmi r2, 20
    8  lnil r3
-   9  mov r0, r2
-  10  ret
+   9  retv r2

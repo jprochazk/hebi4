@@ -15,7 +15,6 @@ OK
     v = r1
   .code
   0  lsmi r1, 0
-  1  mov r0, r1
-  2  call r0, 0   ; dyn
-  3  call r0, 0   ; dyn
-  4  ret
+  1  call r1, 0   ; dyn
+  2  call r1, 0   ; dyn
+  3  retv r1
