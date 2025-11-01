@@ -341,6 +341,7 @@ pub enum VmError {
     UnopInvalidType,
     CmpTypeError,
     NotAList,
+    NotAString,
     InvalidArrayIndex,
     IndexOutOfBounds,
     NotATable,
@@ -359,6 +360,7 @@ impl VmError {
             Self::UnopInvalidType => error("invalid type", span),
             Self::CmpTypeError => error("type mismatch", span),
             Self::NotAList => error("not a list", span),
+            Self::NotAString => error("not a string", span),
             Self::InvalidArrayIndex => error("value is not a valid array index", span),
             Self::IndexOutOfBounds => error("index out of bounds", span),
             Self::NotATable => error("not a table", span),
@@ -376,6 +378,7 @@ impl VmError {
             | Self::UnopInvalidType
             | Self::CmpTypeError
             | Self::NotAList
+            | Self::NotAString
             | Self::InvalidArrayIndex
             | Self::IndexOutOfBounds
             | Self::NotATable
@@ -422,22 +425,22 @@ static JT: JumpTable = jump_table! {
     llist,
     ltable,
     jmp,
-    istrue,
-    istruec,
-    isfalse,
-    isfalsec,
     islt,
     isle,
     isgt,
     isge,
     iseq,
     isne,
+    isnil,
+    isnotnil,
+    istrue,
+    isfalse,
     iseqs,
     isnes,
-    iseqn,
-    isnen,
-    iseqp,
-    isnep,
+    iseqi,
+    isnei,
+    iseqf,
+    isnef,
     isltv,
     islev,
     isgtv,
@@ -902,12 +905,12 @@ unsafe fn jmp(vm: Vm, jt: Jt, ip: Ip, args: Jmp, sp: Sp, lp: Lp) -> Control {
 }
 
 #[inline(always)]
-unsafe fn istrue(vm: Vm, jt: Jt, ip: Ip, args: Istrue, sp: Sp, lp: Lp) -> Control {
-    // istrue v
+unsafe fn isnil(vm: Vm, jt: Jt, ip: Ip, args: Isnil, sp: Sp, lp: Lp) -> Control {
+    // isnil v
     // jmp offset
 
     let v = *sp.at(args.v());
-    if v.coerce_bool() {
+    if matches!(v, ValueRaw::Nil) {
         // skip `jmp`
         let ip = ip.offset(2);
         dispatch_current(vm, jt, ip, sp, lp)
@@ -919,15 +922,29 @@ unsafe fn istrue(vm: Vm, jt: Jt, ip: Ip, args: Istrue, sp: Sp, lp: Lp) -> Contro
 }
 
 #[inline(always)]
-unsafe fn istruec(vm: Vm, jt: Jt, ip: Ip, args: Istruec, sp: Sp, lp: Lp) -> Control {
-    // isfalsec dst, v
+unsafe fn isnotnil(vm: Vm, jt: Jt, ip: Ip, args: Isnotnil, sp: Sp, lp: Lp) -> Control {
+    // isnotnil v
+    // jmp offset
+
+    let v = *sp.at(args.v());
+    if !matches!(v, ValueRaw::Nil) {
+        // skip `jmp`
+        let ip = ip.offset(2);
+        dispatch_current(vm, jt, ip, sp, lp)
+    } else {
+        // execute `jmp`
+        let ip = ip.offset(1);
+        dispatch_current(vm, jt, ip, sp, lp)
+    }
+}
+
+#[inline(always)]
+unsafe fn istrue(vm: Vm, jt: Jt, ip: Ip, args: Istrue, sp: Sp, lp: Lp) -> Control {
+    // istrue v
     // jmp offset
 
     let v = *sp.at(args.v());
     if v.coerce_bool() {
-        // set `dst` to `v`
-        *sp.at(args.dst()) = v;
-
         // skip `jmp`
         let ip = ip.offset(2);
         dispatch_current(vm, jt, ip, sp, lp)
@@ -956,15 +973,175 @@ unsafe fn isfalse(vm: Vm, jt: Jt, ip: Ip, args: Isfalse, sp: Sp, lp: Lp) -> Cont
 }
 
 #[inline(always)]
-unsafe fn isfalsec(vm: Vm, jt: Jt, ip: Ip, args: Isfalsec, sp: Sp, lp: Lp) -> Control {
-    // isfalsec dst, v
+unsafe fn iseqs(vm: Vm, jt: Jt, ip: Ip, args: Iseqs, sp: Sp, lp: Lp) -> Control {
+    // iseqs v
     // jmp offset
 
-    let v = *sp.at(args.v());
-    if !v.coerce_bool() {
-        // set `dst` to `v`
-        *sp.at(args.dst()) = v;
+    // TODO: string interning
+    let lhs = *sp.at(args.lhs());
+    let rhs = lp.str_unchecked(args.rhs());
 
+    let Some(lhs) = lhs.into_object::<String>() else {
+        // execute `jmp`
+        let ip = ip.offset(1);
+        return dispatch_current(vm, jt, ip, sp, lp);
+    };
+
+    let lhs = lhs.as_ref();
+    let lhs = lhs.as_str();
+
+    let rhs = rhs.as_ref();
+    let rhs = rhs.as_str();
+
+    if lhs == rhs {
+        // skip `jmp`
+        let ip = ip.offset(2);
+        dispatch_current(vm, jt, ip, sp, lp)
+    } else {
+        // execute `jmp`
+        let ip = ip.offset(1);
+        dispatch_current(vm, jt, ip, sp, lp)
+    }
+}
+
+#[inline(always)]
+unsafe fn isnes(vm: Vm, jt: Jt, ip: Ip, args: Isnes, sp: Sp, lp: Lp) -> Control {
+    // isnes v
+    // jmp offset
+
+    // TODO: string interning
+    let lhs = *sp.at(args.lhs());
+    let rhs = lp.str_unchecked(args.rhs());
+
+    let Some(lhs) = lhs.into_object::<String>() else {
+        // execute `jmp`
+        let ip = ip.offset(1);
+        return dispatch_current(vm, jt, ip, sp, lp);
+    };
+
+    let lhs = lhs.as_ref();
+    let lhs = lhs.as_str();
+
+    let rhs = rhs.as_ref();
+    let rhs = rhs.as_str();
+
+    if lhs != rhs {
+        // skip `jmp`
+        let ip = ip.offset(2);
+        dispatch_current(vm, jt, ip, sp, lp)
+    } else {
+        // execute `jmp`
+        let ip = ip.offset(1);
+        dispatch_current(vm, jt, ip, sp, lp)
+    }
+}
+
+#[inline(always)]
+unsafe fn iseqi(vm: Vm, jt: Jt, ip: Ip, args: Iseqi, sp: Sp, lp: Lp) -> Control {
+    // iseqi v
+    // jmp offset
+
+    let lhs = *sp.at(args.lhs());
+    let rhs = lp.int_unchecked(args.rhs());
+
+    let lhs = match lhs {
+        ValueRaw::Int(v) => v,
+        ValueRaw::Float(v) => v as i64,
+        _ => {
+            // execute `jmp`
+            let ip = ip.offset(1);
+            return dispatch_current(vm, jt, ip, sp, lp);
+        }
+    };
+
+    if lhs == rhs {
+        // skip `jmp`
+        let ip = ip.offset(2);
+        dispatch_current(vm, jt, ip, sp, lp)
+    } else {
+        // execute `jmp`
+        let ip = ip.offset(1);
+        dispatch_current(vm, jt, ip, sp, lp)
+    }
+}
+
+#[inline(always)]
+unsafe fn isnei(vm: Vm, jt: Jt, ip: Ip, args: Isnei, sp: Sp, lp: Lp) -> Control {
+    // isnei v
+    // jmp offset
+
+    let lhs = *sp.at(args.lhs());
+    let rhs = lp.int_unchecked(args.rhs());
+
+    let lhs = match lhs {
+        ValueRaw::Int(v) => v,
+        ValueRaw::Float(v) => v as i64,
+        _ => {
+            // execute `jmp`
+            let ip = ip.offset(1);
+            return dispatch_current(vm, jt, ip, sp, lp);
+        }
+    };
+
+    if lhs != rhs {
+        // skip `jmp`
+        let ip = ip.offset(2);
+        dispatch_current(vm, jt, ip, sp, lp)
+    } else {
+        // execute `jmp`
+        let ip = ip.offset(1);
+        dispatch_current(vm, jt, ip, sp, lp)
+    }
+}
+
+#[inline(always)]
+unsafe fn iseqf(vm: Vm, jt: Jt, ip: Ip, args: Iseqf, sp: Sp, lp: Lp) -> Control {
+    // iseqf v
+    // jmp offset
+
+    let lhs = *sp.at(args.lhs());
+    let rhs = lp.float_unchecked(args.rhs());
+
+    let lhs = match lhs {
+        ValueRaw::Int(v) => v as f64,
+        ValueRaw::Float(v) => v,
+        _ => {
+            // execute `jmp`
+            let ip = ip.offset(1);
+            return dispatch_current(vm, jt, ip, sp, lp);
+        }
+    };
+
+    if lhs == rhs {
+        // skip `jmp`
+        let ip = ip.offset(2);
+        dispatch_current(vm, jt, ip, sp, lp)
+    } else {
+        // execute `jmp`
+        let ip = ip.offset(1);
+        dispatch_current(vm, jt, ip, sp, lp)
+    }
+}
+
+#[inline(always)]
+unsafe fn isnef(vm: Vm, jt: Jt, ip: Ip, args: Isnef, sp: Sp, lp: Lp) -> Control {
+    // isnef v
+    // jmp offset
+
+    let lhs = *sp.at(args.lhs());
+    let rhs = lp.float_unchecked(args.rhs());
+
+    let lhs = match lhs {
+        ValueRaw::Int(v) => v as f64,
+        ValueRaw::Float(v) => v,
+        _ => {
+            // execute `jmp`
+            let ip = ip.offset(1);
+            return dispatch_current(vm, jt, ip, sp, lp);
+        }
+    };
+
+    if lhs != rhs {
         // skip `jmp`
         let ip = ip.offset(2);
         dispatch_current(vm, jt, ip, sp, lp)
@@ -1075,63 +1252,81 @@ unsafe fn isne(vm: Vm, jt: Jt, ip: Ip, args: Isne, sp: Sp, lp: Lp) -> Control {
 }
 
 #[inline(always)]
-unsafe fn iseqs(vm: Vm, jt: Jt, ip: Ip, args: Iseqs, sp: Sp, lp: Lp) -> Control {
-    todo!()
-}
-
-#[inline(always)]
-unsafe fn isnes(vm: Vm, jt: Jt, ip: Ip, args: Isnes, sp: Sp, lp: Lp) -> Control {
-    todo!()
-}
-
-#[inline(always)]
-unsafe fn iseqn(vm: Vm, jt: Jt, ip: Ip, args: Iseqn, sp: Sp, lp: Lp) -> Control {
-    todo!()
-}
-
-#[inline(always)]
-unsafe fn isnen(vm: Vm, jt: Jt, ip: Ip, args: Isnen, sp: Sp, lp: Lp) -> Control {
-    todo!()
-}
-
-#[inline(always)]
-unsafe fn iseqp(vm: Vm, jt: Jt, ip: Ip, args: Iseqp, sp: Sp, lp: Lp) -> Control {
-    todo!()
-}
-
-#[inline(always)]
-unsafe fn isnep(vm: Vm, jt: Jt, ip: Ip, args: Isnep, sp: Sp, lp: Lp) -> Control {
-    todo!()
-}
-
-#[inline(always)]
 unsafe fn isltv(vm: Vm, jt: Jt, ip: Ip, args: Isltv, sp: Sp, lp: Lp) -> Control {
-    todo!()
+    let dst = sp.at(args.dst());
+    let lhs = *sp.at(args.lhs());
+    let rhs = *sp.at(args.rhs());
+
+    let result = try_cmp_eval!(lhs, rhs, vm, ip, <);
+
+    *dst = ValueRaw::Bool(result);
+
+    dispatch_next(vm, jt, ip, sp, lp)
 }
 
 #[inline(always)]
 unsafe fn islev(vm: Vm, jt: Jt, ip: Ip, args: Islev, sp: Sp, lp: Lp) -> Control {
-    todo!()
+    let dst = sp.at(args.dst());
+    let lhs = *sp.at(args.lhs());
+    let rhs = *sp.at(args.rhs());
+
+    let result = try_cmp_eval!(lhs, rhs, vm, ip, <=);
+
+    *dst = ValueRaw::Bool(result);
+
+    dispatch_next(vm, jt, ip, sp, lp)
 }
 
 #[inline(always)]
 unsafe fn isgtv(vm: Vm, jt: Jt, ip: Ip, args: Isgtv, sp: Sp, lp: Lp) -> Control {
-    todo!()
+    let dst = sp.at(args.dst());
+    let lhs = *sp.at(args.lhs());
+    let rhs = *sp.at(args.rhs());
+
+    let result = try_cmp_eval!(lhs, rhs, vm, ip, >);
+
+    *dst = ValueRaw::Bool(result);
+
+    dispatch_next(vm, jt, ip, sp, lp)
 }
 
 #[inline(always)]
 unsafe fn isgev(vm: Vm, jt: Jt, ip: Ip, args: Isgev, sp: Sp, lp: Lp) -> Control {
-    todo!()
+    let dst = sp.at(args.dst());
+    let lhs = *sp.at(args.lhs());
+    let rhs = *sp.at(args.rhs());
+
+    let result = try_cmp_eval!(lhs, rhs, vm, ip, >=);
+
+    *dst = ValueRaw::Bool(result);
+
+    dispatch_next(vm, jt, ip, sp, lp)
 }
 
 #[inline(always)]
 unsafe fn iseqv(vm: Vm, jt: Jt, ip: Ip, args: Iseqv, sp: Sp, lp: Lp) -> Control {
-    todo!()
+    let dst = sp.at(args.dst());
+    let lhs = *sp.at(args.lhs());
+    let rhs = *sp.at(args.rhs());
+
+    let result = try_cmp_eval!(lhs, rhs, vm, ip, ==);
+
+    *dst = ValueRaw::Bool(result);
+
+    dispatch_next(vm, jt, ip, sp, lp)
 }
 
 #[inline(always)]
 unsafe fn isnev(vm: Vm, jt: Jt, ip: Ip, args: Isnev, sp: Sp, lp: Lp) -> Control {
-    todo!()
+    let dst = sp.at(args.dst());
+    let lhs = *sp.at(args.lhs());
+    let rhs = *sp.at(args.rhs());
+
+    let result = try_cmp_eval!(lhs, rhs, vm, ip, !=);
+
+    *dst = ValueRaw::Bool(result);
+
+    dispatch_next(vm, jt, ip, sp, lp)
 }
 
 macro_rules! try_arith_eval {

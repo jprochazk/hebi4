@@ -1,0 +1,12 @@
+---
+source: src/vm/tests.rs
+expression: snapshot
+---
+SOURCE
+let a = 0
+let b = 1
+
+a < b
+
+OK
+Bool(true)

@@ -884,7 +884,7 @@ impl<'a> FunctionState<'a> {
     }
 
     fn emit(&mut self, insn: Insn, span: Span) -> Option<usize> {
-        // TODO: dce should also affect regalloc
+        // TODO(opt): dce should also affect regalloc
         if self.in_dead_code() {
             return None;
         }
@@ -896,7 +896,7 @@ impl<'a> FunctionState<'a> {
                 self.leave_basic_block();
             }
 
-            // TODO: what if it's a jump target?
+            // TODO(opt): what if it's a jump target?
             // if let Some(insn) = peephole(prev_insn, insn) {
             //     self.code[prev_insn_index] = insn;
             //     return None;
@@ -1390,7 +1390,7 @@ fn eval_expr_return<'a>(
     span: Span,
     _dst: Option<Reg>,
 ) -> Result<Value<'a>> {
-    // TODO: `ret src` instruction
+    // TODO(opt): `ret src` instruction
     if let Some(value) = node.value().as_option() {
         let value = eval_expr_reuse(m, value, node.value_span(), R0)?;
         value_force_reg(m, value, R0)?;
@@ -1451,13 +1451,6 @@ enum If<'a> {
     Multi(Node<'a, ast::IfMulti>),
 }
 
-// TODO: is there any way to tell if the `expr_if` is top-level,
-// and its value is unused?
-// Right now we emit useless `lnil` for every branch with a body
-// which has no tail.
-//
-// Maybe make statements returning "nothing" yield a `Value::Nothing`,
-// which _actually_ evaluates to nothing...?
 fn eval_expr_if<'a>(
     m: &mut State<'a>,
     node: If<'a>,
@@ -1621,29 +1614,61 @@ fn emit_if_cond_inner<'a>(
             _ => unreachable!(),
         },
 
-        // TODO(opt): handle lhs/rhs constant:
-        // if `lhs` is constant, move it to `rhs`
-        // if `rhs` is constant, try to emit specialized literal variants of eq
-        // (?) const-eval if both are constant
         ast::ExprKind::Infix(node) if node.op().is_comparison() => {
             let lhs = eval_expr_reuse(m, node.lhs(), node.lhs_span(), dst)?;
             let rhs = eval_expr(m, node.rhs(), node.rhs_span())?;
 
-            let lhs = value_to_reg_reuse(m, lhs, dst)?;
-            let rhs = value_to_reg(m, rhs)?;
-
-            let insn = match (*node.op(), negated) {
-                (Op::Eq, false) | (Op::Ne, true) => asm::iseq(lhs, rhs),
-                (Op::Ne, false) | (Op::Eq, true) => asm::isne(lhs, rhs),
-                (Op::Gt, false) | (Op::Le, true) => asm::isgt(lhs, rhs),
-                (Op::Ge, false) | (Op::Lt, true) => asm::isge(lhs, rhs),
-                (Op::Lt, false) | (Op::Ge, true) => asm::islt(lhs, rhs),
-                (Op::Le, false) | (Op::Gt, true) => asm::isle(lhs, rhs),
-                _ => unreachable!(),
+            // put whichever side is const on the rhs
+            let (lhs, rhs) = if rhs.is_const() {
+                (lhs, rhs)
+            } else if lhs.is_const() {
+                (rhs, lhs)
+            } else {
+                (lhs, rhs)
             };
+
+            let lhs = value_to_reg_reuse(m, lhs, dst)?;
+            let insn = if node.op().is_eq() && rhs.is_const() {
+                use ValueKind as V;
+
+                match (*node.op(), negated) {
+                    (Op::Eq, false) | (Op::Ne, true) => match rhs.kind {
+                        V::Nil => asm::isnil(lhs),
+                        V::Bool(true) => asm::istrue(lhs),
+                        V::Bool(false) => asm::isfalse(lhs),
+                        V::Int(v) => asm::iseqi(lhs, f!(m).literals.i64(v, node.rhs_span())?),
+                        V::Float(v) => asm::iseqf(lhs, f!(m).literals.f64(v, node.rhs_span())?),
+                        V::Str(v) => asm::iseqs(lhs, f!(m).literals.str(v, node.rhs_span())?),
+                        _ => unreachable!("ICE: non-const value in rhs of const eq path"),
+                    },
+                    (Op::Ne, false) | (Op::Eq, true) => match rhs.kind {
+                        V::Nil => asm::isnotnil(lhs),
+                        V::Bool(true) => asm::isfalse(lhs),
+                        V::Bool(false) => asm::istrue(lhs),
+                        V::Int(v) => asm::isnei(lhs, f!(m).literals.i64(v, node.rhs_span())?),
+                        V::Float(v) => asm::isnef(lhs, f!(m).literals.f64(v, node.rhs_span())?),
+                        V::Str(v) => asm::isnes(lhs, f!(m).literals.str(v, node.rhs_span())?),
+                        _ => unreachable!("ICE: non-const value in rhs of const eq path"),
+                    },
+                    _ => unreachable!("ICE: non-eq op in eq op path"),
+                }
+            } else {
+                let rhs = value_to_reg(m, rhs)?;
+                let insn = match (*node.op(), negated) {
+                    (Op::Eq, false) | (Op::Ne, true) => asm::iseq(lhs, rhs),
+                    (Op::Ne, false) | (Op::Eq, true) => asm::isne(lhs, rhs),
+                    (Op::Gt, false) | (Op::Le, true) => asm::isgt(lhs, rhs),
+                    (Op::Ge, false) | (Op::Lt, true) => asm::isge(lhs, rhs),
+                    (Op::Lt, false) | (Op::Ge, true) => asm::islt(lhs, rhs),
+                    (Op::Le, false) | (Op::Gt, true) => asm::isle(lhs, rhs),
+                    _ => unreachable!("ICE: non-comparison in if cond comparison path"),
+                };
+                free_reg(m, rhs);
+                insn
+            };
+
             m.emit(insn, span);
 
-            free_reg(m, rhs);
             if lhs != dst {
                 free_reg(m, lhs);
             }
@@ -1824,7 +1849,7 @@ fn eval_expr_set_field<'a>(
             ast::AssignOp::Div => ast::InfixOp::Div,
             _ => unreachable!("ICE: assign op none"),
         };
-        runtime_eval_expr_infix(m, op, lhs, Operand::Reg(lhs), rhs, span);
+        runtime_eval_expr_infix_arith(m, op, lhs, Operand::Reg(lhs), rhs, span);
 
         free_operand(m, rhs);
 
@@ -1905,7 +1930,7 @@ fn eval_expr_set_index<'a>(
             ast::AssignOp::Div => ast::InfixOp::Div,
             _ => unreachable!("ICE: assign op none"),
         };
-        runtime_eval_expr_infix(m, op, lhs, Operand::Reg(lhs), rhs, span);
+        runtime_eval_expr_infix_arith(m, op, lhs, Operand::Reg(lhs), rhs, span);
 
         free_operand(m, rhs);
 
@@ -1970,7 +1995,7 @@ fn eval_idx<'a>(m: &mut State<'a>, idx: Node<'a, ast::Expr>, span: Span) -> Resu
     Ok(idx)
 }
 
-// TODO: specialize "method" calls (get prop -> call in a single instruction)
+// TODO(feat): specialize "method" calls (get prop -> call in a single instruction)
 fn eval_expr_call<'a>(
     m: &mut State<'a>,
     call: Node<'a, ast::Call>,
@@ -2102,7 +2127,7 @@ fn eval_expr_infix<'a>(
     let (lhs, rhs) = if lhs.is_const() {
         let rhs = eval_expr(m, node.rhs(), node.rhs_span())?;
         if rhs.is_const() {
-            return const_eval_expr_infix(op, lhs, rhs, span);
+            return const_eval_expr_infix_arith(op, lhs, rhs, span);
         }
 
         let lhs = value_to_operand_reuse(m, lhs, dst)?;
@@ -2118,7 +2143,7 @@ fn eval_expr_infix<'a>(
         (lhs, rhs)
     };
 
-    runtime_eval_expr_infix(m, op, dst, lhs, rhs, span);
+    runtime_eval_expr_infix_arith(m, op, dst, lhs, rhs, span);
 
     free_operand(m, rhs);
     if !lhs.is_in(dst) {
@@ -2128,7 +2153,7 @@ fn eval_expr_infix<'a>(
     Ok(Value::dynamic(dst, span))
 }
 
-fn runtime_eval_expr_infix<'a>(
+fn runtime_eval_expr_infix_arith<'a>(
     m: &mut State<'a>,
     op: ast::InfixOp,
     dst: Reg,
@@ -2162,13 +2187,13 @@ fn runtime_eval_expr_infix<'a>(
             (O::Const(lhs), O::Reg(rhs)) => asm::divnv(dst, lhs, rhs),
             _ => unreachable!("ICE: const/const in non-const path"),
         },
-        op => unreachable!("ICE: invalid op in emit_infix: {op:?}"),
+        op => unreachable!("ICE: invalid op in infix: {op:?}"),
     };
 
     m.emit(insn, span);
 }
 
-fn const_eval_expr_infix<'a>(
+fn const_eval_expr_infix_arith<'a>(
     op: ast::InfixOp,
     lhs: Value<'a>,
     rhs: Value<'a>,
@@ -2195,7 +2220,7 @@ fn const_eval_expr_infix<'a>(
             |a, b| a / b,
             "divide",
         ),
-        op => unreachable!("ICE: invalid op in emit_infix: {op:?}"),
+        op => unreachable!("ICE: invalid op in infix: {op:?}"),
     };
 
     use ValueKind as V;
@@ -2220,13 +2245,75 @@ fn const_eval_expr_infix<'a>(
     };
     Ok(v)
 }
+
 fn eval_expr_infix_logical<'a>(
     m: &mut State<'a>,
     node: Node<'a, ast::Infix>,
     span: Span,
     dst: Option<Reg>,
 ) -> Result<Value<'a>> {
-    todo!()
+    let dst = maybe_reuse_reg(m, span, dst)?;
+
+    // TODO(opt): const eval
+    let lhs = eval_expr_reuse(m, node.lhs(), node.lhs_span(), dst)?;
+    value_force_reg(m, lhs, dst)?;
+
+    use ast::InfixOp as Op;
+    match *node.op() {
+        Op::And => {
+            let mut exit = ForwardLabel::new(m.buf);
+
+            /*
+            dst = lhs
+            if dst:
+                dst = rhs
+            */
+
+            m.emit(asm::istrue(dst), node.lhs_span());
+            emit_forward_jmp(m, span, &mut exit);
+
+            // NOTE: if `lhs` is true, then the value is discarded,
+            // so the `dst` register can be reused.
+            let rhs = eval_expr_reuse(m, node.rhs(), node.rhs_span(), dst)?;
+            value_force_reg(m, rhs, dst)?;
+
+            exit.bind(f!(m))?;
+
+            if !rhs.is_in(dst) {
+                free_value(m, rhs);
+            }
+        }
+        Op::Or => {
+            let mut exit = ForwardLabel::new(m.buf);
+
+            /*
+            dst = lhs
+            if not dst:
+                dst = rhs
+            */
+
+            m.emit(asm::isfalse(dst), node.lhs_span());
+            emit_forward_jmp(m, span, &mut exit);
+
+            // NOTE: if `lhs` is false, then the value is discarded,
+            // so the `dst` register can be reused.
+            let rhs = eval_expr_reuse(m, node.rhs(), node.rhs_span(), dst)?;
+            value_force_reg(m, rhs, dst)?;
+
+            exit.bind(f!(m))?;
+
+            if !rhs.is_in(dst) {
+                free_value(m, rhs);
+            }
+        }
+        op => unreachable!("ICE: invalid op in infix logical: {op:?}"),
+    }
+
+    if !lhs.is_in(dst) {
+        free_value(m, lhs);
+    }
+
+    Ok(Value::dynamic(dst, span))
 }
 
 fn eval_expr_infix_comparison<'a>(
@@ -2235,7 +2322,119 @@ fn eval_expr_infix_comparison<'a>(
     span: Span,
     dst: Option<Reg>,
 ) -> Result<Value<'a>> {
-    todo!()
+    let op = *node.op();
+
+    let dst = maybe_reuse_reg(m, span, dst)?;
+
+    let lhs = eval_expr_reuse(m, node.lhs(), node.lhs_span(), dst)?;
+    let (lhs, rhs) = if lhs.is_const() {
+        let rhs = eval_expr(m, node.rhs(), node.rhs_span())?;
+        if rhs.is_const() {
+            return const_eval_expr_infix_comparison(op, lhs, rhs, span);
+        }
+
+        let lhs = value_to_reg_reuse(m, lhs, dst)?;
+        let rhs = value_to_reg(m, rhs)?;
+
+        (lhs, rhs)
+    } else {
+        let lhs = value_to_reg_reuse(m, lhs, dst)?;
+
+        let rhs = eval_expr(m, node.rhs(), node.rhs_span())?;
+        let rhs = value_to_reg(m, rhs)?;
+
+        (lhs, rhs)
+    };
+
+    runtime_eval_expr_infix_comparison(m, op, dst, lhs, rhs, span);
+
+    free_reg(m, rhs);
+    if lhs != dst {
+        free_reg(m, lhs);
+    }
+
+    Ok(Value::dynamic(dst, span))
+}
+
+fn runtime_eval_expr_infix_comparison<'a>(
+    m: &mut State<'a>,
+    op: ast::InfixOp,
+    dst: Reg,
+    lhs: Reg,
+    rhs: Reg,
+    span: Span,
+) {
+    use ast::InfixOp as Op;
+    let insn = match op {
+        Op::Eq => asm::iseqv(dst, lhs, rhs),
+        Op::Ne => asm::isnev(dst, lhs, rhs),
+        Op::Lt => asm::isltv(dst, lhs, rhs),
+        Op::Le => asm::islev(dst, lhs, rhs),
+        Op::Gt => asm::isgtv(dst, lhs, rhs),
+        Op::Ge => asm::isgev(dst, lhs, rhs),
+        op => unreachable!("ICE: invalid op in infix comparison: {op:?}"),
+    };
+
+    m.emit(insn, span);
+}
+fn const_eval_expr_infix_comparison<'a>(
+    op: ast::InfixOp,
+    lhs: Value<'a>,
+    rhs: Value<'a>,
+    span: Span,
+) -> Result<Value<'a>> {
+    // both sides are constants, return a constant.
+    use ast::InfixOp as Op;
+
+    macro_rules! op {
+        ($tt:tt) => {(
+            |a, b| a $tt b,
+            |a, b| a $tt b,
+            |a, b| a $tt b,
+            |a, b| a $tt b,
+            |a, b| a $tt b,
+        )};
+    }
+
+    let (nil_op, int_op, flt_op, bool_op, str_op): (
+        fn((), ()) -> bool,
+        fn(i64, i64) -> bool,
+        fn(f64n, f64n) -> bool,
+        fn(bool, bool) -> bool,
+        fn(&str, &str) -> bool,
+    ) = match op {
+        Op::Eq => op!(==),
+        Op::Ne => op!(!=),
+        Op::Lt => op!(<),
+        Op::Le => op!(<=),
+        Op::Gt => op!(>),
+        Op::Ge => op!(>=),
+        op => unreachable!("ICE: invalid op in comparison: {op:?}"),
+    };
+
+    use ValueKind as V;
+    let v = match (lhs.kind, rhs.kind) {
+        (V::Nil, V::Nil) => Value::bool(nil_op((), ()), span),
+        (V::Bool(lhs), V::Bool(rhs)) => Value::bool(bool_op(lhs, rhs), span),
+        (V::Int(lhs), V::Int(rhs)) => Value::bool(int_op(lhs, rhs), span),
+        (V::Float(lhs), V::Float(rhs)) => Value::bool(flt_op(lhs, rhs), span),
+        (V::Float(lhs), V::Int(rhs)) => Value::bool(flt_op(lhs, f64n::new(rhs as f64)), span),
+        (V::Int(lhs), V::Float(rhs)) => Value::bool(flt_op(f64n::new(lhs as f64), rhs), span),
+        (V::Str(lhs), V::Str(rhs)) => Value::bool(str_op(lhs, rhs), span),
+        _ => {
+            return error(
+                format!(
+                    "evaluation would fail with a type mismatch: cannot compare {} and {}",
+                    lhs.type_name(),
+                    rhs.type_name()
+                ),
+                span,
+            )
+            .into();
+        }
+    };
+
+    Ok(v)
 }
 
 fn eval_expr_prefix<'a>(
@@ -2315,7 +2514,7 @@ fn eval_expr_list<'a>(
     span: Span,
     dst: Option<Reg>,
 ) -> Result<Value<'a>> {
-    // TODO: constant array
+    // TODO(opt): constant array
 
     let dst = maybe_reuse_reg(m, span, dst)?;
 
@@ -2351,7 +2550,7 @@ fn eval_expr_table<'a>(
     span: Span,
     dst: Option<Reg>,
 ) -> Result<Value<'a>> {
-    // TODO: constant object
+    // TODO(opt): constant object
 
     let dst = maybe_reuse_reg(m, span, dst)?;
 
@@ -2663,8 +2862,6 @@ fn is_basic_block_exit(prev: Insn, insn: Insn) -> bool {
         | Opcode::Ltable
         | Opcode::Istrue
         | Opcode::Isfalse
-        | Opcode::Istruec
-        | Opcode::Isfalsec
         | Opcode::Islt
         | Opcode::Isle
         | Opcode::Isgt
@@ -2673,10 +2870,12 @@ fn is_basic_block_exit(prev: Insn, insn: Insn) -> bool {
         | Opcode::Isne
         | Opcode::Iseqs
         | Opcode::Isnes
-        | Opcode::Iseqn
-        | Opcode::Isnen
-        | Opcode::Iseqp
-        | Opcode::Isnep
+        | Opcode::Iseqi
+        | Opcode::Isnei
+        | Opcode::Iseqf
+        | Opcode::Isnef
+        | Opcode::Isnil
+        | Opcode::Isnotnil
         | Opcode::Isltv
         | Opcode::Islev
         | Opcode::Isgtv
@@ -2706,8 +2905,6 @@ fn is_jump_condition(insn: Insn) -> bool {
     match insn.op() {
         Opcode::Istrue
         | Opcode::Isfalse
-        | Opcode::Istruec
-        | Opcode::Isfalsec
         | Opcode::Islt
         | Opcode::Isle
         | Opcode::Isgt
@@ -2716,10 +2913,12 @@ fn is_jump_condition(insn: Insn) -> bool {
         | Opcode::Isne
         | Opcode::Iseqs
         | Opcode::Isnes
-        | Opcode::Iseqn
-        | Opcode::Isnen
-        | Opcode::Iseqp
-        | Opcode::Isnep => true,
+        | Opcode::Iseqi
+        | Opcode::Isnei
+        | Opcode::Iseqf
+        | Opcode::Isnef
+        | Opcode::Isnil
+        | Opcode::Isnotnil => true,
 
         Opcode::Nop
         | Opcode::Mov

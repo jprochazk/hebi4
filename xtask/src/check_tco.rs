@@ -6,7 +6,7 @@ const JUMP_TABLE_PREFIX: &str = "hebi4::vm::JT::";
 
 pub fn check_tco() {
     cargo("build")
-        .with_args(["--release", "--all-targets"])
+        .with_args(["--release", "--package=hebi4-cli", "--bin=hebi4"])
         .run();
     let o = cmd(
         "objdump -C --no-addresses --no-show-raw-insn -j .text -M intel -d target/release/hebi4",

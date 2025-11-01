@@ -1,0 +1,3 @@
+let v = nil
+
+if v == nil { "ok" } else { "err" }

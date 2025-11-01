@@ -120,28 +120,6 @@ ltable dst:reg cap:imm16;
 /* Adjust instruction pointer by `rel`. */
 jmp rel:imm24s;
 
-/* Skip `jmp` if `v` coerced to bool is `true` */
-istrue v:reg;
-
-/* Skip `jmp` if `v` coerced to bool is `false` */
-isfalse v:reg;
-
-# Variants of `istrue`/`isfalse` which preserve values, used
-# for "ternary" expressions.
-
-/**
- * If `v` coerced to bool is `true`:
- * - Set `dst` to original `v`
- * - Skip `jmp`
- */
-istruec dst:reg v:reg;
-/**
- * If `v` coerced to bool is `false`:
- * - Set `dst` to original `v`
- * - Skip `jmp`
- */
-isfalsec dst:reg v:reg;
-
 /* Skip `jmp` if `lhs < rhs` (register, register) */
 islt lhs:reg rhs:reg;
 /* Skip `jmp` if `lhs <= rhs` (register, register) */
@@ -150,33 +128,36 @@ isle lhs:reg rhs:reg;
 isgt lhs:reg rhs:reg;
 /* Skip `jmp` if `lhs >= rhs` (register, register) */
 isge lhs:reg rhs:reg;
-
 /* Skip `jmp` if `lhs == rhs` (register, register) */
 iseq lhs:reg rhs:reg;
 /* Skip `jmp` if `lhs != rhs` (register, register) */
 isne lhs:reg rhs:reg;
 
 # Specialized for certain kinds of constants: strings, numbers, "primitives"
-# Primitives are values which can be compared by bit pattern: bools and nils.
 #
 # This specialization reduces the number of type checks we have to do for
 # comparisons against constant values.
 
+/* Skip `jmp` if `lhs == nil` (register, primitive) */
+isnil v:reg;
+/* Skip `jmp` if `lhs != nil` (register, primitive) */
+isnotnil v:reg;
+/* Skip `jmp` if `v` coerced to bool is `true` */
+istrue v:reg;
+/* Skip `jmp` if `v` coerced to bool is `false` */
+isfalse v:reg;
 /* Skip `jmp` if `lhs == rhs` (register, literal string) */
 iseqs lhs:reg rhs:lit;
 /* Skip `jmp` if `lhs != rhs` (register, literal string) */
 isnes lhs:reg rhs:lit;
-
-/* Skip `jmp` if `lhs == rhs` (register, literal number) */
-iseqn lhs:reg rhs:lit;
-/* Skip `jmp` if `lhs != rhs` (register, literal number) */
-isnen lhs:reg rhs:lit;
-
-/* Skip `jmp` if `lhs == rhs` (register, primitive) */
-iseqp lhs:reg rhs:imm8;
-/* Skip `jmp` if `lhs != rhs` (register, primitive) */
-isnep lhs:reg rhs:imm8;
-
+/* Skip `jmp` if `lhs == rhs` (register, literal int) */
+iseqi lhs:reg rhs:lit;
+/* Skip `jmp` if `lhs != rhs` (register, literal int) */
+isnei lhs:reg rhs:lit;
+/* Skip `jmp` if `lhs == rhs` (register, literal float) */
+iseqf lhs:reg rhs:lit;
+/* Skip `jmp` if `lhs != rhs` (register, literal float) */
+isnef lhs:reg rhs:lit;
 
 /* `dst = lhs < rhs` (register, register) */
 isltv dst:reg lhs:reg rhs:reg;

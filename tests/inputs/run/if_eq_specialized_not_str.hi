@@ -1,0 +1,3 @@
+let v = "a"
+
+if v != "a" { "err" } else { "ok" }

@@ -1,0 +1,25 @@
+---
+source: src/codegen/tests.rs
+expression: snapshot
+---
+SOURCE
+let a = 0
+let b = 1
+
+a and b
+
+OK
+.fn @main
+  params 0
+  stack 3
+  .locals
+    a = r1
+    b = r2
+  .code
+  0  lsmi r1, 0
+  1  lsmi r2, 1
+  2  mov r0, r1
+  3  istrue r0
+  4  jmp 2   ; to 6
+  5  mov r0, r2
+  6  ret

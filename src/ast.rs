@@ -65,6 +65,24 @@ impl InfixOp {
             | InfixOp::Div => false,
         }
     }
+
+    #[inline]
+    pub fn is_eq(self) -> bool {
+        match self {
+            InfixOp::Eq | InfixOp::Ne => true,
+
+            InfixOp::Gt
+            | InfixOp::Ge
+            | InfixOp::Lt
+            | InfixOp::Le
+            | InfixOp::Or
+            | InfixOp::And
+            | InfixOp::Add
+            | InfixOp::Sub
+            | InfixOp::Mul
+            | InfixOp::Div => false,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

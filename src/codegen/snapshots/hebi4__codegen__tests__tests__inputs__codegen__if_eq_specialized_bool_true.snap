@@ -1,0 +1,23 @@
+---
+source: src/codegen/tests.rs
+expression: snapshot
+---
+SOURCE
+let v = true
+
+if v == true { "ok" } else { "err" }
+
+OK
+.fn @main
+  params 0
+  stack 2
+  .locals
+    v = r1
+  .code
+  0  ltrue r1
+  1  istrue r1
+  2  jmp 3   ; to 5
+  3  lstr r0, "ok"
+  4  jmp 2   ; to 6
+  5  lstr r0, "err"
+  6  ret

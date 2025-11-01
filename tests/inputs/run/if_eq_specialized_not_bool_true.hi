@@ -1,0 +1,3 @@
+let v = true
+
+if v != true { "err" } else { "ok" }

@@ -1,0 +1,11 @@
+---
+source: src/vm/tests.rs
+expression: snapshot
+---
+SOURCE
+let v = false
+
+if v != false { "err" } else { "ok" }
+
+OK
+"ok"

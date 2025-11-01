@@ -162,48 +162,34 @@ where
                 I::Llist { dst, cap } => writeln!(f, "llist {dst}, {cap}")?,
                 I::Ltable { dst, cap } => writeln!(f, "ltable {dst}, {cap}")?,
                 I::Jmp { rel } => writeln!(f, "jmp {rel}   ; to {}", (i as isize) + rel.sz())?,
-                I::Istrue { v } => writeln!(f, "istrue {v}")?,
-                I::Istruec { dst, v } => writeln!(f, "istruec {dst}, {v}")?,
-                I::Isfalse { v } => writeln!(f, "isfalse {v}")?,
-                I::Isfalsec { dst, v } => writeln!(f, "isfalsec {dst}, {v}")?,
                 I::Islt { lhs, rhs } => writeln!(f, "islt {lhs}, {rhs}")?,
                 I::Isle { lhs, rhs } => writeln!(f, "isle {lhs}, {rhs}")?,
                 I::Isgt { lhs, rhs } => writeln!(f, "isgt {lhs}, {rhs}")?,
                 I::Isge { lhs, rhs } => writeln!(f, "isge {lhs}, {rhs}")?,
                 I::Iseq { lhs, rhs } => writeln!(f, "iseq {lhs}, {rhs}")?,
                 I::Isne { lhs, rhs } => writeln!(f, "isne {lhs}, {rhs}")?,
+                I::Istrue { v } => writeln!(f, "istrue {v}")?,
+                I::Isfalse { v } => writeln!(f, "isfalse {v}")?,
+                I::Isnil { v } => writeln!(f, "isnil {v}")?,
+                I::Isnotnil { v } => writeln!(f, "isnotnil {v}")?,
                 I::Iseqs { lhs, rhs } => {
                     writeln!(f, "iseqs {lhs}, {rhs}", rhs = func.literal(rhs.zx()))?
                 }
                 I::Isnes { lhs, rhs } => {
                     writeln!(f, "isnes {lhs}, {rhs}", rhs = func.literal(rhs.zx()))?
                 }
-                I::Iseqn { lhs, rhs } => {
-                    writeln!(f, "iseqn {lhs}, {rhs}", rhs = func.literal(rhs.zx()))?
+                I::Iseqi { lhs, rhs } => {
+                    writeln!(f, "iseqi {lhs}, {rhs}", rhs = func.literal(rhs.zx()))?
                 }
-                I::Isnen { lhs, rhs } => {
-                    writeln!(f, "isnen {lhs}, {rhs}", rhs = func.literal(rhs.zx()))?
+                I::Isnei { lhs, rhs } => {
+                    writeln!(f, "isnei {lhs}, {rhs}", rhs = func.literal(rhs.zx()))?
                 }
-                I::Iseqp { lhs, rhs } => writeln!(
-                    f,
-                    "iseqp {lhs}, {rhs}",
-                    rhs = match rhs.get() {
-                        0 => "false",
-                        1 => "true",
-                        0xFF => "nil",
-                        _ => unreachable!(),
-                    },
-                )?,
-                I::Isnep { lhs, rhs } => writeln!(
-                    f,
-                    "isnep {lhs}, {rhs}",
-                    rhs = match rhs.get() {
-                        0 => "false",
-                        1 => "true",
-                        0xFF => "nil",
-                        _ => unreachable!(),
-                    },
-                )?,
+                I::Iseqf { lhs, rhs } => {
+                    writeln!(f, "iseqf {lhs}, {rhs}", rhs = func.literal(rhs.zx()))?
+                }
+                I::Isnef { lhs, rhs } => {
+                    writeln!(f, "isnef {lhs}, {rhs}", rhs = func.literal(rhs.zx()))?
+                }
                 I::Isltv { dst, lhs, rhs } => writeln!(f, "isltv {dst}, {lhs}, {rhs}")?,
                 I::Islev { dst, lhs, rhs } => writeln!(f, "islev {dst}, {lhs}, {rhs}")?,
                 I::Isgtv { dst, lhs, rhs } => writeln!(f, "isgtv {dst}, {lhs}, {rhs}")?,
