@@ -7,7 +7,6 @@ let a = 1
 let a = 2
 a = 3
 
-
 OK
 .fn @main
   params 0

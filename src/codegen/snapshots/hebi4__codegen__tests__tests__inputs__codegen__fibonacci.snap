@@ -10,8 +10,6 @@ fn fib(n) {
 
 fib(10)
 
-
-
 OK
 .fn @main
   params 0

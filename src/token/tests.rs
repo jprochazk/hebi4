@@ -5,6 +5,7 @@ use crate::token::tokenize;
 #[glob_test::glob("../../tests/inputs/syntax/*.hi")]
 fn tokenizer(path: &Path) {
     let input = read_to_string(path).unwrap();
+    let input = input.trim();
     let emit_snapshot =
         input.starts_with("//") && input.lines().next().unwrap().contains("tokenize");
 

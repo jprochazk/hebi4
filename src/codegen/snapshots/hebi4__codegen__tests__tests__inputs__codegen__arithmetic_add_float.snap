@@ -11,8 +11,6 @@ result = a + b
 result = 1.0 + b
 result = a + 1.0
 
-
-
 OK
 .fn @main
   params 0

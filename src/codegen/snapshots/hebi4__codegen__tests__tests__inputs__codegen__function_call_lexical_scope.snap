@@ -3,14 +3,12 @@ source: src/codegen/tests.rs
 expression: snapshot
 ---
 SOURCE
-
 // due to lexical scoping, a function may be called
 // before it's been defined
 
 f()
 
 fn f() {}
-
 
 OK
 .fn @main

@@ -22,7 +22,8 @@ fn module(input: &str) -> Module {
 #[glob_test::glob("../../tests/inputs/run/*.hi")]
 fn run(path: &Path) {
     let input = read_to_string(path).unwrap();
-    let module = module(&input);
+    let input = input.trim();
+    let module = module(input);
 
     let mut vm = Hebi::new();
     vm.with(|mut r| {
@@ -38,8 +39,8 @@ fn run(path: &Path) {
             Err(err) => (
                 format!(
                     "SOURCE\n{input}\n\nERROR\n{}\n\nDISASM:\n\n{}",
-                    err.render(&input),
-                    module.disasm(&input)
+                    err.render(input),
+                    module.disasm(input)
                 ),
                 true,
             ),
@@ -53,8 +54,8 @@ fn run(path: &Path) {
             Err(err) => (
                 format!(
                     "SOURCE\n{input}\n\nERROR\n{}\n\nDISASM:\n\n{}",
-                    err.render(&input),
-                    module.disasm(&input)
+                    err.render(input),
+                    module.disasm(input)
                 ),
                 true,
             ),

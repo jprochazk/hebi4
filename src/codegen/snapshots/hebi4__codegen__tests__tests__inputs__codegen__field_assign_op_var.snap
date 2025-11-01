@@ -1,0 +1,30 @@
+---
+source: src/codegen/tests.rs
+expression: snapshot
+---
+SOURCE
+let o = {a:0}
+let v = 1
+o.a = o.a + v
+o.a += v
+
+OK
+.fn @main
+  params 0
+  stack 4
+  .locals
+    o = r1
+    v = r2
+  .code
+   0  ltable r1, 1
+   1  lsmi r2, 0
+   2  skeyc r1, "a", r2
+   3  lsmi r2, 1
+   4  lkeyc r3, r1, "a"
+   5  add r3, r3, r2
+   6  skeyc r1, "a", r3
+   7  lkeyc r3, r1, "a"
+   8  add r3, r3, r2
+   9  skeyc r1, "a", r3
+  10  lnil r0
+  11  ret

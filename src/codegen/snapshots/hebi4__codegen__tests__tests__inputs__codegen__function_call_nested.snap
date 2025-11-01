@@ -10,7 +10,6 @@ fn f(v) {}
 // in this case the result is used as tail, so `dst` is re-used
 f(f(f(0)))
 
-
 OK
 .fn @main
   params 0

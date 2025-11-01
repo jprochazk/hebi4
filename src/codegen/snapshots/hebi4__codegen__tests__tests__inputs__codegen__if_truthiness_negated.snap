@@ -9,7 +9,6 @@ let y = 0
 if not x { return 1 }
 if not y { return 2 }
 
-
 OK
 .fn @main
   params 0

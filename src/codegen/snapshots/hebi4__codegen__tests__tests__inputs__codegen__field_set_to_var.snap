@@ -7,8 +7,6 @@ let a = {foo:0}
 let v = 1
 a.foo = v
 
-
-
 OK
 .fn @main
   params 0
@@ -22,4 +20,5 @@ OK
   2  skeyc r1, "foo", r2
   3  lsmi r2, 1
   4  skeyc r1, "foo", r2
-  5  ret
+  5  lnil r0
+  6  ret

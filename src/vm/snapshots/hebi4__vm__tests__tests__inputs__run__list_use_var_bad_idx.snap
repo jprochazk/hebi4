@@ -7,7 +7,6 @@ let v = [100]
 let k = "a"
 v[k]
 
-
 ERROR
 value is not a valid array index
 3 |  v[k]

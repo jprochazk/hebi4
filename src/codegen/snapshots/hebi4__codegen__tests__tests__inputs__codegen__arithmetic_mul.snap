@@ -11,7 +11,6 @@ result = a * b
 result = 1 * b
 result = a * 1
 
-
 OK
 .fn @main
   params 0

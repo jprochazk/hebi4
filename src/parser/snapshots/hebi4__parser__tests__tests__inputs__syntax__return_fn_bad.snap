@@ -7,7 +7,6 @@ SOURCE
 
 return fn(){}
 
-
 ERROR
 ambiguous
 3 |  return fn(){}

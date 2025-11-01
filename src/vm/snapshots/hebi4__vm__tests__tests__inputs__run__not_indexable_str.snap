@@ -6,7 +6,6 @@ SOURCE
 let v = 0
 v["a"]
 
-
 ERROR
 not a table
 2 |  v["a"]

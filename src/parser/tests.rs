@@ -6,13 +6,14 @@ use crate::token::tokenize;
 #[glob_test::glob("../../tests/inputs/syntax/*.hi")]
 fn parser(path: &Path) {
     let input = read_to_string(path).unwrap();
+    let input = input.trim();
     let emit_snapshot = input.starts_with("//") && input.lines().next().unwrap().contains("parse");
 
-    let tokens = tokenize(&input);
+    let tokens = tokenize(input);
     let (snapshot, failure) = match parse(&tokens) {
         Ok(ast) => (format!("SOURCE\n{input}\n\nOK\n{ast:#?}"), false),
         Err(err) => (
-            format!("SOURCE\n{input}\n\nERROR\n{}", err.render(&input)),
+            format!("SOURCE\n{input}\n\nERROR\n{}", err.render(input)),
             true,
         ),
     };

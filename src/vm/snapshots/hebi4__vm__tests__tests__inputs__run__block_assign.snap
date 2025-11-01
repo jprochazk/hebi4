@@ -6,6 +6,5 @@ SOURCE
 let v = do { 1 }
 v
 
-
 OK
 Int(1)

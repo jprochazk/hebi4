@@ -7,7 +7,6 @@ SOURCE
 
 fn () {}
 
-
 ERROR
 expected function name
 3 |  fn () {}

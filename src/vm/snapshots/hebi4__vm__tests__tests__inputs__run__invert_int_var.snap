@@ -6,6 +6,5 @@ SOURCE
 let v = 1
 do {-v}
 
-
 OK
 Int(-1)

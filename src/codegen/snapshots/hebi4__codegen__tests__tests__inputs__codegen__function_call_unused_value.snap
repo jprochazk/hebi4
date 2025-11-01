@@ -11,7 +11,6 @@ f(0, 1, 2)
 
 nil
 
-
 OK
 .fn @main
   params 0

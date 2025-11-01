@@ -6,6 +6,5 @@ SOURCE
 let v = [0, 1, 2]
 v[0] + v[1] + v[2]
 
-
 OK
 Int(3)

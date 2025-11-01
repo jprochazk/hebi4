@@ -13,7 +13,6 @@ if not (a >= b) {}  // islt
 if not (a == b) {}  // isne
 if not (a != b) {}  // iseq
 
-
 OK
 .fn @main
   params 0

@@ -15,8 +15,6 @@ loop {
   let v = 3
 }
 
-
-
 OK
 .fn @main
   params 0

@@ -1,0 +1,41 @@
+---
+source: src/codegen/tests.rs
+expression: snapshot
+---
+SOURCE
+let o = {a:0}
+fn k() { "a" }
+let v = 1
+o[k()] = o[k()] + v
+o[k()] += v
+
+OK
+.fn @main
+  params 0
+  stack 6
+  .locals
+    o = r1
+    v = r2
+  .code
+   0  ltable r1, 1
+   1  lsmi r2, 0
+   2  skeyc r1, "a", r2
+   3  lsmi r2, 1
+   4  call r3, fn1   ; fn1=k
+   5  call r5, fn1   ; fn1=k
+   6  lidx r4, r1, r5
+   7  add r4, r4, r2
+   8  sidx r1, r3, r4
+   9  call r3, fn1   ; fn1=k
+  10  lidx r4, r1, r3
+  11  add r4, r4, r2
+  12  sidx r1, r3, r4
+  13  lnil r0
+  14  ret
+
+.fn k
+  params 0
+  stack 1
+  .code
+  0  lstr r0, "a"
+  1  ret

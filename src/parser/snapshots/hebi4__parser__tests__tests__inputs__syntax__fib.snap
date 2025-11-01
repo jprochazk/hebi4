@@ -31,7 +31,6 @@ fn fib_iter(n) {
   return curr
 }
 
-
 OK
 Root(
     [

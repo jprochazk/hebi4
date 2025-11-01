@@ -11,7 +11,6 @@ if x { return 1 }
 if y { return 2 }
 if z { return 3 }
 
-
 OK
 .fn @main
   params 0

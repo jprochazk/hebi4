@@ -10,6 +10,5 @@ fn fib(n) {
 
 fib(10)
 
-
 OK
 Int(55)

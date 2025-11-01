@@ -8,7 +8,6 @@ do {
 }
 a = 2
 
-
 ERROR
 could not resolve name
 4 |  a = 2

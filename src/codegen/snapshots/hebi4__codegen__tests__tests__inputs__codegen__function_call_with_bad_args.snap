@@ -16,7 +16,6 @@ fn f(a, b, c) { }
 
 f(0)
 
-
 ERROR
 invalid number of arguments, expected 3 but got 1
 12 |  f(0)

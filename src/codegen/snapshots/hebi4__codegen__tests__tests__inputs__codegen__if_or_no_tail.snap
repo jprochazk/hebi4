@@ -10,7 +10,6 @@ if a < b or b >= a {
   return 0
 }
 
-
 OK
 .fn @main
   params 0

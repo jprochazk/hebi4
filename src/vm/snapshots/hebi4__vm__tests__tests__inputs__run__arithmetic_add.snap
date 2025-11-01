@@ -13,6 +13,5 @@ result += a + 1  // 8 + 2 + 1 = 11
 
 result  //=11
 
-
 OK
 Int(11)

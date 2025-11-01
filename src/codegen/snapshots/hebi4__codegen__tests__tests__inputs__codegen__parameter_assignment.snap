@@ -12,8 +12,6 @@ let v = 0
 v = f(v)
 v
 
-
-
 OK
 .fn @main
   params 0

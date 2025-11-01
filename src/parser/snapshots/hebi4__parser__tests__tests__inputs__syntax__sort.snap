@@ -37,8 +37,6 @@ fn selection_sort(arr) {
   return arr
 }
 
-
-
 OK
 Root(
     [

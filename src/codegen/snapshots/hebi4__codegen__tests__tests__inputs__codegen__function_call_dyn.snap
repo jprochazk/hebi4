@@ -8,7 +8,6 @@ SOURCE
 // type/arity checking at runtime.
 fn f(c) { c() }
 
-
 OK
 .fn @main
   params 0

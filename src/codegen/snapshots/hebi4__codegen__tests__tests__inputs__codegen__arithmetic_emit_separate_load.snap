@@ -261,7 +261,6 @@ a = a + 40254
 a = a + 40255
 a = a + 40256
 
-
 OK
 .fn @main
   params 0

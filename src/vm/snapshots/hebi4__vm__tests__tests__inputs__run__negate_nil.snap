@@ -5,6 +5,5 @@ expression: snapshot
 SOURCE
 not nil
 
-
 OK
 Bool(true)

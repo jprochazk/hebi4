@@ -6,6 +6,5 @@ SOURCE
 let v = 1.0
 do {-v}
 
-
 OK
 Float(-1.0)

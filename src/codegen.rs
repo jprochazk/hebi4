@@ -472,18 +472,15 @@ fn is_at_top<'a>(m: &mut State<'a>, reg: Reg) -> bool {
 /// Attempt to reuse `reg` if present, otherwise allocate a fresh register.
 #[cfg_attr(debug_assertions, track_caller)]
 fn maybe_reuse_reg<'a>(m: &mut State<'a>, span: Span, reg: Option<Reg>) -> Result<Reg> {
+    #[cfg(debug_assertions)]
+    if std::env::var("PRINT_REGALLOC").ok().is_some() {
+        eprintln!("reuse {span} {}: {reg:?}", std::panic::Location::caller());
+    }
+
     let r = match reg {
         Some(reg) => Ok(reg),
         None => fresh_reg(m, span),
     };
-
-    #[cfg(debug_assertions)]
-    if std::env::var("PRINT_REGALLOC").ok().is_some() {
-        eprintln!(
-            "reuse {span} {}: {reg:?} -> {r:?}",
-            std::panic::Location::caller()
-        );
-    }
 
     r
 }
@@ -538,7 +535,11 @@ fn fresh_var<'a>(m: &mut State<'a>, span: Span) -> Result<Reg> {
 fn free_reg<'a>(m: &mut State<'a>, reg: Reg) {
     #[cfg(debug_assertions)]
     if std::env::var("PRINT_REGALLOC").ok().is_some() {
-        eprintln!("free reg {}: {reg:?}", std::panic::Location::caller());
+        eprintln!(
+            "free reg {}: {reg:?} (variable={})",
+            std::panic::Location::caller(),
+            reg.get() < f!(m).ra.nvars,
+        );
     }
 
     f!(m).ra.free(reg);
@@ -1109,6 +1110,7 @@ enum ValueKind<'a> {
 }
 
 impl<'a> Value<'a> {
+    #[inline]
     fn type_name(self) -> &'static str {
         match self.kind {
             ValueKind::Nil => "nil",
@@ -1120,6 +1122,7 @@ impl<'a> Value<'a> {
         }
     }
 
+    #[inline]
     fn is_const(self) -> bool {
         match self.kind {
             ValueKind::Nil
@@ -1129,6 +1132,11 @@ impl<'a> Value<'a> {
             | ValueKind::Str(_) => true,
             ValueKind::Dynamic(_) => false,
         }
+    }
+
+    #[inline]
+    fn is_in(self, reg: Reg) -> bool {
+        matches!(self.kind, ValueKind::Dynamic(r) if r == reg)
     }
 
     #[inline]
@@ -1386,6 +1394,10 @@ fn eval_expr_return<'a>(
     if let Some(value) = node.value().as_option() {
         let value = eval_expr_reuse(m, value, node.value_span(), R0)?;
         value_force_reg(m, value, R0)?;
+
+        if !value.is_in(R0) {
+            free_value(m, value);
+        }
     } else {
         value_force_reg(m, Value::nil(span), R0)?;
     }
@@ -1671,6 +1683,10 @@ fn emit_if_cond_generic<'a>(
 
     m.emit(insn, span);
 
+    if value != dst {
+        free_reg(m, value);
+    }
+
     // `jmp` is emitted by caller.
 
     Ok(())
@@ -1757,22 +1773,28 @@ fn eval_expr_get_field<'a>(
     span: Span,
     dst: Option<Reg>,
 ) -> Result<Value<'a>> {
-    let out = maybe_reuse_reg(m, span, dst)?;
+    let dst = maybe_reuse_reg(m, span, dst)?;
 
-    let parent = eval_expr_reuse(m, node.parent(), node.parent_span(), out)?;
-    let parent = value_to_reg_reuse(m, parent, out)?;
+    let parent = eval_expr_reuse(m, node.parent(), node.parent_span(), dst)?;
+    let parent = value_to_reg_reuse(m, parent, dst)?;
 
     let idx = str_to_operand(m, node.key().get(), node.key_span(), None)?;
-    let insn = match idx {
-        Operand::Reg(idx) => asm::lkey(out, parent, idx),
-        Operand::Const(idx) => asm::lkeyc(out, parent, idx),
-    };
-    m.emit(insn, span);
+    runtime_eval_key(m, dst, parent, idx, span);
 
     free_operand(m, idx);
-    free_reg(m, parent);
+    if parent != dst {
+        free_reg(m, parent);
+    }
 
-    Ok(Value::dynamic(out, span))
+    Ok(Value::dynamic(dst, span))
+}
+
+fn runtime_eval_key<'a>(m: &mut State<'a>, dst: Reg, parent: Reg, idx: Operand, span: Span) {
+    let insn = match idx {
+        Operand::Reg(idx) => asm::lkey(dst, parent, idx),
+        Operand::Const(idx) => asm::lkeyc(dst, parent, idx),
+    };
+    m.emit(insn, span);
 }
 
 fn eval_expr_set_field<'a>(
@@ -1781,20 +1803,36 @@ fn eval_expr_set_field<'a>(
     span: Span,
     dst: Option<Reg>,
 ) -> Result<Value<'a>> {
-    // TODO: support `op`
-    if *node.op() != ast::AssignOp::None {
-        todo!()
-    }
+    let _ = dst;
 
-    let out = maybe_reuse_reg(m, span, dst)?;
-
-    let parent = eval_expr_reuse(m, node.base().parent(), node.base().parent_span(), out)?;
-    let parent = value_to_reg_reuse(m, parent, out)?;
+    let parent = eval_expr(m, node.base().parent(), node.base().parent_span())?;
+    let parent = value_to_reg(m, parent)?;
 
     let idx = str_to_operand(m, node.base().key().get(), node.base().key_span(), None)?;
 
-    let value = eval_expr(m, node.value(), node.value_span())?;
-    let value = value_to_reg(m, value)?;
+    let value = if *node.op() != ast::AssignOp::None {
+        let lhs = fresh_reg(m, node.base_span())?;
+        runtime_eval_key(m, lhs, parent, idx, span);
+
+        let rhs = eval_expr(m, node.value(), node.value_span())?;
+        let rhs = value_to_operand(m, rhs)?;
+
+        let op = match *node.op() {
+            ast::AssignOp::Add => ast::InfixOp::Add,
+            ast::AssignOp::Sub => ast::InfixOp::Sub,
+            ast::AssignOp::Mul => ast::InfixOp::Mul,
+            ast::AssignOp::Div => ast::InfixOp::Div,
+            _ => unreachable!("ICE: assign op none"),
+        };
+        runtime_eval_expr_infix(m, op, lhs, Operand::Reg(lhs), rhs, span);
+
+        free_operand(m, rhs);
+
+        lhs
+    } else {
+        let value = eval_expr(m, node.value(), node.value_span())?;
+        value_to_reg(m, value)?
+    };
 
     let insn = match idx {
         Operand::Reg(idx) => asm::skey(parent, idx, value),
@@ -1806,7 +1844,7 @@ fn eval_expr_set_field<'a>(
     free_operand(m, idx);
     free_reg(m, parent);
 
-    Ok(Value::dynamic(out, span))
+    Ok(Value::nil(span))
 }
 
 fn eval_expr_get_index<'a>(
@@ -1815,23 +1853,29 @@ fn eval_expr_get_index<'a>(
     span: Span,
     dst: Option<Reg>,
 ) -> Result<Value<'a>> {
-    let out = maybe_reuse_reg(m, span, dst)?;
+    let dst = maybe_reuse_reg(m, span, dst)?;
 
-    let parent = eval_expr_reuse(m, node.parent(), node.parent_span(), out)?;
-    let parent = value_to_reg_reuse(m, parent, out)?;
+    let parent = eval_expr_reuse(m, node.parent(), node.parent_span(), dst)?;
+    let parent = value_to_reg_reuse(m, parent, dst)?;
 
     let idx = eval_idx(m, node.key(), node.key_span())?;
-    let insn = match idx {
-        Idx::Str(idx) => asm::lkeyc(out, parent, idx),
-        Idx::Int(idx) => asm::lidxn(out, parent, idx),
-        Idx::Reg(idx) => asm::lidx(out, parent, idx),
-    };
-    m.emit(insn, span);
+    runtime_eval_idx(m, dst, parent, idx, span);
 
     free_idx(m, idx);
-    free_reg(m, parent);
+    if parent != dst {
+        free_reg(m, parent);
+    }
 
-    Ok(Value::dynamic(out, span))
+    Ok(Value::dynamic(dst, span))
+}
+
+fn runtime_eval_idx<'a>(m: &mut State<'a>, dst: Reg, parent: Reg, idx: Idx, span: Span) {
+    let insn = match idx {
+        Idx::Str(idx) => asm::lkeyc(dst, parent, idx),
+        Idx::Int(idx) => asm::lidxn(dst, parent, idx),
+        Idx::Reg(idx) => asm::lidx(dst, parent, idx),
+    };
+    m.emit(insn, span);
 }
 
 fn eval_expr_set_index<'a>(
@@ -1840,12 +1884,6 @@ fn eval_expr_set_index<'a>(
     span: Span,
     dst: Option<Reg>,
 ) -> Result<Value<'a>> {
-    // TODO: support `op`
-    if *node.op() != ast::AssignOp::None {
-        todo!()
-    }
-
-    // expr in statement position, result is always unused
     let _ = dst;
 
     let parent = eval_expr(m, node.base().parent(), node.base().parent_span())?;
@@ -1853,8 +1891,29 @@ fn eval_expr_set_index<'a>(
 
     let idx = eval_idx(m, node.base().key(), node.base().key_span())?;
 
-    let value = eval_expr(m, node.value(), node.value_span())?;
-    let value = value_to_reg(m, value)?;
+    let value = if *node.op() != ast::AssignOp::None {
+        let lhs = fresh_reg(m, node.base_span())?;
+        runtime_eval_idx(m, lhs, parent, idx, node.base().key_span());
+
+        let rhs = eval_expr(m, node.value(), node.value_span())?;
+        let rhs = value_to_operand(m, rhs)?;
+
+        let op = match *node.op() {
+            ast::AssignOp::Add => ast::InfixOp::Add,
+            ast::AssignOp::Sub => ast::InfixOp::Sub,
+            ast::AssignOp::Mul => ast::InfixOp::Mul,
+            ast::AssignOp::Div => ast::InfixOp::Div,
+            _ => unreachable!("ICE: assign op none"),
+        };
+        runtime_eval_expr_infix(m, op, lhs, Operand::Reg(lhs), rhs, span);
+
+        free_operand(m, rhs);
+
+        lhs
+    } else {
+        let value = eval_expr(m, node.value(), node.value_span())?;
+        value_to_reg(m, value)?
+    };
 
     let insn = match idx {
         Idx::Str(idx) => asm::skeyc(parent, idx, value),
@@ -1870,6 +1929,7 @@ fn eval_expr_set_index<'a>(
     Ok(Value::nil(span))
 }
 
+#[derive(Clone, Copy)]
 enum Idx {
     Str(Lit8),
     Int(Lit8),
@@ -1920,7 +1980,7 @@ fn eval_expr_call<'a>(
     // `out+1` is start of args, `out` and args must be contiguous
     // maximum number of args is 100, so they always fit within `u8`
     let nargs = call.args().len() as u8;
-    let (out, args) = match dst {
+    let (dst, args) = match dst {
         // We can use `dst` directly:
         // - If `dst` is top of stack, meaning argument registers can be
         //   allocated contiguously after `dst`
@@ -1933,9 +1993,9 @@ fn eval_expr_call<'a>(
         }
         Some(..) | None => {
             // No; allocate our own `dst` and args contiguously
-            let out = fresh_reg(m, span)?;
+            let dst = fresh_reg(m, span)?;
             let args = fresh_reg_range(m, span, nargs)?;
-            (out, args)
+            (dst, args)
         }
     };
 
@@ -1962,25 +2022,25 @@ fn eval_expr_call<'a>(
             value_force_reg(m, value, reg)?;
         }
 
-        m.emit(asm::fastcall(out, id), span);
+        m.emit(asm::fastcall(dst, id), span);
     } else {
         // maybe callable? only VM can know for sure
 
         let nargs = call.args().len() as u8;
-        let callee = eval_expr_reuse(m, call.callee(), call.callee_span(), out)?;
-        value_force_reg(m, callee, out)?;
+        let callee = eval_expr_reuse(m, call.callee(), call.callee_span(), dst)?;
+        value_force_reg(m, callee, dst)?;
 
         for ((reg, value), &span) in args.into_iter().zip(call.args()).zip(call.args_spans()) {
             let value = eval_expr_reuse(m, value, span, reg)?;
             value_force_reg(m, value, reg)?;
         }
 
-        m.emit(asm::call(out, unsafe { Imm8::new_unchecked(nargs) }), span);
+        m.emit(asm::call(dst, unsafe { Imm8::new_unchecked(nargs) }), span);
     }
 
     free_reg_range(m, args);
 
-    Ok(Value::dynamic(out, span))
+    Ok(Value::dynamic(dst, span))
 }
 
 trait ExprInfo {
@@ -2026,64 +2086,86 @@ fn eval_expr_infix<'a>(
     span: Span,
     dst: Option<Reg>,
 ) -> Result<Value<'a>> {
-    if node.op().is_logical() {
+    let op = *node.op();
+
+    if op.is_logical() {
         return eval_expr_infix_logical(m, node, span, dst);
     }
 
-    if node.op().is_comparison() {
+    if op.is_comparison() {
         return eval_expr_infix_comparison(m, node, span, dst);
     }
 
     let dst = maybe_reuse_reg(m, span, dst)?;
 
     let lhs = eval_expr_reuse(m, node.lhs(), node.lhs_span(), dst)?;
-    let rhs = eval_expr(m, node.rhs(), node.rhs_span())?;
+    let (lhs, rhs) = if lhs.is_const() {
+        let rhs = eval_expr(m, node.rhs(), node.rhs_span())?;
+        if rhs.is_const() {
+            return const_eval_expr_infix(op, lhs, rhs, span);
+        }
 
-    let result = if lhs.is_const() && rhs.is_const() {
-        const_eval_expr_infix(*node.op(), lhs, rhs, span)?
-    } else {
         let lhs = value_to_operand_reuse(m, lhs, dst)?;
         let rhs = value_to_operand(m, rhs)?;
 
-        let insn = match *node.op() {
-            ast::InfixOp::Add => match (lhs, rhs) {
-                (Operand::Reg(lhs), Operand::Reg(rhs)) => asm::addvv(dst, lhs, rhs),
-                (Operand::Reg(lhs), Operand::Const(rhs)) => asm::addvn(dst, lhs, rhs),
-                (Operand::Const(lhs), Operand::Reg(rhs)) => asm::addnv(dst, lhs, rhs),
-                _ => unreachable!("ICE: const/const in non-const path"),
-            },
-            ast::InfixOp::Sub => match (lhs, rhs) {
-                (Operand::Reg(lhs), Operand::Reg(rhs)) => asm::subvv(dst, lhs, rhs),
-                (Operand::Reg(lhs), Operand::Const(rhs)) => asm::subvn(dst, lhs, rhs),
-                (Operand::Const(lhs), Operand::Reg(rhs)) => asm::subnv(dst, lhs, rhs),
-                _ => unreachable!("ICE: const/const in non-const path"),
-            },
-            ast::InfixOp::Mul => match (lhs, rhs) {
-                (Operand::Reg(lhs), Operand::Reg(rhs)) => asm::mulvv(dst, lhs, rhs),
-                (Operand::Reg(lhs), Operand::Const(rhs)) => asm::mulvn(dst, lhs, rhs),
-                (Operand::Const(lhs), Operand::Reg(rhs)) => asm::mulnv(dst, lhs, rhs),
-                _ => unreachable!("ICE: const/const in non-const path"),
-            },
-            ast::InfixOp::Div => match (lhs, rhs) {
-                (Operand::Reg(lhs), Operand::Reg(rhs)) => asm::divvv(dst, lhs, rhs),
-                (Operand::Reg(lhs), Operand::Const(rhs)) => asm::divvn(dst, lhs, rhs),
-                (Operand::Const(lhs), Operand::Reg(rhs)) => asm::divnv(dst, lhs, rhs),
-                _ => unreachable!("ICE: const/const in non-const path"),
-            },
-            op => unreachable!("ICE: invalid op in emit_infix: {op:?}"),
-        };
+        (lhs, rhs)
+    } else {
+        let lhs = value_to_operand_reuse(m, lhs, dst)?;
 
-        m.emit(insn, span);
+        let rhs = eval_expr(m, node.rhs(), node.rhs_span())?;
+        let rhs = value_to_operand(m, rhs)?;
 
-        free_operand(m, rhs);
-        if lhs != dst {
-            free_operand(m, lhs);
-        }
-
-        Value::dynamic(dst, span)
+        (lhs, rhs)
     };
 
-    Ok(result)
+    runtime_eval_expr_infix(m, op, dst, lhs, rhs, span);
+
+    free_operand(m, rhs);
+    if !lhs.is_in(dst) {
+        free_operand(m, lhs);
+    }
+
+    Ok(Value::dynamic(dst, span))
+}
+
+fn runtime_eval_expr_infix<'a>(
+    m: &mut State<'a>,
+    op: ast::InfixOp,
+    dst: Reg,
+    lhs: Operand,
+    rhs: Operand,
+    span: Span,
+) {
+    use Operand as O;
+    let insn = match op {
+        ast::InfixOp::Add => match (lhs, rhs) {
+            (O::Reg(lhs), O::Reg(rhs)) => asm::addvv(dst, lhs, rhs),
+            (O::Reg(lhs), O::Const(rhs)) => asm::addvn(dst, lhs, rhs),
+            (O::Const(lhs), O::Reg(rhs)) => asm::addnv(dst, lhs, rhs),
+            _ => unreachable!("ICE: const/const in non-const path"),
+        },
+        ast::InfixOp::Sub => match (lhs, rhs) {
+            (O::Reg(lhs), O::Reg(rhs)) => asm::subvv(dst, lhs, rhs),
+            (O::Reg(lhs), O::Const(rhs)) => asm::subvn(dst, lhs, rhs),
+            (O::Const(lhs), O::Reg(rhs)) => asm::subnv(dst, lhs, rhs),
+            _ => unreachable!("ICE: const/const in non-const path"),
+        },
+        ast::InfixOp::Mul => match (lhs, rhs) {
+            (O::Reg(lhs), O::Reg(rhs)) => asm::mulvv(dst, lhs, rhs),
+            (O::Reg(lhs), O::Const(rhs)) => asm::mulvn(dst, lhs, rhs),
+            (O::Const(lhs), O::Reg(rhs)) => asm::mulnv(dst, lhs, rhs),
+            _ => unreachable!("ICE: const/const in non-const path"),
+        },
+        ast::InfixOp::Div => match (lhs, rhs) {
+            (O::Reg(lhs), O::Reg(rhs)) => asm::divvv(dst, lhs, rhs),
+            (O::Reg(lhs), O::Const(rhs)) => asm::divvn(dst, lhs, rhs),
+            (O::Const(lhs), O::Reg(rhs)) => asm::divnv(dst, lhs, rhs),
+            _ => unreachable!("ICE: const/const in non-const path"),
+        },
+        op => unreachable!("ICE: invalid op in emit_infix: {op:?}"),
+    };
+
+    m.emit(insn, span);
 }
 
 fn const_eval_expr_infix<'a>(
@@ -2353,12 +2435,9 @@ enum Operand {
     Const(Lit8),
 }
 
-impl PartialEq<Reg> for Operand {
-    fn eq(&self, other: &Reg) -> bool {
-        match self {
-            Self::Reg(this) => this != other,
-            Self::Const(_) => false,
-        }
+impl Operand {
+    fn is_in(self, reg: Reg) -> bool {
+        matches!(self, Operand::Reg(r) if r == reg)
     }
 }
 

@@ -8,8 +8,6 @@ do {
   do { a }
 }
 
-
-
 OK
 .fn @main
   params 0

@@ -6,6 +6,5 @@ SOURCE
 let v = false
 not false
 
-
 OK
 Bool(true)

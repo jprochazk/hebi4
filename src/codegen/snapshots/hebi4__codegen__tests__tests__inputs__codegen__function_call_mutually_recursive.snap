@@ -9,7 +9,6 @@ SOURCE
 fn a() { b() }
 fn b() { a() }
 
-
 OK
 .fn @main
   params 0

@@ -13,8 +13,6 @@ else if a >= b {}  // isgt
 else if a == b {}  // iseq
 else if a != b {}  // isne
 
-
-
 OK
 .fn @main
   params 0

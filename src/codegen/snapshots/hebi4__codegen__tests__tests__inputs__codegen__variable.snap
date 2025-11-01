@@ -6,7 +6,6 @@ SOURCE
 let a = 0
 let b = 1
 
-
 OK
 .fn @main
   params 0

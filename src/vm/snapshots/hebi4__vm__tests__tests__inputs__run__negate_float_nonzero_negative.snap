@@ -5,6 +5,5 @@ expression: snapshot
 SOURCE
 not -1.0
 
-
 OK
 Bool(false)

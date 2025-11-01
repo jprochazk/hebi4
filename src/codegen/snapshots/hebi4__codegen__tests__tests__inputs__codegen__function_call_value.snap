@@ -7,7 +7,6 @@ let v = 0
 
 v()()
 
-
 OK
 .fn @main
   params 0

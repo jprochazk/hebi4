@@ -5,6 +5,5 @@ expression: snapshot
 SOURCE
 [0, 1, 2]
 
-
 OK
 [Int(0), Int(1), Int(2)]

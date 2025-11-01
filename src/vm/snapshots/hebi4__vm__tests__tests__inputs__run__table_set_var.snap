@@ -8,7 +8,5 @@ let k = "a"
 v[k] = 100
 v[k]
 
-
-
 OK
 Int(100)

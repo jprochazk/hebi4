@@ -5,7 +5,6 @@ expression: snapshot
 SOURCE
 return
 
-
 OK
 .fn @main
   params 0

@@ -21,7 +21,6 @@ let mutli_one_else =
   else if true { 1 }
   else { 2 }
 
-
 OK
 Root(
     [

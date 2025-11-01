@@ -7,7 +7,6 @@ fn f() {}
 
 f()
 
-
 OK
 .fn @main
   params 0

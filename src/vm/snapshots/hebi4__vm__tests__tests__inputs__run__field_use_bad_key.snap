@@ -6,7 +6,6 @@ SOURCE
 let v = {a:100}
 v.b
 
-
 ERROR
 missing key
 2 |  v.b

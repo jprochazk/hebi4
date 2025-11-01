@@ -5,6 +5,5 @@ expression: snapshot
 SOURCE
 1 + 1 + 1 + 1
 
-
 OK
 Int(4)

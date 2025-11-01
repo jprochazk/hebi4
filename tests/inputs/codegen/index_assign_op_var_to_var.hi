@@ -1,0 +1,5 @@
+let o = {a:0}
+let k = "a"
+let v = 1
+o[k] = o[k] + v
+o[k] += v

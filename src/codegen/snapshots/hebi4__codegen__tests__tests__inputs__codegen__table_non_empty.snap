@@ -5,7 +5,6 @@ expression: snapshot
 SOURCE
 {a:0,b:1,c:2}
 
-
 OK
 .fn @main
   params 0

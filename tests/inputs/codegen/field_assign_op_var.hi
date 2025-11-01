@@ -1,0 +1,5 @@
+let o = {a:0}
+let v = 1
+o.a = o.a + v
+o.a += v
+

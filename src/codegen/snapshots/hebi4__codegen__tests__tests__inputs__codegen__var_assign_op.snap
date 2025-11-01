@@ -1,0 +1,25 @@
+---
+source: src/codegen/tests.rs
+expression: snapshot
+---
+SOURCE
+let a = 0
+a += 1
+a -= 1
+a *= 1
+a /= 1
+
+OK
+.fn @main
+  params 0
+  stack 2
+  .locals
+    a = r1
+  .code
+  0  lsmi r1, 0
+  1  add r1, r1, 1
+  2  sub r1, r1, 1
+  3  mul r1, r1, 1
+  4  div r1, r1, 1
+  5  lnil r0
+  6  ret

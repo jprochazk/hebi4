@@ -13,8 +13,6 @@ fn factorial(n) {
   }
 }
 
-
-
 OK
 Root(
     [

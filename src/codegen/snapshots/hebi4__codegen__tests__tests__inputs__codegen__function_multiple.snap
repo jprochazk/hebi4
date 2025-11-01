@@ -7,7 +7,6 @@ SOURCE
 fn a() {}
 fn b() {}
 
-
 OK
 .fn @main
   params 0

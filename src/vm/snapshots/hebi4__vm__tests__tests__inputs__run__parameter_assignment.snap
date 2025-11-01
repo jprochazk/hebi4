@@ -12,6 +12,5 @@ let v = 0
 v = f(v)
 v
 
-
 OK
 Int(1)

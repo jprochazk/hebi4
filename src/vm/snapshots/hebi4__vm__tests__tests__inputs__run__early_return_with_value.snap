@@ -5,6 +5,5 @@ expression: snapshot
 SOURCE
 return 100
 
-
 OK
 Int(100)

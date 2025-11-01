@@ -7,6 +7,5 @@ let v = {a:100}
 let k = "a"
 v[k]
 
-
 OK
 Int(100)

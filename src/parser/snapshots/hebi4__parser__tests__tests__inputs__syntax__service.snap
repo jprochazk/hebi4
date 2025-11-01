@@ -15,8 +15,6 @@ svc.GET("/hello/:name", fn(req, res) {
 
 http.serve(svc)
 
-
-
 OK
 Root(
     [

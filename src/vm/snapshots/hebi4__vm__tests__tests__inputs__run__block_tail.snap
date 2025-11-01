@@ -5,6 +5,5 @@ expression: snapshot
 SOURCE
 do { 1 }
 
-
 OK
 Int(1)

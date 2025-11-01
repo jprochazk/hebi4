@@ -8,8 +8,6 @@ let k = "foo"
 let v = 1
 a[k] = v
 
-
-
 OK
 .fn @main
   params 0

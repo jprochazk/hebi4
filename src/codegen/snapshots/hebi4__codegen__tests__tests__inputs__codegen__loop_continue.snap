@@ -10,7 +10,6 @@ loop {
   let v = 1
 }
 
-
 OK
 .fn @main
   params 0

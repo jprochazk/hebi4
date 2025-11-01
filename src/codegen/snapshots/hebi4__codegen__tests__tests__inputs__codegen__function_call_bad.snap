@@ -8,7 +8,6 @@ SOURCE
 
 f()
 
-
 ERROR
 could not resolve name
 4 |  f()

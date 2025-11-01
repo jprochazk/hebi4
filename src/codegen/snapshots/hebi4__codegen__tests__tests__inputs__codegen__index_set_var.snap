@@ -7,7 +7,6 @@ let a = [0]
 let i = 0
 a[i] = 1
 
-
 OK
 .fn @main
   params 0

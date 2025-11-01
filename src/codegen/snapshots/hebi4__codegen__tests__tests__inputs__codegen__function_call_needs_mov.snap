@@ -13,8 +13,6 @@ let b = 1
 // to allocate including `dst` and then `mov`.
 a = f(1)
 
-
-
 OK
 .fn @main
   params 0

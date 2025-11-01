@@ -12,7 +12,6 @@ if a < b and b >= a {
   return 1
 }
 
-
 OK
 .fn @main
   params 0

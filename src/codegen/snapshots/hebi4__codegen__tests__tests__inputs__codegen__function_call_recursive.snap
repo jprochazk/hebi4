@@ -7,7 +7,6 @@ SOURCE
 // as they are declared _before_ they are emitted.
 fn f() { f() }
 
-
 OK
 .fn @main
   params 0

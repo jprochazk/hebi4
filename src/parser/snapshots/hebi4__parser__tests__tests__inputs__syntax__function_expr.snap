@@ -9,7 +9,6 @@ let empty = fn() {}
 let args = fn(a, b, c) {}
 let args_tc = fn(a, b, c, ) {}
 
-
 OK
 Root(
     [
