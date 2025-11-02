@@ -1,7 +1,8 @@
 // use crate::{error::Location, span::Span};
 
 use crate::{
-    codegen::opcodes::FnId,
+    codegen::opcodes::{FnId, HostId},
+    core::CoreLib,
     module::{Capture, Local},
 };
 
@@ -119,6 +120,11 @@ impl<'a> std::fmt::Display for DisasmFuncWithSrc<'a> {
                     "lfunc {dst}, {id}   ; {id}={name}",
                     name = module.function_at(id).name()
                 )?,
+                I::Lhost { dst, id } => writeln!(
+                    f,
+                    "lhost {dst}, {id}   ; {id}={name}",
+                    name = module.host_function_at(id).name
+                )?,
                 I::Llist { dst, cap } => writeln!(f, "llist {dst}, {cap}")?,
                 I::Ltable { dst, cap } => writeln!(f, "ltable {dst}, {cap}")?,
                 I::Jmp { rel } => writeln!(f, "jmp {rel}   ; to {}", (i as isize) + rel.sz())?,
@@ -194,6 +200,11 @@ impl<'a> std::fmt::Display for DisasmFuncWithSrc<'a> {
                     "call {dst}, {id}   ; {id}={name}",
                     name = module.function_at(id).name(),
                 )?,
+                I::Hostcall { dst, id } => writeln!(
+                    f,
+                    "call {dst}, {id}   ; {id}={name}",
+                    name = module.host_function_at(id).name,
+                )?,
                 I::Ret {} => writeln!(f, "ret")?,
                 I::Retv { src } => writeln!(f, "retv {src}")?,
                 I::Stop {} => writeln!(f, "stop")?,
@@ -220,6 +231,10 @@ impl crate::module::Module {
 impl crate::module::Module {
     fn function_at(&self, id: FnId) -> &crate::module::FuncInfo {
         crate::module::Module::functions(self).get(id.zx()).unwrap()
+    }
+
+    fn host_function_at(&self, id: HostId) -> &crate::core::CoreFunction {
+        CoreLib::get().entry(id)
     }
 }
 

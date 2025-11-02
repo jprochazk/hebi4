@@ -450,6 +450,7 @@ declare_operand_types! {
     Lit8(u8) = "l{}",
 
     FnId(u16) = "fn{}",
+    HostId(u16) = "h{}",
 
     Imm8(u8) = "{}",
     Imm16(u16) = "{}",

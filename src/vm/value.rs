@@ -84,6 +84,7 @@ impl ValueRaw {
 
 pub mod closure;
 pub mod function;
+pub mod host_function;
 pub mod list;
 pub mod module;
 pub mod string;

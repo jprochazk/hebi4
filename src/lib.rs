@@ -30,9 +30,11 @@ mod vm;
 
 mod disasm;
 
+mod core;
+
 pub use codegen::EmitOptions;
 pub use module::Module;
-pub use vm::{Hebi, gc, value};
+pub use vm::{Hebi, Stdio, StdioWrite, gc, value};
 
 pub fn parse(code: &str) -> Result<ast::Ast> {
     let tokens = token::tokenize(code);

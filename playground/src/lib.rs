@@ -1,9 +1,44 @@
 use hebi4::{EmitOptions, Hebi, Module};
 use wasm_bindgen::prelude::*;
+use std::io::{self, Write};
 
 #[wasm_bindgen(start)]
 pub fn init() {
     console_error_panic_hook::set_once();
+}
+
+/// A writer that calls into JavaScript for each write
+struct JsWriter {
+    callback: js_sys::Function,
+}
+
+impl JsWriter {
+    fn new(callback: js_sys::Function) -> Self {
+        Self { callback }
+    }
+}
+
+impl Write for JsWriter {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        let s = std::str::from_utf8(buf)
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+
+        let js_string = JsValue::from_str(s);
+        self.callback
+            .call1(&JsValue::NULL, &js_string)
+            .map_err(|e| {
+                io::Error::new(
+                    io::ErrorKind::Other,
+                    format!("JS callback error: {:?}", e),
+                )
+            })?;
+
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
 }
 
 #[wasm_bindgen]
@@ -119,7 +154,7 @@ impl RunResult {
 }
 
 #[wasm_bindgen]
-pub fn run(code: &str, enable_dce: bool) -> RunResult {
+pub fn run(code: &str, enable_dce: bool, output_callback: js_sys::Function) -> RunResult {
     let opts = if enable_dce {
         EmitOptions {
             dead_code_elimination: true,
@@ -135,7 +170,13 @@ pub fn run(code: &str, enable_dce: bool) -> RunResult {
                 output: String::new(),
             };
 
-            Hebi::new().with(|mut vm| {
+            // Create stdio with JS callback
+            let stdio = hebi4::Stdio {
+                stdout: Box::new(JsWriter::new(output_callback.clone())),
+                stderr: Box::new(JsWriter::new(output_callback)),
+            };
+
+            Hebi::new().with_stdio(stdio).with(|mut vm| {
                 let loaded_module = vm.load(&module);
                 match vm.run(&loaded_module) {
                     Ok(v) => {

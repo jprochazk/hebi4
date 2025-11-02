@@ -92,6 +92,9 @@ lclosure dst:reg id:lit;
 /* Load function by `id` into register `dst`. */
 lfunc dst:reg id:fnid;
 
+/* Load host function by `id` into register `dst`. */
+lhost dst:reg id:hostid;
+
 # TODO: constant lists/tables don't need to use stack space at all
 /*
  * Allocate a list with `capacity` into register `dst`.
@@ -281,6 +284,11 @@ call dst:reg callee:reg args:imm8;
  * `dst = funcs[id](dst..dst+funcs[id].args)`
  */
 fastcall dst:reg id:fnid;
+
+/*
+ * `dst = host[id](dst..dst+host[id].args)`
+ */
+hostcall dst:reg id:hostid;
 
 # Note that `ret` and `stop` are separate, to avoid a branch in `ret` which
 # would otherwise be required to check if there are any call frames left to

@@ -151,6 +151,7 @@ function updateAst(code) {
       output.className = "output error";
     }
   } catch (err) {
+    console.error(err);
     output.textContent = `Error: ${err.message}`;
     output.className = "output error";
   }
@@ -187,6 +188,7 @@ function updateDisasm(code, optimize) {
       output.className = "output error";
     }
   } catch (err) {
+    console.error(err);
     output.textContent = `Error: ${err.message}`;
     output.className = "output error";
   }
@@ -213,16 +215,35 @@ function updateRun(code, optimize) {
   }
 
   try {
-    const result = run(code, optimize);
+    // Clear output before running
+    output.textContent = "";
+    output.className = "output";
+
+    // Callback to append output as the program runs
+    const outputCallback = (/** @type {string} */ text) => {
+      output.textContent += text;
+    };
+
+    const result = run(code, optimize, outputCallback);
 
     if (result.success) {
-      output.textContent = result.output;
+      // Append the final return value
+      if (output.textContent) {
+        output.textContent += "\n";
+      }
+      output.textContent += `=> ${result.output}`;
       output.className = "output success";
     } else {
-      output.textContent = result.output;
+      // Show error (will be empty if compile/runtime error occurred before any output)
+      if (!output.textContent) {
+        output.textContent = result.output;
+      } else {
+        output.textContent += "\n\n" + result.output;
+      }
       output.className = "output error";
     }
   } catch (err) {
+    console.error(err);
     output.textContent = `Error: ${err.message}`;
     output.className = "output error";
   }

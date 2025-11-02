@@ -57,12 +57,14 @@ use value::{List, ModuleProto, String, Table};
 
 use crate::{
     codegen::opcodes::*,
+    core::RuntimeCoreLib,
     error::{Error, Result, error},
     module,
     span::Span,
     value::{
         Closure,
         closure::{CaptureInfo, ClosureProto},
+        host_function::{Context, HostFunction, HostFunctionCallback},
     },
     vm::value::{FunctionProto, ValueRaw, module::ModuleRegistry},
 };
@@ -204,6 +206,7 @@ impl Captures {
     }
 }
 
+// TODO: native call frames
 #[derive(Clone, Copy)]
 struct CallFrame {
     callee: GcPtr<FunctionProto>,
@@ -316,6 +319,16 @@ impl Vm {
     }
 
     #[inline]
+    unsafe fn get_host_function(self, id: HostId) -> GcPtr<HostFunction> {
+        (*self.0.as_ptr())
+            .core
+            .functions
+            .as_mut_ptr()
+            .offset(id.sz())
+            .read()
+    }
+
+    #[inline]
     unsafe fn current_captures(self) -> Captures {
         let captures = (*self.0.as_ptr()).current_captures;
         debug_assert!(captures.is_some());
@@ -370,6 +383,11 @@ impl Vm {
     }
 
     #[inline]
+    unsafe fn stdio(self) -> *mut Stdio {
+        &raw mut (*self.0.as_ptr()).stdio
+    }
+
+    #[inline]
     unsafe fn maybe_gc(self) {
         // TODO: GC thresholds
         // for now, we always GC
@@ -402,6 +420,8 @@ pub enum VmError {
     NotIndexable,
     ArityMismatch,
     NotCallable,
+
+    Host,
 }
 
 impl VmError {
@@ -429,12 +449,16 @@ impl VmError {
             Self::NotIndexable => error("this value cannot be indexed", span),
             Self::ArityMismatch => error("invalid number of arguments", span),
             Self::NotCallable => error("this value cannot be called", span),
+
+            Self::Host => error("<host error>", span),
         }
     }
 
     #[inline]
-    fn is_external(self) -> bool {
+    fn is_host(self) -> bool {
         match self {
+            Self::Host => true,
+
             Self::DivisionByZero
             | Self::ArithTypeError
             | Self::UnopInvalidType
@@ -486,6 +510,7 @@ static JT: JumpTable = jump_table! {
     lstr,
     lclosure,
     lfunc,
+    lhost,
     llist,
     ltable,
     jmp,
@@ -527,6 +552,7 @@ static JT: JumpTable = jump_table! {
     not,
     call,
     fastcall,
+    hostcall,
     ret,
     retv,
     stop,
@@ -962,6 +988,16 @@ unsafe fn init_captures(closure: GcPtr<ClosureProto>, vm: Vm, sp: Sp) -> Box<[Va
 unsafe fn lfunc(vm: Vm, jt: Jt, ip: Ip, args: Lfunc, sp: Sp, lp: Lp) -> Control {
     let dst = sp.at(args.dst());
     let func = vm.get_function_in_current_module(args.id());
+
+    *dst = ValueRaw::Object(func.as_any());
+
+    dispatch_next(vm, jt, ip, sp, lp)
+}
+
+#[inline(always)]
+unsafe fn lhost(vm: Vm, jt: Jt, ip: Ip, args: Lhost, sp: Sp, lp: Lp) -> Control {
+    let dst = sp.at(args.dst());
+    let func = vm.get_host_function(args.id());
 
     *dst = ValueRaw::Object(func.as_any());
 
@@ -1650,10 +1686,10 @@ unsafe fn not(vm: Vm, jt: Jt, ip: Ip, args: Not, sp: Sp, lp: Lp) -> Control {
 unsafe fn call(vm: Vm, jt: Jt, ip: Ip, args: Call, sp: Sp, lp: Lp) -> Control {
     let ret = args.dst();
     let callee = *sp.at(args.callee());
-    let nargs = args.args().zx();
+    let nargs = args.args().get();
 
     if let Some(callee) = callee.into_object::<FunctionProto>() {
-        if callee.as_ref().nparams as usize != nargs {
+        if callee.as_ref().nparams != nargs {
             return arity_mismatch_error(ip, vm);
         }
 
@@ -1661,13 +1697,20 @@ unsafe fn call(vm: Vm, jt: Jt, ip: Ip, args: Call, sp: Sp, lp: Lp) -> Control {
 
         dispatch_current(vm, jt, ip, sp, lp)
     } else if let Some(callee) = callee.into_object::<Closure>() {
-        if callee.as_ref().func.as_ref().nparams as usize != nargs {
+        if callee.as_ref().func.as_ref().nparams != nargs {
             return arity_mismatch_error(ip, vm);
         }
 
         let (sp, lp, ip) = do_closure_call(callee, ret, ip, vm);
 
         dispatch_current(vm, jt, ip, sp, lp)
+    } else if let Some(callee) = callee.into_object::<HostFunction>() {
+        if callee.as_ref().arity != nargs {
+            return arity_mismatch_error(ip, vm);
+        }
+
+        let callee = callee.as_ref().f;
+        do_host_call(callee, vm, jt, ip, sp, lp, ret, nargs)
     } else {
         not_callable_error(ip, vm)
     }
@@ -1691,6 +1734,17 @@ unsafe fn fastcall(vm: Vm, jt: Jt, ip: Ip, args: Fastcall, sp: Sp, lp: Lp) -> Co
     let (sp, lp, ip) = do_call(callee, ret, ip, vm);
 
     dispatch_current(vm, jt, ip, sp, lp)
+}
+
+#[inline(always)]
+unsafe fn hostcall(vm: Vm, jt: Jt, ip: Ip, args: Hostcall, sp: Sp, lp: Lp) -> Control {
+    let ret = args.dst();
+    let callee = vm.get_host_function(args.id());
+
+    let nargs = callee.as_ref().arity;
+    let callee = callee.as_ref().f;
+
+    do_host_call(callee, vm, jt, ip, sp, lp, ret, nargs)
 }
 
 #[inline(always)]
@@ -1762,6 +1816,37 @@ unsafe fn do_closure_call(callee: GcPtr<Closure>, ret: Reg, ip: Ip, vm: Vm) -> (
 }
 
 #[inline(always)]
+unsafe fn do_host_call(
+    callee: HostFunctionCallback,
+    vm: Vm,
+    jt: Jt,
+    ip: Ip,
+    sp: Sp,
+    lp: Lp,
+    ret: Reg,
+    nargs: u8,
+) -> Control {
+    let context = {
+        let stack_base = (vm.current_frame().stack_base() + (ret.get() as u32)) as usize;
+        let sp: Sp = vm.stack_at(stack_base);
+        Context::new(vm, sp, nargs)
+    };
+    match callee(context) {
+        Ok(value) => {
+            *sp.at(ret) = value;
+
+            dispatch_next(vm, jt, ip, sp, lp)
+        }
+        Err(err) => {
+            vm.set_saved_ip(ip);
+            vm.write_error(err);
+
+            Control::error(VmError::Host)
+        }
+    }
+}
+
+#[inline(always)]
 unsafe fn maybe_grow_stack(vm: Vm, stack_base: usize, frame_size: usize) -> Sp {
     if !vm.has_enough_stack_space(stack_base, frame_size) {
         grow_stack(vm, frame_size)
@@ -1795,6 +1880,34 @@ unsafe fn return_from_call(vm: Vm) -> (Sp, Lp, Ip) {
     (sp, lp, ip)
 }
 
+pub trait StdioWrite: std::io::Write + std::any::Any + 'static {
+    fn as_any(&self) -> &dyn std::any::Any;
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any;
+}
+impl<T: std::io::Write + std::any::Any> StdioWrite for T {
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
+}
+
+pub struct Stdio {
+    pub stdout: Box<dyn StdioWrite>,
+    pub stderr: Box<dyn StdioWrite>,
+}
+
+impl Default for Stdio {
+    fn default() -> Self {
+        Self {
+            stdout: Box::new(std::io::stdout()),
+            stderr: Box::new(std::io::stderr()),
+        }
+    }
+}
+
 type Invariant<'a> = PhantomData<fn(&'a ()) -> &'a ()>;
 
 #[repr(C)]
@@ -1809,6 +1922,10 @@ pub(crate) struct VmState {
 
     /// Storage for loaded modules
     registry: ModuleRegistry,
+
+    core: RuntimeCoreLib,
+
+    stdio: Stdio,
 
     /// VM "registers"
     stack: DynArray<ValueRaw>,
@@ -1842,10 +1959,13 @@ impl Hebi {
         const INITIAL_STACK_SIZE: usize = (1024 * 1024) / std::mem::size_of::<ValueRaw>();
         const STACK_DEPTH: usize = INITIAL_STACK_SIZE / 16;
 
+        let heap = gc::Heap::new();
+
         Hebi {
             inner: Box::new(VmState {
-                heap: gc::Heap::new(),
                 registry: ModuleRegistry::new(),
+                core: RuntimeCoreLib::init(&heap),
+                stdio: Stdio::default(),
                 stack: DynArray::new(INITIAL_STACK_SIZE),
                 frames: DynStack::new(STACK_DEPTH),
 
@@ -1854,8 +1974,15 @@ impl Hebi {
 
                 error: None,
                 saved_ip: None,
+
+                heap,
             }),
         }
+    }
+
+    pub fn with_stdio(mut self, stdio: Stdio) -> Self {
+        self.inner.stdio = stdio;
+        self
     }
 
     #[inline(always)]
@@ -1918,6 +2045,10 @@ pub struct Runtime<'vm> {
 // Currently they are kept alive by the fact that we only
 // run gc during allocating instructions (`larr` and friends).
 impl<'vm> Runtime<'vm> {
+    pub fn stdio(&mut self) -> &mut Stdio {
+        unsafe { &mut self.vm.as_mut().stdio }
+    }
+
     /// Load a module into the VM's module registry.
     pub fn load(&mut self, m: &module::Module) -> Module<'vm> {
         let vm = unsafe { self.vm.as_mut() };
@@ -1980,7 +2111,7 @@ impl<'vm> Runtime<'vm> {
                     let op = jt.at(insn);
                     match op(vm, jt, ip, insn, sp, lp) {
                         Control::Stop => return Ok(()),
-                        Control::Error(err) if err.is_external() => {
+                        Control::Error(err) if err.is_host() => {
                             let err = vm.take_error();
                             return Err(err.unwrap());
                         }

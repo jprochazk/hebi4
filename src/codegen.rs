@@ -115,7 +115,8 @@ use opcodes::{FnId, Imm8, Imm16, Imm16s, Imm24s, Insn, Lit, Lit8, Opcode, Reg, a
 
 use crate::{
     ast::{self, Ast, Ident, Node, NodeList, Stmt, f64n},
-    codegen::opcodes::{Cap, Mvar},
+    codegen::opcodes::{Cap, HostId, Mvar},
+    core::CoreLib,
     error::{Result, error},
     module::{Capture, CaptureInfo, ClosureInfo, FuncDebugInfo, FuncInfo, Literal, Local, Module},
     span::Span,
@@ -1103,6 +1104,13 @@ impl<'a> State<'a> {
 
         // TODO: module variables
 
+        if let Some((id, func)) = CoreLib::get().find(name) {
+            return Ok(Some(Symbol::HostFunction {
+                arity: func.arity,
+                id,
+            }));
+        }
+
         Ok(None)
     }
 
@@ -1149,6 +1157,7 @@ enum Symbol {
     Capture { span: Span, idx: Cap },
     ModuleVar { span: Span, idx: Mvar },
     Function { arity: u8, span: Span, id: FnId },
+    HostFunction { arity: u8, id: HostId },
 }
 
 fn emit_closure<'a>(
@@ -1964,39 +1973,30 @@ fn eval_expr_get_var<'a>(
 ) -> Result<Value<'a>> {
     let span = get.name_span();
 
-    enum Id {
-        Var(Reg),
-        Cap(Cap),
-        Mvar(Mvar),
-        Func(FnId),
-    }
-
     // variable must exist at this point
-    let id = match m
+    match m
         .resolve(get.name().get())?
         .ok_or_else(|| error("could not resolve name", span))?
     {
-        Symbol::Local { reg, .. } => Id::Var(reg),
-        Symbol::Capture { idx, .. } => Id::Cap(idx),
-        Symbol::ModuleVar { idx, .. } => Id::Mvar(idx),
-        Symbol::Function { id, .. } => Id::Func(id),
-    };
-
-    match id {
-        Id::Var(reg) => Ok(Value::dynamic(reg, span)),
-        Id::Cap(idx) => {
+        Symbol::Local { reg, .. } => Ok(Value::dynamic(reg, span)),
+        Symbol::Capture { idx, .. } => {
             let dst = maybe_reuse_reg(m, span, dst)?;
             m.emit(asm::lcap(dst, idx), span);
             Ok(Value::dynamic(dst, span))
         }
-        Id::Mvar(idx) => {
+        Symbol::ModuleVar { idx, .. } => {
             let dst = maybe_reuse_reg(m, span, dst)?;
             m.emit(asm::lmvar(dst, idx), span);
             Ok(Value::dynamic(dst, span))
         }
-        Id::Func(id) => {
+        Symbol::Function { id, .. } => {
             let dst = maybe_reuse_reg(m, span, dst)?;
             m.emit(asm::lfunc(dst, id), span);
+            Ok(Value::dynamic(dst, span))
+        }
+        Symbol::HostFunction { id, .. } => {
+            let dst = maybe_reuse_reg(m, span, dst)?;
+            m.emit(asm::lhost(dst, id), span);
             Ok(Value::dynamic(dst, span))
         }
     }
@@ -2072,6 +2072,7 @@ fn eval_expr_set_var<'a>(
         Symbol::Capture { idx, .. } => Id::Cap(fresh_var(m, span)?, idx),
         Symbol::ModuleVar { idx, .. } => Id::Mvar(fresh_var(m, span)?, idx),
         Symbol::Function { .. } => return error("cannot assign to function", span).into(),
+        Symbol::HostFunction { .. } => return error("cannot assign to host function", span).into(),
     };
 
     // lhs is always a register, so we only evaluate rhs, and emit either `vv` or `vn`.
@@ -2323,6 +2324,50 @@ fn eval_idx<'a>(m: &mut State<'a>, idx: Node<'a, ast::Expr>, span: Span) -> Resu
     Ok(idx)
 }
 
+fn prepare_fast_call<'a>(
+    m: &mut State<'a>,
+    call: Node<'a, ast::Call>,
+    dst: Option<Reg>,
+    span: Span,
+    arity: u8,
+) -> Result<(Reg, RegRange)> {
+    // Fastcall optimization: If the symbol is syntactically a function, then
+    // - check arity now, and
+    // - call the function by ID, avoiding arity/type checking
+
+    let nargs = call.args().len() as u8;
+    let (dst, args) = match dst {
+        // We can use `dst` directly:
+        // - If `dst` is top of stack, meaning argument registers can be
+        //   allocated contiguously after `dst`
+        Some(dst) if is_at_top(m, dst) => {
+            // Yes; allocate registers for args right above `dst`, if there are any.
+            let args = fresh_reg_range(m, span, nargs)?;
+            (dst, args)
+        }
+        _ => {
+            // No; allocate our own `dst` and args contiguously
+            let dst = fresh_reg(m, span)?;
+            let args = fresh_reg_range(m, span, nargs)?;
+            (dst, args)
+        }
+    };
+    if nargs != arity {
+        return error(
+            format!("invalid number of arguments, expected {arity} but got {nargs}"),
+            span,
+        )
+        .into();
+    }
+
+    for ((reg, value), &span) in args.into_iter().zip(call.args()).zip(call.args_spans()) {
+        let value = eval_expr_reuse(m, value, span, reg)?;
+        value_force_reg(m, value, reg)?;
+    }
+
+    Ok((dst, args))
+}
+
 // TODO(feat): specialize "method" calls (get prop -> call in a single instruction)
 fn eval_expr_call<'a>(
     m: &mut State<'a>,
@@ -2334,43 +2379,21 @@ fn eval_expr_call<'a>(
     // maximum number of args is 100, so they always fit within `u8`
 
     let out = if let ast::ExprKind::GetVar(node) = call.callee().kind()
-        && let Some(Symbol::Function { id, arity, .. }) = m.resolve(node.name().get())?
+        && let Some(Symbol::Function { arity, id, .. }) = m.resolve(node.name().get())?
     {
-        // Fastcall optimization: If the symbol is syntactically a function, then
-        // - check arity now, and
-        // - call the function by ID, avoiding arity/type checking
-
-        let nargs = call.args().len() as u8;
-        let (dst, args) = match dst {
-            // We can use `dst` directly:
-            // - If `dst` is top of stack, meaning argument registers can be
-            //   allocated contiguously after `dst`
-            Some(dst) if is_at_top(m, dst) => {
-                // Yes; allocate registers for args right above `dst`, if there are any.
-                let args = fresh_reg_range(m, span, nargs)?;
-                (dst, args)
-            }
-            _ => {
-                // No; allocate our own `dst` and args contiguously
-                let dst = fresh_reg(m, span)?;
-                let args = fresh_reg_range(m, span, nargs)?;
-                (dst, args)
-            }
-        };
-        if nargs != arity {
-            return error(
-                format!("invalid number of arguments, expected {arity} but got {nargs}"),
-                span,
-            )
-            .into();
-        }
-
-        for ((reg, value), &span) in args.into_iter().zip(call.args()).zip(call.args_spans()) {
-            let value = eval_expr_reuse(m, value, span, reg)?;
-            value_force_reg(m, value, reg)?;
-        }
+        let (dst, args) = prepare_fast_call(m, call, dst, span, arity)?;
 
         m.emit(asm::fastcall(dst, id), span);
+
+        free_reg_range(m, args);
+
+        dst
+    } else if let ast::ExprKind::GetVar(node) = call.callee().kind()
+        && let Some(Symbol::HostFunction { arity, id, .. }) = m.resolve(node.name().get())?
+    {
+        let (dst, args) = prepare_fast_call(m, call, dst, span, arity)?;
+
+        m.emit(asm::hostcall(dst, id), span);
 
         free_reg_range(m, args);
 
@@ -3207,6 +3230,7 @@ fn is_basic_block_exit(prev: Insn, insn: Insn) -> bool {
         | Opcode::Lstr
         | Opcode::Lclosure
         | Opcode::Lfunc
+        | Opcode::Lhost
         | Opcode::Llist
         | Opcode::Ltable
         | Opcode::Istrue
@@ -3246,7 +3270,8 @@ fn is_basic_block_exit(prev: Insn, insn: Insn) -> bool {
         | Opcode::Unm
         | Opcode::Not
         | Opcode::Call
-        | Opcode::Fastcall => false,
+        | Opcode::Fastcall
+        | Opcode::Hostcall => false,
     }
 }
 
@@ -3292,6 +3317,7 @@ fn is_jump_condition(insn: Insn) -> bool {
         | Opcode::Lstr
         | Opcode::Lclosure
         | Opcode::Lfunc
+        | Opcode::Lhost
         | Opcode::Llist
         | Opcode::Ltable
         | Opcode::Jmp
@@ -3317,6 +3343,7 @@ fn is_jump_condition(insn: Insn) -> bool {
         | Opcode::Not
         | Opcode::Call
         | Opcode::Fastcall
+        | Opcode::Hostcall
         | Opcode::Ret
         | Opcode::Retv
         | Opcode::Stop => false,

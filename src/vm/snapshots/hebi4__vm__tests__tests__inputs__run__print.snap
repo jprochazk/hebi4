@@ -1,0 +1,12 @@
+---
+source: src/vm/tests.rs
+expression: snapshot
+---
+SOURCE
+print("hello, world!")
+
+OK
+Nil
+
+STDOUT
+"hello, world!"

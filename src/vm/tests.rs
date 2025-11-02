@@ -1,9 +1,9 @@
-use std::{fs::read_to_string, path::Path};
+use std::{fmt::Write as _, fs::read_to_string, path::Path};
 
 use super::Hebi;
-use crate::Module;
+use crate::vm::{self, Runtime, Stdio};
 
-fn module(input: &str) -> Module {
+fn module(input: &str) -> crate::Module {
     let tokens = crate::token::tokenize(&input);
     let ast = match crate::parser::parse(&tokens) {
         Ok(ast) => ast,
@@ -19,62 +19,104 @@ fn module(input: &str) -> Module {
     module
 }
 
+fn take_stdio(r: &mut Runtime<'_>) -> (String, String) {
+    let stdout = r
+        .stdio()
+        .stdout
+        .as_any_mut()
+        .downcast_mut::<Vec<u8>>()
+        .unwrap();
+    let stdout_s = String::from_utf8(stdout.clone()).unwrap();
+    stdout.clear();
+    let stderr = r
+        .stdio()
+        .stderr
+        .as_any_mut()
+        .downcast_mut::<Vec<u8>>()
+        .unwrap();
+    let stderr_s = String::from_utf8(stderr.clone()).unwrap();
+    stderr.clear();
+
+    (stdout_s, stderr_s)
+}
+
+fn snapshot<'vm>(
+    input: &str,
+    module: &crate::Module,
+    r: &mut Runtime<'vm>,
+    loaded_module: &vm::Module<'vm>,
+) -> (String, bool) {
+    match r.run(&loaded_module) {
+        Ok(value) => {
+            let (stdout, stderr) = take_stdio(r);
+            let mut snapshot = format!("SOURCE\n{input}\n\nOK\n{:?}", unsafe { value.as_ref() });
+            if !stdout.is_empty() {
+                snapshot.write_str("\n\nSTDOUT\n").unwrap();
+                snapshot.write_str(&stdout).unwrap();
+            }
+            if !stderr.is_empty() {
+                snapshot.write_str("\n\nSTDERR\n").unwrap();
+                snapshot.write_str(&stderr).unwrap();
+            }
+
+            (snapshot, false)
+        }
+
+        Err(err) => {
+            let (stdout, stderr) = take_stdio(r);
+            let mut snapshot = format!(
+                "SOURCE\n{input}\n\nERROR\n{}\n\nDISASM:\n\n{}",
+                err.render(input),
+                module.disasm(input)
+            );
+            if !stdout.is_empty() {
+                snapshot.write_str("\n\nSTDOUT\n").unwrap();
+                snapshot.write_str(&stdout).unwrap();
+            }
+            if !stderr.is_empty() {
+                snapshot.write_str("\n\nSTDERR\n").unwrap();
+                snapshot.write_str(&stderr).unwrap();
+            }
+
+            (snapshot, true)
+        }
+    }
+}
+
 #[glob_test::glob("../../tests/inputs/run/*.hi")]
 fn run(path: &Path) {
     let input = read_to_string(path).unwrap();
     let input = input.trim();
     let module = module(input);
 
-    let mut vm = Hebi::new();
+    let mut vm = Hebi::new().with_stdio(Stdio {
+        stdout: Box::new(Vec::new()),
+        stderr: Box::new(Vec::new()),
+    });
     vm.with(|mut r| {
         let loaded_module = r.load(&module);
 
         // run each code snippet twice using the same VM,
         // ensuring it has the same result.
-        let (snapshot, failure) = match r.run(&loaded_module) {
-            Ok(value) => (
-                format!("SOURCE\n{input}\n\nOK\n{:?}", unsafe { value.as_ref() }),
-                false,
-            ),
-            Err(err) => (
-                format!(
-                    "SOURCE\n{input}\n\nERROR\n{}\n\nDISASM:\n\n{}",
-                    err.render(input),
-                    module.disasm(input)
-                ),
-                true,
-            ),
-        };
+        let (snapshot1, failure1) = snapshot(input, &module, &mut r, &loaded_module);
+        let (snapshot2, failure2) = snapshot(input, &module, &mut r, &loaded_module);
 
-        let (snapshot2, failure2) = match r.run(&loaded_module) {
-            Ok(value) => (
-                format!("SOURCE\n{input}\n\nOK\n{:?}", unsafe { value.as_ref() }),
-                false,
-            ),
-            Err(err) => (
-                format!(
-                    "SOURCE\n{input}\n\nERROR\n{}\n\nDISASM:\n\n{}",
-                    err.render(input),
-                    module.disasm(input)
-                ),
-                true,
-            ),
-        };
-
-        assert_eq!(snapshot, snapshot2);
-        assert_eq!(failure, failure2);
+        assert_eq!(snapshot1, snapshot2);
+        assert_eq!(failure1, failure2);
 
         #[cfg(not(miri))]
         {
+            let snapshot = snapshot1;
             insta::assert_snapshot!(snapshot);
         }
 
         #[cfg(miri)]
         {
+            let failure = failure1;
             if failure {
-                panic!("{snapshot}");
+                panic!("{snapshot1}");
             } else {
-                eprintln!("{snapshot}");
+                eprintln!("{snapshot1}");
             }
         }
     });

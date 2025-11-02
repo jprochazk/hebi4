@@ -322,6 +322,9 @@ enum OperandType {
     /// 16-bit function ID
     FnId,
 
+    /// 16-bit host function ID
+    HostId,
+
     /// 8-bit value
     Imm8,
 
@@ -347,6 +350,7 @@ impl OperandType {
             OperandType::Lit => 16,
             OperandType::Lit8 => 8,
             OperandType::FnId => 16,
+            OperandType::HostId => 16,
             OperandType::Imm8 => 8,
             OperandType::Imm16 => 16,
             OperandType::Imm16s => 16,
@@ -363,6 +367,7 @@ impl OperandType {
             OperandType::Lit => "Lit",
             OperandType::Lit8 => "Lit8",
             OperandType::FnId => "FnId",
+            OperandType::HostId => "HostId",
             OperandType::Imm8 => "Imm8",
             OperandType::Imm16 => "Imm16",
             OperandType::Imm16s => "Imm16s",
@@ -379,6 +384,7 @@ impl OperandType {
             OperandType::Lit => "u16",
             OperandType::Lit8 => "u8",
             OperandType::FnId => "u16",
+            OperandType::HostId => "u16",
             OperandType::Imm8 => "u8",
             OperandType::Imm16 => "u16",
             OperandType::Imm16s => "i16",
@@ -395,6 +401,7 @@ impl OperandType {
             | OperandType::Lit
             | OperandType::Lit8
             | OperandType::FnId
+            | OperandType::HostId
             | OperandType::Imm8
             | OperandType::Imm16
             | OperandType::Imm24 => false,
@@ -486,6 +493,7 @@ fn parse_instruction(s: &'_ str, opcode: u8, docs: String) -> Instruction<'_> {
             "lit" => OperandType::Lit,
             "lit8" => OperandType::Lit8,
             "fnid" => OperandType::FnId,
+            "hostid" => OperandType::HostId,
             "imm8" => OperandType::Imm8,
             "imm16" => OperandType::Imm16,
             "imm16s" => OperandType::Imm16s,
