@@ -30,6 +30,9 @@ jobs:
         with:
           targets: wasm32-unknown-unknown
 
+      - name: Cache
+        uses: Swatinem/rust-cache@2.8.1
+
       - name: Install wasm-pack
         run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
 
