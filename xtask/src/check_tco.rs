@@ -5,34 +5,36 @@ use super::*;
 const JUMP_TABLE_PREFIX: &str = "hebi4::vm::JT::";
 
 pub fn check_tco() {
-    cargo("build")
-        .with_args(["--release", "--package=hebi4-cli", "--bin=hebi4"])
-        .run();
-    let o = cmd(
-        "objdump -C --no-addresses --no-show-raw-insn -j .text -M intel -d target/release/hebi4",
-    )
-    .output_utf8();
+    let o = {
+        let c = cargo("build").with_args(["--release", "--package=hebi4-cli", "--bin=hebi4"]);
+        println!("> {c:?}");
+        c.run();
+
+        let c = cmd(
+            "objdump -C --no-addresses --no-show-raw-insn -j .text -M intel -d target/release/hebi4",
+        );
+        println!("> {c:?}");
+
+        c.output_utf8()
+    };
 
     // find all jump table entries, and check if TCO kicked in
+    println!("Parsing sections");
     let mut jt = BTreeSet::new();
     let mut missing_tco = Vec::new();
     for section in parse_sections(&o, JUMP_TABLE_PREFIX) {
         jt.insert(section.name.strip_prefix(JUMP_TABLE_PREFIX).unwrap());
 
         if !has_jump_to_reg(&section) {
+            // this one is allowed to have no tail-call jump
+            if section.name.ends_with("::stop") {
+                continue;
+            }
             missing_tco.push(section.name.to_string());
         }
     }
 
     let mut failed = false;
-
-    if !missing_tco.is_empty() {
-        eprintln!("Instructions without tail-call jump to next handler:");
-        for n in &missing_tco {
-            eprintln!("  {n:?}");
-        }
-        failed = true;
-    }
 
     // every opcode must have a corresponding JT entry
     let opcodes_s =
@@ -50,10 +52,25 @@ pub fn check_tco() {
             eprintln!("  {m:?}");
         }
         failed = true;
+    } else {
+        println!("All instructions have a jump table entry");
+    }
+
+    if !missing_tco.is_empty() {
+        println!("Instructions without tail-call jump to next handler:");
+        for n in &missing_tco {
+            println!("  {n:?}");
+        }
+        failed = true;
+    } else {
+        println!("All instructions are tail-call optimized");
     }
 
     if failed {
+        println!("Some checks failed");
         std::process::exit(1);
+    } else {
+        println!("All checks passed");
     }
 }
 

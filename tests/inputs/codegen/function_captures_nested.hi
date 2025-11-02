@@ -1,0 +1,10 @@
+fn a() {
+  let v = 0
+
+  let b = fn() {
+    let c = fn() {
+      v
+    }
+  }
+}
+

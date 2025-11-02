@@ -18,18 +18,18 @@ OK
   params 0
   stack 2
   .code
-  0  lfunc r1, fn2
+  0  lfunc r1, fn2   ; fn2=b
   1  call r0, fn1   ; fn1=a
   2  ret
 
 .fn a
   params 1
-  stack 2
+  stack 3
   .locals
     f = r1
   .code
-  0  call r1, 0   ; dyn
-  1  retv r1
+  0  call r2, r1, 0   ; dyn
+  1  retv r2
 
 .fn b
   params 0

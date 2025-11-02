@@ -14,16 +14,17 @@ a = f()
 OK
 .fn @main
   params 0
-  stack 3
+  stack 4
   .locals
     a = r1
     b = r2
   .code
   0  lsmi r1, 0
   1  lsmi r2, 1
-  2  call r1, fn1   ; fn1=f
-  3  lnil r0
-  4  ret
+  2  call r3, fn1   ; fn1=f
+  3  mov r1, r3
+  4  lnil r0
+  5  ret
 
 .fn f
   params 0

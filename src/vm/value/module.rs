@@ -6,9 +6,9 @@ use crate::{
     codegen::opcodes::{FnId, Insn, Reg, asm},
     gc::GcUninitRoot,
     module::{FuncInfo, Literal, Module},
-    value::string,
+    value::{closure::ClosureProto, string},
     vm::{
-        gc::{GcPtr, GcRef, GcRefMut, GcRoot, Heap, Trace, let_root, let_root_unchecked},
+        gc::{GcPtr, GcRef, GcRefMut, GcRoot, Heap, Trace, let_root},
         value::String,
     },
 };
@@ -178,14 +178,22 @@ fn canonicalize<'a>(
         )
     };
 
-    let entrypoint = generate_entrypoint(heap, info.name(), &module);
-    module.as_mut(heap).entrypoint = Some(entrypoint);
+    let_root!(in heap; entrypoint);
+    let entrypoint = generate_entrypoint(heap, entrypoint, info.name(), &module);
+    module.as_mut(heap).entrypoint = Some(entrypoint.as_ptr());
 
     let mut functions = Vec::new();
     functions.reserve_exact(info.functions().len());
-    for function in info.functions() {
-        let function = canonicalize_function(heap, function, &module);
-        functions.push(function);
+    for info in info.functions() {
+        let_root!(in heap; function);
+        let function = canonicalize_function(heap, function, info, &module);
+        functions.push(function.as_ptr());
+    }
+    for i in 0..functions.len() {
+        let literals = canonicalize_literals(heap, &functions, info.functions()[i].literals());
+        unsafe {
+            functions[i].as_mut().literals = literals;
+        }
     }
     let functions = functions.into_boxed_slice();
 
@@ -194,35 +202,43 @@ fn canonicalize<'a>(
     module
 }
 
-fn canonicalize_function(
+fn canonicalize_function<'a>(
     heap: &mut Heap,
+    root: GcUninitRoot<'a>,
     function: &FuncInfo,
-    module: &GcRoot<'_, ModuleProto>,
-) -> GcPtr<FunctionProto> {
+    module: &GcRoot<'a, ModuleProto>,
+) -> GcRoot<'a, FunctionProto> {
     string!(in heap; name = function.name());
 
     let name = name.as_ptr();
     let code = function.code().into();
-    let literals = canonicalize_literals(heap, function.literals());
+    let literals = Box::new([]);
     let module = module.as_ptr();
     let dbg = function.dbg().cloned();
 
-    let_root_unchecked!(unsafe in heap; function = heap.alloc_no_gc(|ptr| unsafe {
-        (*ptr).write(FunctionProto {
-            name,
-            nparams: 0,
-            nstack: 1,
-            code,
-            literals,
-            module,
-            dbg,
-        });
-    }));
-
-    function.as_ptr()
+    unsafe {
+        root.init_raw(
+            heap,
+            heap.alloc_no_gc(|ptr| {
+                (*ptr).write(FunctionProto {
+                    name,
+                    nparams: 0,
+                    nstack: 1,
+                    code,
+                    literals,
+                    module,
+                    dbg,
+                });
+            }),
+        )
+    }
 }
 
-fn canonicalize_literals(heap: &mut Heap, literals: &[Literal]) -> Box<[ValueRaw]> {
+fn canonicalize_literals(
+    heap: &mut Heap,
+    functions: &[GcPtr<FunctionProto>],
+    literals: &[Literal],
+) -> Box<[ValueRaw]> {
     let mut out = Vec::new();
     out.reserve_exact(literals.len());
     for literal in literals {
@@ -232,29 +248,37 @@ fn canonicalize_literals(heap: &mut Heap, literals: &[Literal]) -> Box<[ValueRaw
             Literal::Int(v) => ValueRaw::Int(*v),
             Literal::Float(v) => ValueRaw::Float(*v),
             Literal::String(v) => ValueRaw::Object(String::alloc(heap, v.as_str()).as_any()),
+            Literal::ClosureInfo(v) => ValueRaw::Object(
+                ClosureProto::alloc(heap, functions[v.func.zx()], &v.capture_info).as_any(),
+            ),
         };
         out.push(value);
     }
     out.into_boxed_slice()
 }
 
-fn generate_entrypoint(
-    heap: &Heap,
+fn generate_entrypoint<'a>(
+    heap: &mut Heap,
+    root: GcUninitRoot<'a>,
     name: &str,
-    module: &GcRoot<'_, ModuleProto>,
-) -> GcPtr<FunctionProto> {
+    module: &GcRoot<'a, ModuleProto>,
+) -> GcRoot<'a, FunctionProto> {
     string!(in heap; name = &format!("{name}#start"));
-    let_root_unchecked!(unsafe in heap; f = heap.alloc_no_gc(|ptr| unsafe {
-        (*ptr).write(FunctionProto {
-            name: name.as_ptr(),
-            nparams: 0,
-            nstack: 1,
-            code: Box::new(ENTRYPOINT),
-            literals: Box::new([]),
-            module: module.as_ptr(),
-            dbg: None,
-        });
-    }));
 
-    f.as_ptr()
+    unsafe {
+        root.init_raw(
+            heap,
+            heap.alloc_no_gc(|ptr| {
+                (*ptr).write(FunctionProto {
+                    name: name.as_ptr(),
+                    nparams: 0,
+                    nstack: 1,
+                    code: Box::new(ENTRYPOINT),
+                    literals: Box::new([]),
+                    module: module.as_ptr(),
+                    dbg: None,
+                });
+            }),
+        )
+    }
 }

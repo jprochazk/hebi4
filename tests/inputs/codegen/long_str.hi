@@ -1,0 +1,7 @@
+"
+This string contains many characters.
+
+At least this many should be enough to hit
+the \"long string\" threshold, at which point
+the full string will not be printed in disassembly.
+"

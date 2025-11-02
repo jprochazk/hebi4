@@ -5,16 +5,18 @@ expression: snapshot
 SOURCE
 let v = 0
 
-v()()
+v(0)(0)
 
 OK
 .fn @main
   params 0
-  stack 3
+  stack 6
   .locals
     v = r1
   .code
   0  lsmi r1, 0
-  1  call r2, r1, 0   ; dyn
-  2  call r2, r2, 0   ; dyn
-  3  retv r2
+  1  lsmi r5, 0
+  2  call r4, r1, 1   ; dyn
+  3  lsmi r3, 0
+  4  call r2, r4, 1   ; dyn
+  5  retv r2

@@ -1,28 +1,13 @@
 // use crate::{error::Location, span::Span};
 
 use crate::{
-    codegen::opcodes::{FnId, Insn},
-    gc::ValueRef,
-    module::Local,
-    vm::{
-        gc::GcRef,
-        value::{FunctionProto, ModuleProto},
-    },
+    codegen::opcodes::FnId,
+    module::{Capture, Local},
 };
 
-pub trait DisasmModule {
-    type Func: DisasmFunc;
+struct DisasmModuleWithSrc<'a>(&'a crate::module::Module, &'a str);
 
-    fn functions(&self) -> impl Iterator<Item = Self::Func> + '_;
-    fn function_at(&self, id: FnId) -> Self::Func;
-}
-
-struct DisasmModuleWithSrc<'a, Mod: DisasmModule>(Mod, &'a str);
-
-impl<'a, Mod: Copy + DisasmModule> std::fmt::Display for DisasmModuleWithSrc<'a, Mod>
-where
-    Mod::Func: Copy + DisasmFunc,
-{
+impl<'a> std::fmt::Display for DisasmModuleWithSrc<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let DisasmModuleWithSrc(module, src) = self;
 
@@ -33,59 +18,13 @@ where
     }
 }
 
-pub trait DisasmFunc {
-    fn name(&self) -> impl std::fmt::Display + '_;
-    fn arity(&self) -> usize;
-    fn stack_size(&self) -> usize;
-    fn code(&self) -> &[Insn];
+struct DisasmFuncWithSrc<'a>(
+    &'a crate::module::Module,
+    &'a crate::module::FuncInfo,
+    &'a str,
+);
 
-    fn has_debug_info(&self) -> bool;
-    fn num_locals(&self) -> usize;
-    fn local_at(&self, i: usize) -> Local;
-
-    fn literal(&self, at: usize) -> impl std::fmt::Display + '_;
-}
-
-impl<'a, T: DisasmFunc> DisasmFunc for &'a T {
-    fn name(&self) -> impl std::fmt::Display + '_ {
-        T::name(self)
-    }
-
-    fn arity(&self) -> usize {
-        T::arity(self)
-    }
-
-    fn stack_size(&self) -> usize {
-        T::stack_size(self)
-    }
-
-    fn code(&self) -> &[Insn] {
-        T::code(self)
-    }
-
-    fn has_debug_info(&self) -> bool {
-        T::has_debug_info(self)
-    }
-
-    fn num_locals(&self) -> usize {
-        T::num_locals(self)
-    }
-
-    fn local_at(&self, i: usize) -> Local {
-        T::local_at(self, i)
-    }
-
-    fn literal(&self, at: usize) -> impl std::fmt::Display + '_ {
-        T::literal(self, at)
-    }
-}
-
-struct DisasmFuncWithSrc<'a, Mod: DisasmModule>(Mod, Mod::Func, &'a str);
-
-impl<'a, Mod: Copy + DisasmModule> std::fmt::Display for DisasmFuncWithSrc<'a, Mod>
-where
-    Mod::Func: Copy + DisasmFunc,
-{
+impl<'a> std::fmt::Display for DisasmFuncWithSrc<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let DisasmFuncWithSrc(module, func, src) = self;
 
@@ -99,6 +38,15 @@ where
                     let Local { span, reg } = func.local_at(i);
                     let name = &src[span];
                     writeln!(f, "    {name} = {reg}")?;
+                }
+            }
+
+            if func.num_captures() > 0 {
+                writeln!(f, "  .captures")?;
+                for i in 0..func.num_captures() {
+                    let Capture { span, info } = func.capture_at(i);
+                    let name = &src[span];
+                    writeln!(f, "    {name} = {info}")?;
                 }
             }
         }
@@ -154,11 +102,23 @@ where
                 I::Lsmi { dst, v } => writeln!(f, "lsmi {dst}, {v}")?,
                 I::Ltrue { dst } => writeln!(f, "ltrue {dst}")?,
                 I::Lfalse { dst } => writeln!(f, "lfalse {dst}")?,
-                I::Lint { dst, id } => writeln!(f, "lint {dst}, {v}", v = func.literal(id.zx()),)?,
-                I::Lnum { dst, id } => writeln!(f, "lnum {dst}, {v}", v = func.literal(id.zx()),)?,
-                I::Lstr { dst, id } => writeln!(f, "lstr {dst}, {v}", v = func.literal(id.zx()),)?,
-                I::Lclosure { dst, id } => writeln!(f, "lclosure {dst}, {id}")?,
-                I::Lfunc { dst, id } => writeln!(f, "lfunc {dst}, {id}")?,
+                I::Lint { dst, id } => writeln!(f, "lint {dst}, {v}", v = func.literal(id.zx()))?,
+                I::Lnum { dst, id } => writeln!(f, "lnum {dst}, {v}", v = func.literal(id.zx()))?,
+                I::Lstr { dst, id } => writeln!(f, "lstr {dst}, {v}", v = func.literal(id.zx()))?,
+                I::Lclosure { dst, id } => {
+                    let closure = func.literal(id.zx()).closure().unwrap();
+                    writeln!(
+                        f,
+                        "lclosure {dst}, {id}   ; {name}, captures={n}",
+                        name = module.function_at(closure.func).name(),
+                        n = closure.capture_info.len(),
+                    )?
+                }
+                I::Lfunc { dst, id } => writeln!(
+                    f,
+                    "lfunc {dst}, {id}   ; {id}={name}",
+                    name = module.function_at(id).name()
+                )?,
                 I::Llist { dst, cap } => writeln!(f, "llist {dst}, {cap}")?,
                 I::Ltable { dst, cap } => writeln!(f, "ltable {dst}, {cap}")?,
                 I::Jmp { rel } => writeln!(f, "jmp {rel}   ; to {}", (i as isize) + rel.sz())?,
@@ -226,7 +186,9 @@ where
                 }
                 I::Unm { dst, rhs } => writeln!(f, "unm {dst}, {rhs}")?,
                 I::Not { dst, rhs } => writeln!(f, "not {dst}, {rhs}")?,
-                I::Call { dst, args } => writeln!(f, "call {dst}, {args}   ; dyn")?,
+                I::Call { dst, callee, args } => {
+                    writeln!(f, "call {dst}, {callee}, {args}   ; dyn")?
+                }
                 I::Fastcall { dst, id } => writeln!(
                     f,
                     "call {dst}, {id}   ; {id}={name}",
@@ -250,40 +212,18 @@ fn num_digits(v: usize) -> usize {
 }
 
 impl crate::module::Module {
-    pub fn disasm(&self, src: &str) -> impl std::fmt::Display {
+    pub fn disasm<'a>(&'a self, src: &'a str) -> impl std::fmt::Display + 'a {
         DisasmModuleWithSrc(self, src)
     }
 }
 
-impl<'a> DisasmModule for &'a crate::module::Module {
-    type Func = &'a crate::module::FuncInfo;
-
-    fn functions(&self) -> impl Iterator<Item = Self::Func> + '_ {
-        crate::module::Module::functions(self).iter()
-    }
-
-    fn function_at(&self, id: FnId) -> Self::Func {
+impl crate::module::Module {
+    fn function_at(&self, id: FnId) -> &crate::module::FuncInfo {
         crate::module::Module::functions(self).get(id.zx()).unwrap()
     }
 }
 
-impl DisasmFunc for crate::module::FuncInfo {
-    fn name(&self) -> impl std::fmt::Display + '_ {
-        self.name()
-    }
-
-    fn arity(&self) -> usize {
-        self.arity() as usize
-    }
-
-    fn stack_size(&self) -> usize {
-        self.stack_size() as usize
-    }
-
-    fn code(&self) -> &[Insn] {
-        self.code()
-    }
-
+impl crate::module::FuncInfo {
     fn has_debug_info(&self) -> bool {
         self.dbg().is_some()
     }
@@ -296,73 +236,22 @@ impl DisasmFunc for crate::module::FuncInfo {
         self.dbg().map(|dbg| dbg.locals[i]).unwrap()
     }
 
-    fn literal(&self, at: usize) -> impl std::fmt::Display + '_ {
+    fn num_captures(&self) -> usize {
+        self.dbg().map(|dbg| dbg.captures.len()).unwrap_or_default()
+    }
+
+    fn capture_at(&self, i: usize) -> Capture {
+        self.dbg().map(|dbg| dbg.captures[i]).unwrap()
+    }
+
+    fn closure_fn_id_at(&self, i: usize) -> FnId {
+        let crate::module::Literal::ClosureInfo(info) = &self.literals()[i] else {
+            unreachable!();
+        };
+        info.func
+    }
+
+    fn literal(&self, at: usize) -> &crate::module::Literal {
         &self.literals()[at]
-    }
-}
-
-impl<'a> GcRef<'a, ModuleProto> {
-    pub fn disasm(&self, src: &str) -> impl std::fmt::Display {
-        DisasmModuleWithSrc(*self, src)
-    }
-}
-
-impl<'a> DisasmModule for GcRef<'a, ModuleProto> {
-    type Func = GcRef<'a, FunctionProto>;
-
-    fn functions(&self) -> impl Iterator<Item = Self::Func> + '_ {
-        self.functions()
-    }
-
-    fn function_at(&self, id: FnId) -> Self::Func {
-        self.get_function(id).unwrap()
-    }
-}
-
-impl<'a> DisasmFunc for GcRef<'a, FunctionProto> {
-    fn name(&self) -> impl std::fmt::Display + '_ {
-        self.name()
-    }
-
-    fn arity(&self) -> usize {
-        self.arity()
-    }
-
-    fn stack_size(&self) -> usize {
-        self.stack_size()
-    }
-
-    fn has_debug_info(&self) -> bool {
-        self.dbg().is_some()
-    }
-
-    fn num_locals(&self) -> usize {
-        self.dbg().map(|dbg| dbg.locals.len()).unwrap_or_default()
-    }
-
-    fn local_at(&self, i: usize) -> Local {
-        self.dbg().map(|dbg| dbg.locals[i]).unwrap()
-    }
-
-    fn code(&self) -> &[Insn] {
-        &self.code
-    }
-
-    fn literal(&self, at: usize) -> impl std::fmt::Display + '_ {
-        DisplayValueRef(GcRef::map_value(self, |this| &this.literals()[at]))
-    }
-}
-
-struct DisplayValueRef<'a>(ValueRef<'a>);
-
-impl std::fmt::Display for DisplayValueRef<'_> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self.0 {
-            ValueRef::Nil => write!(f, "nil"),
-            ValueRef::Bool(v) => write!(f, "{v}"),
-            ValueRef::Int(v) => write!(f, "{v}"),
-            ValueRef::Float(v) => write!(f, "{v}"),
-            ValueRef::Object(v) => write!(f, "{}", v.type_name()),
-        }
     }
 }

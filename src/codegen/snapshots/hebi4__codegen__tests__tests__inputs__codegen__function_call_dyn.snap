@@ -18,9 +18,9 @@ OK
 
 .fn f
   params 1
-  stack 2
+  stack 3
   .locals
     c = r1
   .code
-  0  call r1, 0   ; dyn
-  1  retv r1
+  0  call r2, r1, 0   ; dyn
+  1  retv r2

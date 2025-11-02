@@ -1,0 +1,46 @@
+---
+source: src/codegen/tests.rs
+expression: snapshot
+---
+SOURCE
+fn f() {
+  let a = 10 // r1
+}
+
+let a = 0 // r1
+let v = 0 // r2
+let b = 0 // r3
+
+v = f() // dst is not at top, nargs = 0
+
+b
+
+// f0: [ r0, r1, r2, r3 ]
+// f1:         [ r0, r1 ]
+//
+
+OK
+.fn @main
+  params 0
+  stack 5
+  .locals
+    a = r1
+    v = r2
+    b = r3
+  .code
+  0  lsmi r1, 0
+  1  lsmi r2, 0
+  2  lsmi r3, 0
+  3  call r4, fn1   ; fn1=f
+  4  mov r2, r4
+  5  retv r3
+
+.fn f
+  params 0
+  stack 2
+  .locals
+    a = r1
+  .code
+  0  lsmi r1, 10
+  1  lnil r0
+  2  ret

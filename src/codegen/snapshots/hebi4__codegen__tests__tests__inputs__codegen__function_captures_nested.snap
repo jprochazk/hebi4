@@ -1,0 +1,55 @@
+---
+source: src/codegen/tests.rs
+expression: snapshot
+---
+SOURCE
+fn a() {
+  let v = 0
+
+  let b = fn() {
+    let c = fn() {
+      v
+    }
+  }
+}
+
+OK
+.fn @main
+  params 0
+  stack 1
+  .code
+  0  lnil r0
+  1  ret
+
+.fn a
+  params 0
+  stack 3
+  .locals
+    v = r1
+    b = r2
+  .code
+  0  lsmi r1, 0
+  1  lclosure r2, l0   ; closure{@37..75}, captures=1
+  2  lnil r0
+  3  ret
+
+.fn closure{@37..75}
+  params 0
+  stack 2
+  .locals
+    c = r1
+  .captures
+    v = r1
+  .code
+  0  lclosure r1, l0   ; closure{@56..71}, captures=1
+  1  lnil r0
+  2  ret
+
+.fn closure{@56..71}
+  params 0
+  stack 1
+  .captures
+    v = c0
+  .code
+  0  lcap r0, c0
+  1  ret

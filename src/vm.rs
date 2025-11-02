@@ -60,7 +60,10 @@ use crate::{
     error::{Error, Result, error},
     module,
     span::Span,
-    value::Closure,
+    value::{
+        Closure,
+        closure::{CaptureInfo, ClosureProto},
+    },
     vm::value::{FunctionProto, ValueRaw, module::ModuleRegistry},
 };
 
@@ -143,6 +146,14 @@ impl Lp {
         debug_assert!(matches!(&*v, ValueRaw::Object(gc) if gc.is::<String>()));
         v.cast::<u64>().add(1).cast::<GcPtr<String>>().read()
     }
+
+    #[inline(always)]
+    pub unsafe fn closure_unchecked(self, r: impl LpIdx) -> GcPtr<ClosureProto> {
+        let v = self._at(r.idx());
+
+        debug_assert!(matches!(&*v, ValueRaw::Object(gc) if gc.is::<ClosureProto>()));
+        v.cast::<u64>().add(1).cast::<GcPtr<ClosureProto>>().read()
+    }
 }
 
 impl Jt {
@@ -179,6 +190,17 @@ impl Ip {
     #[inline(always)]
     unsafe fn get(self) -> Insn {
         self.0.read()
+    }
+}
+
+#[derive(Clone, Copy)]
+#[repr(transparent)]
+struct Captures(NonNull<ValueRaw>);
+
+impl Captures {
+    #[inline(always)]
+    pub unsafe fn at(self, idx: Cap) -> *mut ValueRaw {
+        self.0.offset(idx.sz()).as_ptr()
     }
 }
 
@@ -272,14 +294,38 @@ impl Vm {
     }
 
     #[inline]
+    unsafe fn var_in_current_module(self, idx: Mvar) -> *mut ValueRaw {
+        self.current_module()
+            .as_mut()
+            .module_vars
+            .as_mut_ptr()
+            .offset(idx.sz())
+    }
+
+    #[inline]
     unsafe fn current_module(self) -> GcPtr<ModuleProto> {
-        (*self.0.as_ptr()).current_module.unwrap_unchecked()
+        let module = (*self.0.as_ptr()).current_module;
+        debug_assert!(module.is_some());
+        module.unwrap_unchecked()
     }
 
     #[inline]
     unsafe fn set_current_module_for(self, f: GcPtr<FunctionProto>) {
         let module = f.as_ref().module().as_ptr();
         (*self.0.as_ptr()).current_module = Some(module);
+    }
+
+    #[inline]
+    unsafe fn current_captures(self) -> Captures {
+        let captures = (*self.0.as_ptr()).current_captures;
+        debug_assert!(captures.is_some());
+        captures.unwrap_unchecked()
+    }
+
+    #[inline]
+    unsafe fn set_current_captures_for(self, f: GcPtr<Closure>) {
+        let captures = NonNull::new_unchecked(f.as_mut().captures.as_mut_ptr());
+        (*self.0.as_ptr()).current_captures = Some(Captures(captures));
     }
 
     #[inline]
@@ -578,22 +624,30 @@ unsafe fn mov(vm: Vm, jt: Jt, ip: Ip, args: Mov, sp: Sp, lp: Lp) -> Control {
 
 #[inline(always)]
 unsafe fn lmvar(vm: Vm, jt: Jt, ip: Ip, args: Lmvar, sp: Sp, lp: Lp) -> Control {
-    todo!()
+    *sp.at(args.dst()) = *vm.var_in_current_module(args.src());
+
+    dispatch_next(vm, jt, ip, sp, lp)
 }
 
 #[inline(always)]
 unsafe fn smvar(vm: Vm, jt: Jt, ip: Ip, args: Smvar, sp: Sp, lp: Lp) -> Control {
-    todo!()
+    *vm.var_in_current_module(args.dst()) = *sp.at(args.src());
+
+    dispatch_next(vm, jt, ip, sp, lp)
 }
 
 #[inline(always)]
 unsafe fn lcap(vm: Vm, jt: Jt, ip: Ip, args: Lcap, sp: Sp, lp: Lp) -> Control {
-    todo!()
+    *sp.at(args.dst()) = *vm.current_captures().at(args.src());
+
+    dispatch_next(vm, jt, ip, sp, lp)
 }
 
 #[inline(always)]
 unsafe fn scap(vm: Vm, jt: Jt, ip: Ip, args: Scap, sp: Sp, lp: Lp) -> Control {
-    todo!()
+    *vm.current_captures().at(args.dst()) = *sp.at(args.src());
+
+    dispatch_next(vm, jt, ip, sp, lp)
 }
 
 #[inline(always)]
@@ -878,7 +932,30 @@ unsafe fn lfalse(vm: Vm, jt: Jt, ip: Ip, args: Lfalse, sp: Sp, lp: Lp) -> Contro
 
 #[inline(always)]
 unsafe fn lclosure(vm: Vm, jt: Jt, ip: Ip, args: Lclosure, sp: Sp, lp: Lp) -> Control {
-    todo!()
+    let dst = sp.at(args.dst());
+    let closure = lp.closure_unchecked(args.id());
+
+    let captures = init_captures(closure, vm, sp);
+    let heap = vm.heap();
+    let closure = Closure::alloc(&*heap, closure, captures);
+
+    *dst = ValueRaw::Object(closure.as_any());
+
+    dispatch_next(vm, jt, ip, sp, lp)
+}
+
+unsafe fn init_captures(closure: GcPtr<ClosureProto>, vm: Vm, sp: Sp) -> Box<[ValueRaw]> {
+    let closure = closure.as_ref();
+    let ncaptures = closure.capture_info.len();
+    let mut captures = Box::new_uninit_slice(ncaptures);
+    for i in 0..ncaptures {
+        let value = match *closure.capture_info.get_unchecked(i) {
+            CaptureInfo::Reg(reg) => *sp.at(reg),
+            CaptureInfo::Cap(cap) => *vm.current_captures().at(cap),
+        };
+        captures.get_unchecked_mut(i).write(value);
+    }
+    captures.assume_init()
 }
 
 #[inline(always)]
@@ -895,13 +972,14 @@ unsafe fn lfunc(vm: Vm, jt: Jt, ip: Ip, args: Lfunc, sp: Sp, lp: Lp) -> Control 
 unsafe fn llist(vm: Vm, jt: Jt, ip: Ip, args: Llist, sp: Sp, lp: Lp) -> Control {
     vm.maybe_gc();
 
+    let dst = sp.at(args.dst());
     let len = args.cap().zx();
 
     // UNROOTED: immediately written to the stack
     let heap = vm.heap();
     let list = List::alloc_zeroed(&*heap, len);
 
-    *sp.at(args.dst()) = ValueRaw::Object(list.as_any());
+    *dst = ValueRaw::Object(list.as_any());
 
     dispatch_next(vm, jt, ip, sp, lp)
 }
@@ -910,13 +988,14 @@ unsafe fn llist(vm: Vm, jt: Jt, ip: Ip, args: Llist, sp: Sp, lp: Lp) -> Control 
 unsafe fn ltable(vm: Vm, jt: Jt, ip: Ip, args: Ltable, sp: Sp, lp: Lp) -> Control {
     vm.maybe_gc();
 
+    let dst = sp.at(args.dst());
     let len = args.cap().zx();
 
     // UNROOTED: immediately written to the stack
     let heap = vm.heap();
     let table = Table::alloc(&*heap, len);
 
-    *sp.at(args.dst()) = ValueRaw::Object(table.as_any());
+    *dst = ValueRaw::Object(table.as_any());
 
     dispatch_next(vm, jt, ip, sp, lp)
 }
@@ -1570,7 +1649,7 @@ unsafe fn not(vm: Vm, jt: Jt, ip: Ip, args: Not, sp: Sp, lp: Lp) -> Control {
 #[inline(always)]
 unsafe fn call(vm: Vm, jt: Jt, ip: Ip, args: Call, sp: Sp, lp: Lp) -> Control {
     let ret = args.dst();
-    let callee = *sp.at(ret);
+    let callee = *sp.at(args.callee());
     let nargs = args.args().zx();
 
     if let Some(callee) = callee.into_object::<FunctionProto>() {
@@ -1582,7 +1661,13 @@ unsafe fn call(vm: Vm, jt: Jt, ip: Ip, args: Call, sp: Sp, lp: Lp) -> Control {
 
         dispatch_current(vm, jt, ip, sp, lp)
     } else if let Some(callee) = callee.into_object::<Closure>() {
-        todo!("closure call")
+        if callee.as_ref().func.as_ref().nparams as usize != nargs {
+            return arity_mismatch_error(ip, vm);
+        }
+
+        let (sp, lp, ip) = do_closure_call(callee, ret, ip, vm);
+
+        dispatch_current(vm, jt, ip, sp, lp)
     } else {
         not_callable_error(ip, vm)
     }
@@ -1629,12 +1714,15 @@ unsafe fn stop(vm: Vm, jt: Jt, ip: Ip, args: Stop, sp: Sp, lp: Lp) -> Control {
     Control::stop()
 }
 
-/// call procedure:
-/// 1. grow stack if needed
-/// 2. allocate new call frame
-/// 3. jump to start of callee
+/// Call procedure:
+/// 1. Grow stack if needed
+/// 2. Allocate new call frame
+/// 3. Update VM state
+/// 4. Jump to start of callee
 ///
-/// new call frame's stack overlaps with the current frame's stack
+/// This function does not check arity.
+///
+/// New call frame's stack overlaps with the current frame's stack
 /// example: assuming 3 args, with ret at r6:
 /// ```text,ignore
 ///   frame N:   [ 0 1 2 3 4 5 6 7 8 9 ]
@@ -1664,6 +1752,13 @@ unsafe fn do_call(callee: GcPtr<FunctionProto>, ret: Reg, ip: Ip, vm: Vm) -> (Sp
     });
 
     (sp, lp, ip)
+}
+
+#[inline(always)]
+unsafe fn do_closure_call(callee: GcPtr<Closure>, ret: Reg, ip: Ip, vm: Vm) -> (Sp, Lp, Ip) {
+    vm.set_current_captures_for(callee);
+
+    do_call(callee.as_ref().func, ret, ip, vm)
 }
 
 #[inline(always)]
@@ -1708,7 +1803,6 @@ pub struct Hebi {
     inner: Box<VmState>,
 }
 
-#[repr(align(16))]
 pub(crate) struct VmState {
     /// Garbage collected heap
     heap: gc::Heap,
@@ -1727,6 +1821,8 @@ pub(crate) struct VmState {
     ///
     /// NOTE: This is always `Some` while the VM is executing
     current_module: Option<GcPtr<ModuleProto>>,
+
+    current_captures: Option<Captures>,
 
     /// Saved error.
     ///
@@ -1754,6 +1850,8 @@ impl Hebi {
                 frames: DynStack::new(STACK_DEPTH),
 
                 current_module: None,
+                current_captures: None,
+
                 error: None,
                 saved_ip: None,
             }),

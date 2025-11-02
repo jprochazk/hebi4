@@ -1,0 +1,24 @@
+---
+source: src/codegen/tests.rs
+expression: snapshot
+---
+SOURCE
+fn a() {
+  let v = 0
+
+  let b = fn() {
+    fn c() {
+      // won't work, because a regular `fn` is in the path
+      let d = fn() {
+        v
+      }
+    }
+  }
+}
+
+ERROR
+functions can't capture variables from outer scope
+2 |    let v = 0
+  |        ^
+  |
+  > help: use a closure instead: `let f = fn() {}`

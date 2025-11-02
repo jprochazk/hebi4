@@ -85,7 +85,7 @@ lstr dst:reg id:lit;
 /*
  * Load closure function by `id` into register `dst`.
  *
- * `id` holds a ClosureInfo.
+ * `id` holds a `ClosureProto`.
  */
 lclosure dst:reg id:lit;
 
@@ -273,9 +273,9 @@ not dst:reg rhs:reg;
 
 # TODO: specialize for differing number of arguments?
 /*
- * `dst = dst(dst+1..dst+1+args)`
+ * `dst = callee(callee+1..callee+1+args)`
  */
-call dst:reg args:imm8;
+call dst:reg callee:reg args:imm8;
 
 /*
  * `dst = funcs[id](dst..dst+funcs[id].args)`

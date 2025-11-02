@@ -1,0 +1,23 @@
+---
+source: src/vm/tests.rs
+expression: snapshot
+---
+SOURCE
+fn counter() {
+  let n = 0
+
+  return (fn() {
+    let v = n
+    n += 1
+    v
+  })
+}
+
+let c = counter()
+let a = c() // 0
+let b = c() // 1
+
+if a == 0 and b == 1 { "ok" } else { "err" }
+
+OK
+"ok"

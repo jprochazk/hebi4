@@ -5,7 +5,7 @@ use beef::lean::Cow;
 use crate::{
     codegen::{
         EmitOptions, emit,
-        opcodes::{FnId, Insn, Reg},
+        opcodes::{Cap, FnId, Insn, Reg},
     },
     error::Result,
     parser::parse,
@@ -163,12 +163,40 @@ impl FuncInfo {
 pub struct FuncDebugInfo {
     pub(crate) spans: Box<[Span]>,
     pub(crate) locals: Box<[Local]>,
+    pub(crate) captures: Box<[Capture]>,
 }
 
 #[derive(Clone, Copy)]
 pub struct Local {
     pub(crate) span: Span,
     pub(crate) reg: Reg,
+}
+
+#[derive(Clone, Copy)]
+pub struct Capture {
+    pub(crate) span: Span,
+    pub(crate) info: CaptureInfo,
+}
+
+#[derive(Debug)]
+pub struct ClosureInfo {
+    pub(crate) func: FnId,
+    pub(crate) capture_info: Box<[CaptureInfo]>,
+}
+
+impl ClosureInfo {
+    pub(crate) fn new(func: FnId, capture_info: std::vec::Vec<CaptureInfo>) -> Self {
+        Self {
+            func,
+            capture_info: capture_info.into_boxed_slice(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum CaptureInfo {
+    Reg(Reg),
+    Cap(Cap),
 }
 
 #[derive(Debug)]
@@ -178,6 +206,7 @@ pub enum Literal {
     Int(i64),
     Float(f64),
     String(String),
+    ClosureInfo(ClosureInfo),
 }
 
 impl Literal {
@@ -216,6 +245,14 @@ impl Literal {
             None
         }
     }
+
+    pub fn closure(&self) -> Option<&ClosureInfo> {
+        if let Self::ClosureInfo(v) = self {
+            Some(v)
+        } else {
+            None
+        }
+    }
 }
 
 impl std::fmt::Display for Literal {
@@ -225,7 +262,25 @@ impl std::fmt::Display for Literal {
             Literal::Bool(v) => write!(f, "{v}"),
             Literal::Int(v) => write!(f, "{v}"),
             Literal::Float(v) => write!(f, "{v:?}"),
-            Literal::String(v) => write!(f, "{v:?}"),
+            Literal::String(v) => {
+                if v.len() < 50 {
+                    write!(f, "{v:?}")
+                } else {
+                    write!(f, "{:?}...", &v[0..50])
+                }
+            }
+            Literal::ClosureInfo(v) => {
+                write!(f, "{{{f}, n={n}}}", f = v.func, n = v.capture_info.len())
+            }
+        }
+    }
+}
+
+impl std::fmt::Display for CaptureInfo {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            CaptureInfo::Reg(reg) => write!(f, "{reg}"),
+            CaptureInfo::Cap(cap) => write!(f, "{cap}"),
         }
     }
 }
