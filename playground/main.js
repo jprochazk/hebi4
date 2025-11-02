@@ -312,6 +312,7 @@ function setupOptimizeCheckbox() {
   });
 }
 
+let copyTimer;
 function setupShareButton() {
   document.getElementById("share").addEventListener("click", async () => {
     const code = getCode();
@@ -323,7 +324,9 @@ function setupShareButton() {
       const btn = document.getElementById("share");
       const originalText = btn.textContent;
       btn.textContent = "Copied!";
-      setTimeout(() => {
+
+      clearTimeout(copyTimer);
+      copyTimer = setTimeout(() => {
         btn.textContent = originalText;
       }, 2000);
     } catch (err) {
