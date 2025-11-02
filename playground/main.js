@@ -16,6 +16,7 @@ import { autocompletion, completionKeymap, closeBrackets, closeBracketsKeymap } 
 import { lintKeymap } from "@codemirror/lint";
 import { examples } from "./examples.js";
 import init, { parse, disassemble, run } from "./pkg/hebi4_playground.js";
+import { encode, decode } from "./base64.js";
 
 /** @type {EditorView} */
 let editor;
@@ -33,8 +34,8 @@ async function initWasm() {
   }
 }
 
-function createEditor() {
-  const defaultCode = getCodeFromUrl() || loadCodeFromStorage() || examples.welcome.code;
+async function createEditor() {
+  const defaultCode = (await getCodeFromUrl()) || loadCodeFromStorage() || examples.welcome.code;
 
   let updateTimer;
 
@@ -315,7 +316,7 @@ function setupShareButton() {
   document.getElementById("share").addEventListener("click", async () => {
     const code = getCode();
     const url = new URL(window.location.href);
-    url.hash = `code=${btoa(encodeURIComponent(code))}`;
+    url.hash = `code=${await encode(code)}`;
 
     try {
       await navigator.clipboard.writeText(url.toString());
@@ -332,12 +333,12 @@ function setupShareButton() {
   });
 }
 
-function getCodeFromUrl() {
+async function getCodeFromUrl() {
   const hash = window.location.hash.slice(1);
   if (hash.startsWith("code=")) {
     try {
       const encoded = hash.slice(5);
-      return decodeURIComponent(atob(encoded));
+      return decode(encoded);
     } catch (err) {
       console.error("Failed to decode code from URL:", err);
       return null;
@@ -363,8 +364,10 @@ function loadCodeFromStorage() {
   }
 }
 
+
+
 async function init_playground() {
-  createEditor();
+  await createEditor();
   setupTabs();
   setupExamples();
   setupRunButton();
