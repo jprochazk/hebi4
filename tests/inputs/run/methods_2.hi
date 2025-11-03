@@ -1,0 +1,23 @@
+fn Counter() {
+  let state = {value: 0}
+
+  let inc = fn() {
+    state.value += 1
+    state.value
+  }
+
+  let dec = fn() {
+    state.value -= 1
+    state.value
+  }
+
+  state.inc = inc
+  state.dec = dec
+
+  return state
+}
+
+let c = Counter()
+print(c.value)
+print(c.inc())
+print(c.dec())

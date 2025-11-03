@@ -2003,14 +2003,30 @@ struct VmRoots {
 
 impl gc::ExternalRoots for VmRoots {
     unsafe fn trace(&self, tracer: &gc::Tracer) {
-        // note: call frame stack itself is not traced despite storing `Gc<FunctionProto>`,
-        // because every function is also traced through the module registry.
+        // NOTE: When adding new state, make sure to trace it as external roots!
+        fn _reminder(v: &VmState) {
+            let VmState {
+                heap,
+                registry,
+                core,
+                stdio,
+                stack,
+                frames,
+                current_module,
+                current_captures,
+                error,
+                saved_ip,
+            } = todo!();
+        }
 
         macro_rules! this {
             () => {
                 *self.state.as_ptr()
             };
         }
+
+        // note: call frame stack itself is not traced despite storing `Gc<FunctionProto>`,
+        // because every function is also traced through the module registry.
 
         // iterate over VM stack
         let frames = &this!().frames;
@@ -2023,8 +2039,14 @@ impl gc::ExternalRoots for VmRoots {
             }
         }
 
+        // modules
         for module in this!().registry.iter() {
             tracer.visit(module);
+        }
+
+        // host functions
+        for func in this!().core.functions.iter() {
+            tracer.visit(*func);
         }
     }
 }
