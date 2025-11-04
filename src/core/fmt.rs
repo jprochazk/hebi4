@@ -2,10 +2,10 @@ use crate::error::{Result, error};
 use crate::span::Span;
 use crate::value::{ValueRaw, host_function::Context};
 
-pub fn print(mut ctx: Context) -> Result<ValueRaw> {
-    let [value] = ctx.args()?;
+pub fn print(mut cx: Context) -> Result<ValueRaw> {
+    let [value] = cx.args()?;
 
-    let o = &mut ctx.stdio().stdout;
+    let o = &mut cx.stdio().stdout;
     match value {
         crate::gc::ValueRef::Nil => writeln!(o, "nil"),
         crate::gc::ValueRef::Bool(v) => writeln!(o, "{v}"),

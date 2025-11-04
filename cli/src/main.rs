@@ -10,20 +10,18 @@ use hebi4::EmitOptions;
 fn main() {
     let args: Args = argh::from_env();
 
+    let opts = args.optimize.unwrap_or_default().0;
     if args.print_ast {
         let code = &args.code_or_path;
         print_ast(code);
     } else if args.disassemble {
         let code = &args.code_or_path;
-        let opts = args.optimize.unwrap_or_default().0;
         disassemble(code, opts);
     } else if args.eval {
         let code = &args.code_or_path;
-        let opts = args.optimize.unwrap_or_default().0;
         eval_string(code, opts);
     } else {
         let path = Path::new(&args.code_or_path);
-        let opts = args.optimize.unwrap_or_default().0;
         eval_file(path, opts)
     }
 }

@@ -124,8 +124,12 @@ impl ModuleRegistry {
         let_root!(in heap; module_root);
         let module = canonicalize(heap, module_root, module, id);
 
-        self.modules.push(module.as_ptr());
-        self.by_name.insert(name, id);
+        if let Some(idx) = self.by_name.get(&name) {
+            self.modules[idx.0 as usize] = module.as_ptr();
+        } else {
+            self.modules.push(module.as_ptr());
+            self.by_name.insert(name, id);
+        }
 
         module.as_ptr()
     }
