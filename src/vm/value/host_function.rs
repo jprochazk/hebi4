@@ -1,11 +1,15 @@
 use std::marker::PhantomData;
 
-use crate::codegen::opcodes::{Reg, Sp, Vm};
-use crate::error::{Result, error};
-use crate::gc::{GcPtr, GcRef, Heap, Trace};
-use crate::span::Span;
-use crate::value::{Str, ValueRaw};
-use crate::vm::{Invariant, Stdio};
+use crate::{
+    codegen::opcodes::{Reg, Sp, Vm},
+    error::{Result, error_span},
+    span::Span,
+    vm::{
+        Invariant, Stdio,
+        gc::{GcPtr, GcRef, Heap, Trace},
+        value::{Str, ValueRaw},
+    },
+};
 
 pub struct Context<'a> {
     vm: Vm,
@@ -29,7 +33,7 @@ impl<'a> Context<'a> {
     pub(crate) fn args<const N: usize>(&self) -> Result<[ValueRaw; N]> {
         if (self.nargs as usize) < N {
             // TODO: span here
-            return error("invalid number of arguments", Span::empty()).into();
+            return error_span("invalid number of arguments", Span::empty()).into();
         }
 
         let mut args = [const { ValueRaw::Nil }; N];
@@ -90,7 +94,7 @@ impl HostFunction {
 unsafe impl Trace for HostFunction {
     vtable!(HostFunction);
 
-    unsafe fn trace(&self, tracer: &crate::gc::Tracer) {
+    unsafe fn trace(&self, tracer: &crate::vm::gc::Tracer) {
         tracer.visit(self.name);
     }
 }

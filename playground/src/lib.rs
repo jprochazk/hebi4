@@ -1,6 +1,7 @@
-use hebi4::{EmitOptions, Hebi, Module};
-use wasm_bindgen::prelude::*;
 use std::io::{self, Write};
+
+use hebi4::prelude::*;
+use wasm_bindgen::prelude::*;
 
 #[wasm_bindgen(start)]
 pub fn init() {
@@ -20,17 +21,14 @@ impl JsWriter {
 
 impl Write for JsWriter {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        let s = std::str::from_utf8(buf)
-            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+        let s =
+            std::str::from_utf8(buf).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
 
         let js_string = JsValue::from_str(s);
         self.callback
             .call1(&JsValue::NULL, &js_string)
             .map_err(|e| {
-                io::Error::new(
-                    io::ErrorKind::Other,
-                    format!("JS callback error: {:?}", e),
-                )
+                io::Error::new(io::ErrorKind::Other, format!("JS callback error: {:?}", e))
             })?;
 
         Ok(buf.len())
@@ -171,7 +169,7 @@ pub fn run(code: &str, enable_dce: bool, output_callback: js_sys::Function) -> R
             };
 
             // Create stdio with JS callback
-            let stdio = hebi4::Stdio {
+            let stdio = Stdio {
                 stdout: Box::new(JsWriter::new(output_callback.clone())),
                 stderr: Box::new(JsWriter::new(output_callback)),
             };

@@ -1,4 +1,4 @@
-use crate::gc::{GcRef, Trace, Tracer};
+use crate::vm::gc::{GcRef, Trace, Tracer};
 
 pub struct UserData {
     // TODO

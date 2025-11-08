@@ -5,7 +5,7 @@ use std::{
 };
 
 use argh::FromArgValue;
-use hebi4::EmitOptions;
+use hebi4::prelude::*;
 
 fn main() {
     let args: Args = argh::from_env();
@@ -117,8 +117,8 @@ fn print_ast(code: &str) {
     }
 }
 
-fn compile_string(code: &str, opts: EmitOptions) -> hebi4::Module {
-    match hebi4::Module::compile_with(None, &code, opts) {
+fn compile_string(code: &str, opts: EmitOptions) -> Module {
+    match Module::compile_with(None, &code, opts) {
         Ok(m) => m,
         Err(err) => {
             eprintln!("{}", err.render(&code));
@@ -130,7 +130,7 @@ fn compile_string(code: &str, opts: EmitOptions) -> hebi4::Module {
 fn eval_string(code: &str, opts: EmitOptions) {
     let module = compile_string(code, opts);
 
-    hebi4::Hebi::new().with(|mut vm| {
+    Hebi::new().with(|mut vm| {
         let loaded_module = vm.load(&module);
         match vm.run(&loaded_module) {
             Ok(v) => BufferedStdout::with(|o| {

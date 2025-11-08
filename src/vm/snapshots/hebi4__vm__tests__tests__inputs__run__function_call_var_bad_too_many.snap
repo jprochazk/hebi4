@@ -10,7 +10,7 @@ a(0)
 ERROR
 invalid number of arguments
 3 |  a(0)
-  |   ^^^
+  |  ^^^^
 
 
 DISASM:

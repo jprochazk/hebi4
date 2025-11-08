@@ -2,10 +2,7 @@ use super::{
     super::gc::{GcRef, GcRefMut, Trace, Tracer, ValueRef, ValueRoot},
     ValueRaw,
 };
-use crate::{
-    gc::{GcRoot, GcUninitRoot},
-    vm::gc::{GcPtr, Heap},
-};
+use crate::vm::gc::{GcPtr, GcRoot, GcUninitRoot, Heap};
 
 #[repr(align(16))]
 pub struct List {
@@ -225,7 +222,7 @@ impl std::fmt::Debug for GcRefMut<'_, List> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::gc::{Heap, ValueRef, ValueRoot, let_root};
+    use crate::vm::gc::{Heap, ValueRef, ValueRoot, let_root};
 
     #[test]
     fn list() {

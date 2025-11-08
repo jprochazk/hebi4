@@ -1,16 +1,19 @@
-mod fmt;
-use crate::{
-    codegen::opcodes::HostId,
-    gc::{GcPtr, Heap},
-    module::native::NativeFunctionCallback,
-    value::{
-        host_function::{HostFunction, HostFunctionCallback},
-        string::Str,
-    },
-};
+use std::sync::LazyLock;
+
 use hashbrown::HashMap;
 use rustc_hash::FxBuildHasher;
-use std::sync::LazyLock;
+
+use crate::{
+    codegen::opcodes::HostId,
+    module::native::NativeFunctionCallback,
+    vm::{
+        gc::{GcPtr, Heap},
+        value::{
+            host_function::{HostFunction, HostFunctionCallback},
+            string::Str,
+        },
+    },
+};
 
 #[derive(Clone, Copy)]
 struct CoreLibData {
@@ -27,14 +30,16 @@ macro_rules! functions {
                     name: stringify!($name),
                     arity: arity_of(&$crate::core::$module::$name),
                     f: {
-                        unsafe fn _shim(cx: $crate::value::host_function::Context<'_>) -> $crate::error::Result<$crate::value::ValueRaw> {
+                        unsafe fn _shim(
+                            cx: $crate::vm::value::host_function::Context<'_>
+                        ) -> $crate::error::Result<$crate::vm::value::ValueRaw> {
                             let f = $crate::core::$module::$name;
                             $crate::module::native::NativeFunctionCallback::call(&f, cx)
                         }
 
                         _shim
                     },
-                }
+                },
             )*].into_iter().collect()
         });
 
@@ -62,11 +67,6 @@ macro_rules! functions {
 fn arity_of<'a, F: NativeFunctionCallback<'a, T>, T>(f: &F) -> u8 {
     F::ARITY
 }
-
-// TODO: better sync for arity
-static CORE_LIB: CoreLibData = functions! {
-    fmt::print
-};
 
 pub struct CoreLib {
     functions: &'static [CoreFunction],
@@ -122,3 +122,11 @@ impl RuntimeCoreLib {
         Self { functions }
     }
 }
+
+mod fmt;
+mod panic;
+
+static CORE_LIB: CoreLibData = functions! {
+    fmt::print,
+    panic::panic,
+};

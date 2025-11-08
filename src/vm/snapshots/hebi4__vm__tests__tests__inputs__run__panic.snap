@@ -1,0 +1,21 @@
+---
+source: src/vm/tests.rs
+expression: snapshot
+---
+SOURCE
+panic()
+
+ERROR
+explicit panic
+1 |  panic()
+  |  ^^^^^^^
+
+
+DISASM:
+
+.fn @main
+  params 0
+  stack 1
+  .code
+  0  call r0, h1   ; h1=panic
+  1  ret

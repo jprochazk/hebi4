@@ -15,9 +15,17 @@ struct ErrorRepr {
     help: Option<Cow<'static, str>>,
 }
 
-pub fn error(message: impl Into<Cow<'static, str>>, span: impl Into<Span>) -> Error {
+pub fn error_span(message: impl Into<Cow<'static, str>>, span: impl Into<Span>) -> Error {
     Error(Box::new(ErrorRepr {
         span: span.into(),
+        message: message.into(),
+        help: None,
+    }))
+}
+
+pub fn error(message: impl Into<Cow<'static, str>>) -> Error {
+    Error(Box::new(ErrorRepr {
+        span: Span::empty(),
         message: message.into(),
         help: None,
     }))
@@ -45,6 +53,12 @@ impl Error {
     #[inline]
     pub fn with_help(mut self, help: impl Into<Cow<'static, str>>) -> Self {
         self.0.help = Some(help.into());
+        self
+    }
+
+    #[inline]
+    pub fn with_span(mut self, span: impl Into<Span>) -> Self {
+        self.0.span = span.into();
         self
     }
 }

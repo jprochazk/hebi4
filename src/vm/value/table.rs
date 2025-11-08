@@ -1,9 +1,8 @@
 use hashbrown::{HashMap, hash_map::RawEntryMut};
 
 use super::{Str, StringHasher, ValueRaw};
-use crate::{
-    gc::GcUninitRoot,
-    vm::gc::{GcPtr, GcRef, GcRefMut, GcRoot, Heap, Trace, Tracer, ValueRef, ValueRoot},
+use crate::vm::gc::{
+    GcPtr, GcRef, GcRefMut, GcRoot, GcUninitRoot, Heap, Trace, Tracer, ValueRef, ValueRoot,
 };
 
 pub(crate) struct Opaque(u32);
@@ -269,7 +268,7 @@ impl std::fmt::Debug for GcRef<'_, Table> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::gc::{Heap, ValueRef, ValueRoot, let_root};
+    use crate::vm::gc::{Heap, ValueRef, ValueRoot, let_root};
 
     #[test]
     fn table() {

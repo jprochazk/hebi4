@@ -1,9 +1,6 @@
 use rustc_hash::FxBuildHasher;
 
-use crate::{
-    gc::{GcRoot, GcUninitRoot},
-    vm::gc::{GcPtr, GcRef, Heap, Trace, Tracer},
-};
+use crate::vm::gc::{GcPtr, GcRef, GcRoot, GcUninitRoot, Heap, Trace, Tracer};
 
 // TODO: intern all strings?
 #[repr(align(16))]

@@ -12,29 +12,42 @@ pub use error::{Error, Result};
 #[macro_use]
 mod intern;
 
-mod module;
+pub mod module;
 
 mod thin;
 
 #[macro_use]
-mod token;
+pub mod token;
 
-mod ast;
+pub mod ast;
 
-mod parser;
+pub mod parser;
 
 #[macro_use]
-mod codegen;
+pub mod codegen;
 
 mod vm;
+pub use vm::{gc, value};
 
-mod disasm;
+pub mod disasm;
 
-mod core;
+pub mod core;
 
-pub use codegen::EmitOptions;
-pub use module::Module;
-pub use vm::{Hebi, Stdio, StdioWrite, gc, value};
+pub mod prelude {
+    pub use crate::{
+        codegen::EmitOptions,
+        error::{Result as HebiResult, error},
+        module::Module,
+        vm::{
+            Hebi, Stdio, StdioWrite,
+            gc::{
+                self, GcAnyRef, GcAnyRoot, GcRef, GcRoot, GcUninitRoot, Heap, let_root,
+                let_root_unchecked, reroot,
+            },
+            value::{self, List, Str, Table, host_function::Context},
+        },
+    };
+}
 
 pub fn parse(code: &str) -> Result<ast::Ast> {
     let tokens = token::tokenize(code);

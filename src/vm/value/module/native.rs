@@ -1,7 +1,7 @@
 use hashbrown::HashMap;
 use rustc_hash::FxBuildHasher;
 
-use crate::{
+use crate::vm::{
     gc::{GcPtr, GcRef, Trace},
     value::{Str, host_function::HostFunction},
 };
@@ -21,7 +21,7 @@ impl<'a> GcRef<'a, NativeModuleProto> {
 unsafe impl Trace for NativeModuleProto {
     vtable!(NativeModuleProto);
 
-    unsafe fn trace(&self, tracer: &crate::gc::Tracer) {
+    unsafe fn trace(&self, tracer: &crate::vm::gc::Tracer) {
         for f in &self.functions {
             tracer.visit(*f);
         }

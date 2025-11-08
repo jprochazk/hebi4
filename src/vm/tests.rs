@@ -3,7 +3,7 @@ use std::{fmt::Write as _, fs::read_to_string, path::Path};
 use super::Hebi;
 use crate::vm::{self, Runtime, Stdio};
 
-fn module(input: &str) -> crate::Module {
+fn module(input: &str) -> crate::module::Module {
     let tokens = crate::token::tokenize(&input);
     let ast = match crate::parser::parse(&tokens) {
         Ok(ast) => ast,
@@ -42,7 +42,7 @@ fn take_stdio(r: &mut Runtime<'_>) -> (String, String) {
 
 fn snapshot<'vm>(
     input: &str,
-    module: &crate::Module,
+    module: &crate::module::Module,
     r: &mut Runtime<'vm>,
     loaded_module: &vm::Module<'vm>,
 ) -> (String, bool) {

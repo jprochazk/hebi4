@@ -4,10 +4,9 @@ use super::Str;
 use crate::{
     codegen::opcodes::Insn,
     module::FuncDebugInfo,
-    value::ValueRaw,
     vm::{
         gc::{GcPtr, GcRef, GcRefMut, Trace},
-        value::ModuleProto,
+        value::{ModuleProto, ValueRaw},
     },
 };
 

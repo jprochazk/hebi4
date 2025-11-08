@@ -6,12 +6,10 @@ use rustc_hash::FxBuildHasher;
 use super::{FunctionProto, ValueRaw};
 use crate::{
     codegen::opcodes::{FnId, Insn, Reg, asm},
-    gc::GcUninitRoot,
     module::{FuncInfo, Literal, Module},
-    value::{closure::ClosureProto, module::native::NativeModuleProto},
     vm::{
-        gc::{GcPtr, GcRef, GcRefMut, GcRoot, Heap, Trace, let_root},
-        value::Str,
+        gc::{GcPtr, GcRef, GcRefMut, GcRoot, GcUninitRoot, Heap, Trace, let_root},
+        value::{Str, closure::ClosureProto, module::native::NativeModuleProto},
     },
 };
 
@@ -170,7 +168,7 @@ impl<'a> GcRef<'a, ImportProto> {
 unsafe impl Trace for ImportProto {
     vtable!(ImportProto);
 
-    unsafe fn trace(&self, tracer: &crate::gc::Tracer) {
+    unsafe fn trace(&self, tracer: &crate::vm::gc::Tracer) {
         tracer.visit(self.spec);
     }
 }

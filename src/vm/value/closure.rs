@@ -1,8 +1,10 @@
 use crate::{
     codegen::opcodes::{Cap, Reg},
-    gc::{GcPtr, GcRef, Heap, Trace, Tracer},
     module,
-    value::{FunctionProto, ValueRaw},
+    vm::{
+        gc::{GcPtr, GcRef, Heap, Trace, Tracer},
+        value::{FunctionProto, ValueRaw},
+    },
 };
 
 pub struct ClosureProto {

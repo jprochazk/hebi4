@@ -366,17 +366,17 @@ pub(crate) struct GcVtable {
 
 macro_rules! generate_vtable_for {
     ($T:ty) => {
-        $crate::gc::GcVtable {
+        $crate::vm::gc::GcVtable {
             trace: {
-                unsafe fn _trace(this: *const (), tracer: *const $crate::gc::Tracer) {
-                    <$T as $crate::gc::Trace>::trace(&*this.cast::<$T>(), &*tracer);
+                unsafe fn _trace(this: *const (), tracer: *const $crate::vm::gc::Tracer) {
+                    <$T as $crate::vm::gc::Trace>::trace(&*this.cast::<$T>(), &*tracer);
                 }
 
                 _trace
             },
             free: {
                 unsafe fn _free(this: *mut ()) -> usize {
-                    let _ = Box::from_raw(this.cast::<$crate::gc::GcBox<$T>>());
+                    let _ = Box::from_raw(this.cast::<$crate::vm::gc::GcBox<$T>>());
                     ::core::mem::size_of::<$T>()
                 }
 
@@ -384,10 +384,10 @@ macro_rules! generate_vtable_for {
             },
             debug: {
                 unsafe fn _debug(
-                    this: $crate::gc::GcAnyPtr,
+                    this: $crate::vm::gc::GcAnyPtr,
                     fmt: &mut ::core::fmt::Formatter<'_>,
                 ) -> ::core::fmt::Result {
-                    let this: $crate::gc::GcPtr<$T> = this.cast_unchecked();
+                    let this: $crate::vm::gc::GcPtr<$T> = this.cast_unchecked();
                     let this = this.as_ref();
                     ::core::fmt::Debug::fmt(&this, fmt)
                 }
@@ -720,8 +720,8 @@ pub(crate) unsafe trait Trace: Sized + 'static {
 macro_rules! vtable {
     ($T:ty) => {
         #[inline]
-        fn vtable() -> &'static $crate::gc::GcVtable {
-            static VT: $crate::gc::GcVtable = generate_vtable_for!($T);
+        fn vtable() -> &'static $crate::vm::gc::GcVtable {
+            static VT: $crate::vm::gc::GcVtable = generate_vtable_for!($T);
 
             &VT
         }
@@ -971,7 +971,7 @@ impl<'a, T: Trace> GcRoot<'a, T> {
     /// getting a mutable reference to the first root, and appending the second root:
     ///
     /// ```rust
-    /// # use hebi4::{gc::{Heap, let_root, reroot}, value::List};
+    /// # use hebi4::prelude::{Heap, let_root, reroot, List};
     /// # let heap = unsafe { &mut Heap::__testing() };
     /// let_root!(in heap; a0);
     /// let a0 = List::new(heap, a0, 0);
@@ -1028,7 +1028,7 @@ impl<'a, T: Trace> GcRoot<'a, T> {
     /// This function only accepts pointers to objects of the same type.
     ///
     /// ```rust
-    /// # use hebi4::{gc::{Heap, let_root}, value::Str};
+    /// # use hebi4::prelude::{Heap, let_root, Str};
     /// # let heap = unsafe { &mut Heap::__testing() };
     /// let_root!(in heap; a);
     /// let_root!(in heap; b);
@@ -1069,7 +1069,7 @@ impl<'a, T: Sized + 'static> GcRoot<'a, T> {
     /// For example, a [`GcRef`] is a valid argument to this function:
     ///
     /// ```rust
-    /// # use hebi4::{gc::{Heap, let_root}, value::{List, Str}};
+    /// # use hebi4::prelude::{Heap, let_root, List, Str};
     /// # let heap = unsafe { &mut Heap::__testing() };
     /// let_root!(in heap; a);
     /// let_root!(in heap; b);
@@ -1751,7 +1751,7 @@ macro_rules! __let_root_unchecked {
 /// Create a root on the stack from a raw `GcPtr`.
 ///
 /// ```rust
-/// # use hebi4::{gc::{Heap, let_root_unchecked}, value::List};
+/// # use hebi4::prelude::{Heap, let_root_unchecked, value::List};
 /// # let heap = unsafe { &mut Heap::__testing() };
 /// # let ptr = List::alloc(heap, 0);
 /// let_root_unchecked!(unsafe in heap; obj = ptr);
@@ -1793,7 +1793,7 @@ macro_rules! __let_root {
 /// Create an uninitialized root on the stack.
 ///
 /// ```rust
-/// # use hebi4::{gc::{Heap, let_root}, value::List};
+/// # use hebi4::prelude::{Heap, let_root, List};
 /// # let heap = unsafe { &mut Heap::__testing() };
 /// let_root!(in heap; obj);
 /// let obj = List::new(heap, obj, 0);
@@ -1823,7 +1823,7 @@ macro_rules! __reroot {
 /// Note that the type must be known, `GcAnyRoot` is not a valid target.
 ///
 /// ```rust
-/// # use hebi4::{gc::{Heap, reroot, let_root}, value::List};
+/// # use hebi4::prelude::{Heap, reroot, let_root, List};
 /// # let heap = unsafe { &mut Heap::__testing() };
 /// let_root!(in heap; a0);
 /// let a0 = List::new(heap, a0, 100);

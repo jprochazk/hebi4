@@ -1,4 +1,4 @@
-use crate::gc::{GcAnyPtr, GcPtr, Trace};
+use crate::vm::gc::{GcAnyPtr, GcPtr, Trace};
 
 // TODO: string interning
 
@@ -100,9 +100,9 @@ pub use self::{
 
 #[cfg(test)]
 mod tests {
-    use crate::{
+    use crate::vm::{
+        gc::{Heap, let_root},
         value::List,
-        vm::gc::{Heap, let_root},
     };
 
     #[test]

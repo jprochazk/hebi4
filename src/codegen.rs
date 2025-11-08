@@ -106,7 +106,7 @@
 //!
 
 #[macro_use]
-pub mod opcodes;
+pub(crate) mod opcodes;
 
 use beef::lean::Cow;
 use bumpalo::{Bump, collections::Vec, vec};
@@ -117,8 +117,11 @@ use crate::{
     ast::{self, Ast, Ident, Node, NodeList, Stmt, f64n},
     codegen::opcodes::{Cap, HostId, Mvar},
     core::CoreLib,
-    error::{Result, error},
-    module::{Capture, CaptureInfo, ClosureInfo, FuncDebugInfo, FuncInfo, ImportInfo, Literal, Local, Module},
+    error::{Result, error_span},
+    module::{
+        Capture, CaptureInfo, ClosureInfo, FuncDebugInfo, FuncInfo, ImportInfo, Literal, Local,
+        Module,
+    },
     span::Span,
     vm::{Control, VmState, value::ValueRaw},
 };
@@ -220,7 +223,7 @@ impl<'a> FunctionTable<'a> {
     fn reserve(&mut self, name: impl Into<Cow<'a, str>>, span: Span) -> Result<FnId> {
         let id = self.entries.len();
         if id >= u16::MAX as usize {
-            return error(format!("too many functions, maximum is {}", u16::MAX), span).into();
+            return error_span(format!("too many functions, maximum is {}", u16::MAX), span).into();
         }
         let id = id as u16;
 
@@ -372,7 +375,7 @@ impl RegAlloc {
 
     fn alloc(&mut self, span: Span) -> Result<Reg> {
         if self.next == u8::MAX {
-            return error("too many registers", span).into();
+            return error_span("too many registers", span).into();
         }
 
         let r = unsafe { Reg::new_unchecked(self.next) };
@@ -397,7 +400,7 @@ impl RegAlloc {
         }
 
         if self.next as usize + n as usize >= u8::MAX as usize {
-            return error("too many registers", span).into();
+            return error_span("too many registers", span).into();
         }
 
         let start = unsafe { Reg::new_unchecked(self.next) };
@@ -686,7 +689,7 @@ impl<'a> Literals<'a> {
     fn next_id(flat: &mut Vec<'a, Literal>, span: Span) -> Result<Lit> {
         let id = flat.len();
         if id > u16::MAX as usize {
-            return error("too many literals", span).into();
+            return error_span("too many literals", span).into();
         }
         Ok(unsafe { Lit::new_unchecked(id as u16) })
     }
@@ -783,7 +786,7 @@ impl<'a> ForwardLabel<'a> {
         let span = *f.dbg.spans.last().unwrap();
         for target in self.patch_targets {
             let offset = i24::try_from((pos - target) as isize)
-                .map_err(|_| error("jump offset out of bounds for i24", span))?;
+                .map_err(|_| error_span("jump offset out of bounds for i24", span))?;
 
             let span = f.dbg.spans[target];
             let insn = &mut f.code[target];
@@ -828,7 +831,7 @@ impl BasicForwardLabel {
         };
 
         let offset = i24::try_from((pos - target) as isize)
-            .map_err(|_| error("jump offset out of bounds for i24", span))?;
+            .map_err(|_| error_span("jump offset out of bounds for i24", span))?;
 
         let span = f.dbg.spans[target];
         let insn = &mut f.code[target];
@@ -853,7 +856,7 @@ impl BackwardLabel {
 
     fn offset(&self, jmp_pos: usize, span: Span) -> Result<Imm24s> {
         let offset = i24::try_from((self.pos as isize) - (jmp_pos as isize))
-            .map_err(|_| error("jump offset exceeds u24::MAX", span))?;
+            .map_err(|_| error_span("jump offset exceeds u24::MAX", span))?;
         Ok(unsafe { Imm24s::new_unchecked(offset) })
     }
 }
@@ -925,7 +928,7 @@ impl<'a> FunctionState<'a> {
 
     fn declare_capture(&mut self, name: &'a str, info: CaptureInfo, span: Span) -> Result<Cap> {
         if !self.allow_captures {
-            return error("functions can't capture variables from outer scope", span)
+            return error_span("functions can't capture variables from outer scope", span)
                 .with_help("use a closure instead: `let f = fn() {}`")
                 .into();
         }
@@ -933,7 +936,7 @@ impl<'a> FunctionState<'a> {
         debug_assert!(!self.captures.iter().any(|c| c.name == name));
 
         if self.captures.len() >= u8::MAX as usize {
-            return error(format!("too many captures, maximum is {}", u8::MAX), span).into();
+            return error_span(format!("too many captures, maximum is {}", u8::MAX), span).into();
         }
 
         let cap = unsafe { Cap::new_unchecked(self.captures.len() as u8) };
@@ -1229,7 +1232,7 @@ fn emit_func_inner<'a>(
     allow_captures: bool,
 ) -> Result<FunctionState<'a>> {
     if params.len() > 100 {
-        return error(
+        return error_span(
             "too many parameters, maximum is 100",
             *param_spans.last().unwrap(),
         )
@@ -1465,7 +1468,7 @@ fn emit_stmt<'a>(m: &mut State<'a>, stmt: Node<'a, Stmt>) -> Result<()> {
             free_value(m, value);
         }
         ast::StmtKind::Import(node) => emit_stmt_import(m, Import::Named(node))?,
-        ast::StmtKind::ImportBare(node) => emit_stmt_import(m, Import::Bare(node))?
+        ast::StmtKind::ImportBare(node) => emit_stmt_import(m, Import::Bare(node))?,
     }
 
     Ok(())
@@ -1663,7 +1666,7 @@ fn eval_expr_break<'a>(
     dst: Option<Reg>,
 ) -> Result<Value<'a>> {
     let Some(mut loop_) = f!(m).loop_.take() else {
-        return error("cannot use `break` outside of loop", span).into();
+        return error_span("cannot use `break` outside of loop", span).into();
     };
 
     // break = unconditional jump to loop exit
@@ -1681,7 +1684,7 @@ fn eval_expr_continue<'a>(
     dst: Option<Reg>,
 ) -> Result<Value<'a>> {
     let Some(loop_) = f!(m).loop_.take() else {
-        return error("cannot use `continue` outside of loop", span).into();
+        return error_span("cannot use `continue` outside of loop", span).into();
     };
 
     // continue = unconditional jump back to loop entry
@@ -2032,7 +2035,7 @@ fn eval_expr_get_var<'a>(
     // variable must exist at this point
     match m
         .resolve(get.name().get())?
-        .ok_or_else(|| error("could not resolve name", span))?
+        .ok_or_else(|| error_span("could not resolve name", span))?
     {
         Symbol::Local { reg, .. } => Ok(Value::dynamic(reg, span)),
         Symbol::Capture { idx, .. } => {
@@ -2120,15 +2123,17 @@ fn eval_expr_set_var<'a>(
     // variable must exist at this point
     let id = match m
         .resolve(set.base().name().get())?
-        .ok_or_else(|| error("could not resolve name", set.base().name_span()))?
+        .ok_or_else(|| error_span("could not resolve name", set.base().name_span()))?
     {
         // when adding other symbols, remember to error out here,
         // only local variables may be assigned to
         Symbol::Local { reg, .. } => Id::Reg(reg),
         Symbol::Capture { idx, .. } => Id::Cap(fresh_var(m, span)?, idx),
         Symbol::ModuleVar { idx, .. } => Id::Mvar(fresh_var(m, span)?, idx),
-        Symbol::Function { .. } => return error("cannot assign to function", span).into(),
-        Symbol::HostFunction { .. } => return error("cannot assign to host function", span).into(),
+        Symbol::Function { .. } => return error_span("cannot assign to function", span).into(),
+        Symbol::HostFunction { .. } => {
+            return error_span("cannot assign to host function", span).into();
+        }
     };
 
     // lhs is always a register, so we only evaluate rhs, and emit either `vv` or `vn`.
@@ -2409,7 +2414,7 @@ fn prepare_fast_call<'a>(
         }
     };
     if nargs != arity {
-        return error(
+        return error_span(
             format!("invalid number of arguments, expected {arity} but got {nargs}"),
             span,
         )
@@ -2471,7 +2476,7 @@ fn eval_expr_call<'a>(
 
         // the reuse here is sound, because if the callee expr is another call,
         // it will check for itself if the `dst` is at top or not.
-        // So calls like `v()()` can re-use `dst`, but `v(0)(0)` cannot.
+        // So calls like `v()()` can re-use `dst`, but `v(1)(2)` cannot.
         let callee = eval_expr_reuse(m, call.callee(), call.callee_span(), dst)?;
         let callee = value_to_reg_reuse(m, callee, dst)?;
 
@@ -2654,13 +2659,13 @@ fn const_eval_expr_infix_arith<'a>(
     use ValueKind as V;
     let v = match (lhs.kind, rhs.kind) {
         (V::Int(lhs), V::Int(rhs)) => {
-            Value::int(iop(lhs, rhs).map_err(|err| error(err, span))?, span)
+            Value::int(iop(lhs, rhs).map_err(|err| error_span(err, span))?, span)
         }
         (V::Float(lhs), V::Float(rhs)) => Value::float(fop(lhs, rhs), span),
         (V::Float(lhs), V::Int(rhs)) => Value::float(fop(lhs, f64n::new(rhs as f64)), span),
         (V::Int(lhs), V::Float(rhs)) => Value::float(fop(f64n::new(lhs as f64), rhs), span),
         _ => {
-            return error(
+            return error_span(
                 format!(
                     "evaluation would fail with a type mismatch: cannot {desc} {} and {}",
                     lhs.type_name(),
@@ -2850,7 +2855,7 @@ fn const_eval_expr_infix_comparison<'a>(
         (V::Int(lhs), V::Float(rhs)) => Value::bool(flt_op(f64n::new(lhs as f64), rhs), span),
         (V::Str(lhs), V::Str(rhs)) => Value::bool(str_op(lhs, rhs), span),
         _ => {
-            return error(
+            return error_span(
                 format!(
                     "evaluation would fail with a type mismatch: cannot compare {} and {}",
                     lhs.type_name(),
@@ -2906,14 +2911,14 @@ fn const_eval_expr_prefix<'a>(op: ast::PrefixOp, rhs: Value<'a>, span: Span) -> 
     let result = match op {
         Op::Minus => match rhs.kind {
             V::Nil => {
-                return error(
+                return error_span(
                     format!("evaluation would fail with a type error: cannot invert nil"),
                     span,
                 )
                 .into();
             }
             V::Bool(_) => {
-                return error(
+                return error_span(
                     format!("evaluation would fail with a type error: cannot invert bool"),
                     span,
                 )
@@ -2922,7 +2927,7 @@ fn const_eval_expr_prefix<'a>(op: ast::PrefixOp, rhs: Value<'a>, span: Span) -> 
             V::Int(v) => Value::int(-v, span),
             V::Float(v) => Value::float(f64n::new(-v.get()), span),
             V::Str(_) => {
-                return error(
+                return error_span(
                     format!("evaluation would fail with a type error: cannot invert str"),
                     span,
                 )

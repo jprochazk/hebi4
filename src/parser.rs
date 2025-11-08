@@ -9,7 +9,7 @@ use crate::{
     ast::{
         self, AssignOp, Ast, Expr, InfixOp, NodeKind, Opt, Pack, Packed, PrefixOp, Stmt, spanned::*,
     },
-    error::{Result, error},
+    error::{Result, error_span},
     span::{Span, Spanned},
     token::{Token, TokenCursor, TokenKind, Tokens},
 };
@@ -88,7 +88,7 @@ impl<'t, 'src> State<'t, 'src> {
         if self.eat(kind) {
             Ok(tok)
         } else {
-            error(
+            error_span(
                 format!(
                     "expected '{}', found '{}'",
                     kind.bare_lexeme(),
@@ -103,6 +103,13 @@ impl<'t, 'src> State<'t, 'src> {
     fn open<T: Pack>(&mut self) -> Marker<T> {
         Marker {
             start: self.cursor.span(self.cursor.current()).start,
+            ty: PhantomData,
+        }
+    }
+
+    fn open_extend<T: Pack>(&mut self, parent: Span) -> Marker<T> {
+        Marker {
+            start: parent.start,
             ty: PhantomData,
         }
     }
@@ -183,13 +190,13 @@ fn parse_stmt_func_decl(p: &mut State, buf: &Bump) -> Result<Spanned<Stmt>> {
 
     let name = bare.name.ok_or_else(|| {
         let span = bare.params.span.start()..bare.params.span.start() + 1;
-        error("expected function name", span)
+        error_span("expected function name", span)
     })?;
     let body = bare.body;
     let params = bare.params.as_slice();
 
     if params.len() > 100 {
-        return error("too many parameters, maximum is 100", name.span).into();
+        return error_span("too many parameters, maximum is 100", name.span).into();
     }
 
     Ok(Spanned::new(FuncDecl { name, body, params }.pack(&mut p.ast), bare.span).map_into())
@@ -305,7 +312,7 @@ fn parse_expr_return(p: &mut State, buf: &Bump) -> Result<Spanned<Expr>> {
 
     // Check for ambiguous `return fn`
     if p.at(t![fn]) {
-        return error("ambiguous", p.span())
+        return error_span("ambiguous", p.span())
             .with_help("disambiguate with `return (fn ...)` or `return nil fn ...`")
             .into();
     }
@@ -324,7 +331,7 @@ fn parse_expr_break(p: &mut State, _: &Bump) -> Result<Spanned<Expr>> {
     let node = p.open_at(t![break])?;
 
     if p.loop_depth == 0 {
-        return error("`break` outside of a loop", span).into();
+        return error_span("`break` outside of a loop", span).into();
     }
 
     Ok(p.close(node, Break {}).map_into())
@@ -335,7 +342,7 @@ fn parse_expr_continue(p: &mut State, _: &Bump) -> Result<Spanned<Expr>> {
     let node = p.open_at(t![continue])?;
 
     if p.loop_depth == 0 {
-        return error("`continue` outside of a loop", span).into();
+        return error_span("`continue` outside of a loop", span).into();
     }
 
     Ok(p.close(node, Continue {}).map_into())
@@ -366,7 +373,7 @@ fn parse_expr_if(p: &mut State, buf: &Bump, is_top_level: bool) -> Result<Spanne
             tail = Some(parse_block(p, buf)?);
         } else {
             // duplicate tail
-            return error("duplicate `else` branch", else_span).into();
+            return error_span("duplicate `else` branch", else_span).into();
         }
     }
 
@@ -377,7 +384,7 @@ fn parse_expr_if(p: &mut State, buf: &Bump, is_top_level: bool) -> Result<Spanne
         .unwrap_or_else(|| Spanned::empty(Opt::none()));
 
     if tail.is_none() && !is_top_level {
-        return error("expected `else`", end_span).into();
+        return error_span("expected `else`", end_span).into();
     }
 
     match branches.len() {
@@ -539,7 +546,7 @@ fn parse_expr_assign(p: &mut State, buf: &Bump) -> Result<Spanned<Expr>> {
             let base = lhs.map(|lhs| ast::GetVar::try_from(lhs).expect("node should be GetVar"));
             Ok(Spanned::new(SetVar { base, value, op }.pack(&mut p.ast), span).map_into())
         }
-        _ => error("invalid assignment target", lhs.span).into(),
+        _ => error_span("invalid assignment target", lhs.span).into(),
     }
 }
 
@@ -683,13 +690,13 @@ fn parse_expr_postfix(p: &mut State, buf: &Bump) -> Result<Spanned<Expr>> {
 }
 
 fn parse_expr_call(p: &mut State, buf: &Bump, callee: Spanned<Expr>) -> Result<Spanned<Expr>> {
-    let node = p.open();
+    let node = p.open_extend(callee.span);
 
     let args = bracketed_list(p, buf, Brackets::Paren, parse_expr)?;
     let args = args.as_slice();
 
     if args.len() > 100 {
-        return error(
+        return error_span(
             "too many arguments, maximum is 100",
             node.start..p.span().end,
         )
@@ -732,7 +739,7 @@ fn parse_table_entry(p: &mut State, buf: &Bump) -> Result<Spanned<ast::TableEntr
 
             (key, value)
         }
-        _ => return error("unexpected token", p.span()).into(),
+        _ => return error_span("unexpected token", p.span()).into(),
     };
 
     Ok(p.close(node, TableEntry { key, value }))
@@ -786,7 +793,7 @@ fn parse_expr_primary(p: &mut State, buf: &Bump) -> Result<Spanned<Expr>> {
         t![nil] => parse_expr_nil(p, buf),
         t![ident] => parse_expr_use(p, buf),
         t!["("] => parse_expr_group(p, buf),
-        _ => error(format!("unexpected token {:?}", p.lexeme()), p.span()).into(),
+        _ => error_span(format!("unexpected token {:?}", p.lexeme()), p.span()).into(),
     }
 }
 
@@ -816,7 +823,7 @@ fn parse_expr_int(p: &mut State, _: &Bump) -> Result<Spanned<Expr>> {
     let span = p.span();
     p.must(t![int])?;
     let value: i64 = i64_from_str_with_underscores(lexeme)
-        .map_err(|err| error(format!("invalid int: {err}"), span))?;
+        .map_err(|err| error_span(format!("invalid int: {err}"), span))?;
     if value <= i32::MAX as i64 {
         let value = value as i32;
         Ok(p.close(node32, Int32 { value }).map_into())
@@ -824,7 +831,7 @@ fn parse_expr_int(p: &mut State, _: &Bump) -> Result<Spanned<Expr>> {
         let id = p.ast.intern_int(value);
         Ok(p.close(node64, Int64 { id }).map_into())
     } else {
-        return error("integer would overflow", span).into();
+        return error_span("integer would overflow", span).into();
     }
 }
 
@@ -898,7 +905,7 @@ fn parse_expr_float(p: &mut State, _: &Bump) -> Result<Spanned<Expr>> {
     p.must(t![float])?;
     let value: f64 = lexeme
         .parse()
-        .map_err(|err| error(format!("invalid float: {err}"), span))?;
+        .map_err(|err| error_span(format!("invalid float: {err}"), span))?;
 
     if (value as f32) as f64 == value {
         Ok(p.close(
@@ -920,7 +927,7 @@ fn parse_expr_bool(p: &mut State, _: &Bump) -> Result<Spanned<Expr>> {
     let value = match p.kind() {
         t![true] => true,
         t![false] => false,
-        _ => return error("not a bool", p.span()).into(),
+        _ => return error_span("not a bool", p.span()).into(),
     };
     p.advance();
 
@@ -940,14 +947,14 @@ fn parse_str(p: &mut State, _: &Bump) -> Result<Spanned<ast::Str>> {
     p.must(t![str])?;
     let value = lexeme
         .strip_prefix('"')
-        .ok_or_else(|| error("invalid string", span))?
+        .ok_or_else(|| error_span("invalid string", span))?
         .strip_suffix('"')
-        .ok_or_else(|| error("invalid string", span))?;
+        .ok_or_else(|| error_span("invalid string", span))?;
 
     let value = match escape::unescape(value) {
         Ok(value) => value,
         Err(err) => {
-            return error(
+            return error_span(
                 "invalid escape",
                 span.start() + err.pos - 1..span.start() + err.pos + 2,
             )

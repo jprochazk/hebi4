@@ -58,26 +58,25 @@ use value::{List, ModuleProto, Str, Table};
 use crate::{
     codegen::opcodes::*,
     core::RuntimeCoreLib,
-    error::{Error, Result, error},
+    error::{Error, Result, error_span},
     module,
     span::Span,
-    value::{
-        Closure,
+    vm::value::{
+        Closure, FunctionProto, ValueRaw,
         closure::{CaptureInfo, ClosureProto},
         host_function::{Context, HostFunction, HostFunctionCallback},
-        module::ImportProto,
+        module::{ImportProto, ModuleRegistry},
     },
-    vm::value::{FunctionProto, ValueRaw, module::ModuleRegistry},
 };
 
 impl Sp {
     #[inline(always)]
-    pub unsafe fn at(self, r: Reg) -> *mut ValueRaw {
+    pub(crate) unsafe fn at(self, r: Reg) -> *mut ValueRaw {
         self.0.offset(r.sz()).as_ptr()
     }
 
     #[inline(always)]
-    pub unsafe fn ret(self) -> *mut ValueRaw {
+    pub(crate) unsafe fn ret(self) -> *mut ValueRaw {
         self.0.as_ptr()
     }
 }
@@ -119,7 +118,7 @@ impl Lp {
     // TODO: could be made safer with some kind of enum `offset_of`
 
     #[inline(always)]
-    pub unsafe fn int_or_float_unchecked(self, r: impl LpIdx) -> ValueRaw {
+    pub(crate) unsafe fn int_or_float_unchecked(self, r: impl LpIdx) -> ValueRaw {
         let v = self._at(r.idx());
 
         debug_assert!(matches!(&*v, ValueRaw::Int(..) | ValueRaw::Float(..)));
@@ -127,7 +126,7 @@ impl Lp {
     }
 
     #[inline(always)]
-    pub unsafe fn int_unchecked(self, r: impl LpIdx) -> i64 {
+    pub(crate) unsafe fn int_unchecked(self, r: impl LpIdx) -> i64 {
         let v = self._at(r.idx());
 
         debug_assert!(matches!(&*v, ValueRaw::Int(..)));
@@ -135,7 +134,7 @@ impl Lp {
     }
 
     #[inline(always)]
-    pub unsafe fn float_unchecked(self, r: impl LpIdx) -> f64 {
+    pub(crate) unsafe fn float_unchecked(self, r: impl LpIdx) -> f64 {
         let v = self._at(r.idx());
 
         debug_assert!(matches!(&*v, ValueRaw::Float(..)));
@@ -143,7 +142,7 @@ impl Lp {
     }
 
     #[inline(always)]
-    pub unsafe fn str_unchecked(self, r: impl LpIdx) -> GcPtr<Str> {
+    pub(crate) unsafe fn str_unchecked(self, r: impl LpIdx) -> GcPtr<Str> {
         let v = self._at(r.idx());
 
         debug_assert!(matches!(&*v, ValueRaw::Object(gc) if gc.is::<Str>()));
@@ -151,7 +150,7 @@ impl Lp {
     }
 
     #[inline(always)]
-    pub unsafe fn closure_unchecked(self, r: impl LpIdx) -> GcPtr<ClosureProto> {
+    pub(crate) unsafe fn closure_unchecked(self, r: impl LpIdx) -> GcPtr<ClosureProto> {
         let v = self._at(r.idx());
 
         debug_assert!(matches!(&*v, ValueRaw::Object(gc) if gc.is::<ClosureProto>()));
@@ -159,7 +158,7 @@ impl Lp {
     }
 
     #[inline(always)]
-    pub unsafe fn import_proto_unchecked(self, r: impl LpIdx) -> GcPtr<ImportProto> {
+    pub(crate) unsafe fn import_proto_unchecked(self, r: impl LpIdx) -> GcPtr<ImportProto> {
         let v = self._at(r.idx());
 
         debug_assert!(matches!(&*v, ValueRaw::Object(gc) if gc.is::<ClosureProto>()));
@@ -169,7 +168,7 @@ impl Lp {
 
 impl Jt {
     #[inline(always)]
-    pub unsafe fn at(self, insn: Insn) -> OpaqueHandler {
+    pub(crate) unsafe fn at(self, insn: Insn) -> OpaqueHandler {
         self.0.offset(insn.tag()).read()
     }
 }
@@ -210,7 +209,7 @@ struct Captures(NonNull<ValueRaw>);
 
 impl Captures {
     #[inline(always)]
-    pub unsafe fn at(self, idx: Cap) -> *mut ValueRaw {
+    pub(crate) unsafe fn at(self, idx: Cap) -> *mut ValueRaw {
         self.0.offset(idx.sz()).as_ptr()
     }
 }
@@ -433,6 +432,13 @@ pub enum VmError {
     Host,
 }
 
+impl Error {
+    unsafe fn annotate(self, vm: Vm) -> Self {
+        let span = vm.get_span_for_saved_ip().unwrap_or_default();
+        self.with_span(span)
+    }
+}
+
 impl VmError {
     // TODO: additional error context, somehow?
     //       for example, try reading the current `ip`, reading the operands,
@@ -444,22 +450,22 @@ impl VmError {
     unsafe fn annotate(&self, vm: Vm) -> Error {
         let span = vm.get_span_for_saved_ip().unwrap_or_default();
         match self {
-            Self::DivisionByZero => error("division by zero", span),
-            Self::ArithTypeError => error("type mismatch", span),
-            Self::UnopInvalidType => error("invalid type", span),
-            Self::CmpTypeError => error("type mismatch", span),
-            Self::NotAList => error("not a list", span),
-            Self::NotAString => error("not a string", span),
-            Self::InvalidArrayIndex => error("value is not a valid array index", span),
-            Self::IndexOutOfBounds => error("index out of bounds", span),
-            Self::NotATable => error("not a table", span),
-            Self::InvalidTableKey => error("value is not a valid table key", span),
-            Self::MissingKey => error("missing key", span),
-            Self::NotIndexable => error("this value cannot be indexed", span),
-            Self::ArityMismatch => error("invalid number of arguments", span),
-            Self::NotCallable => error("this value cannot be called", span),
+            Self::DivisionByZero => error_span("division by zero", span),
+            Self::ArithTypeError => error_span("type mismatch", span),
+            Self::UnopInvalidType => error_span("invalid type", span),
+            Self::CmpTypeError => error_span("type mismatch", span),
+            Self::NotAList => error_span("not a list", span),
+            Self::NotAString => error_span("not a string", span),
+            Self::InvalidArrayIndex => error_span("value is not a valid array index", span),
+            Self::IndexOutOfBounds => error_span("index out of bounds", span),
+            Self::NotATable => error_span("not a table", span),
+            Self::InvalidTableKey => error_span("value is not a valid table key", span),
+            Self::MissingKey => error_span("missing key", span),
+            Self::NotIndexable => error_span("this value cannot be indexed", span),
+            Self::ArityMismatch => error_span("invalid number of arguments", span),
+            Self::NotCallable => error_span("this value cannot be called", span),
 
-            Self::Host => error("<host error>", span),
+            Self::Host => error_span("<host error>", span),
         }
     }
 
@@ -2150,8 +2156,8 @@ impl<'vm> Runtime<'vm> {
                     match op(vm, jt, ip, insn, sp, lp) {
                         Control::Stop => return Ok(()),
                         Control::Error(err) if err.is_host() => {
-                            let err = vm.take_error();
-                            return Err(err.unwrap());
+                            let err = vm.take_error().unwrap();
+                            return Err(err.annotate(vm));
                         }
                         Control::Error(err) => return Err(err.annotate(vm)),
 

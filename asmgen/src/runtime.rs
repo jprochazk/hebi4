@@ -338,9 +338,9 @@ If we used any other registers, `a` couldn't be decoded with just a `mov`.
   though i'm pretty sure things are less fucked up over there
 */
 
-pub type Handler<Operands> = Handler!(fn(Vm, Jt, Ip, Operands, Sp, Lp) -> Control);
+pub(crate) type Handler<Operands> = Handler!(fn(Vm, Jt, Ip, Operands, Sp, Lp) -> Control);
 
-pub type OpaqueHandler = Handler!(fn(Vm, Jt, Ip, Insn, Sp, Lp) -> Control);
+pub(crate) type OpaqueHandler = Handler!(fn(Vm, Jt, Ip, Insn, Sp, Lp) -> Control);
 
 macro_rules! declare_operand_type {
     ($name:ident, $ty:ident, $fmt:literal) => {

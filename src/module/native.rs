@@ -1,8 +1,16 @@
-use crate::error::Result;
-use crate::value::ValueRaw;
-use crate::value::host_function::{Context, HostFunctionCallback};
 use hashbrown::HashMap;
 use rustc_hash::FxBuildHasher;
+
+use crate::{
+    error::Result,
+    vm::{
+        gc::ValueRef,
+        value::{
+            ValueRaw,
+            host_function::{Context, HostFunctionCallback},
+        },
+    },
+};
 
 pub struct NativeModule {}
 
@@ -38,29 +46,12 @@ pub trait IntoHebiResult: Sized {
     unsafe fn into_hebi_result(self, cx: &Context<'_>) -> Result<ValueRaw>;
 }
 
-impl IntoHebiResult for () {
-    #[inline]
-    unsafe fn into_hebi_result(self, _cx: &Context<'_>) -> Result<ValueRaw> {
-        Ok(ValueRaw::Nil)
-    }
-}
-
-impl IntoHebiResult for Result<()> {
-    #[inline]
-    unsafe fn into_hebi_result(self, cx: &Context<'_>) -> Result<ValueRaw> {
-        self.map(|_| ValueRaw::Nil)
-    }
+pub trait TryIntoHebiValue: Sized {
+    unsafe fn try_into_hebi_value(self, cx: &Context<'_>) -> Result<ValueRaw>;
 }
 
 pub trait TryFromHebiValue: Sized {
     unsafe fn try_from_hebi_value(cx: &Context<'_>, value: ValueRaw) -> Result<Self>;
-}
-
-impl<'a> TryFromHebiValue for crate::gc::ValueRef<'a> {
-    unsafe fn try_from_hebi_value(cx: &Context<'_>, value: ValueRaw) -> Result<Self> {
-        // UNROOTED: must be rooted in `cx` stack or elsewhere
-        Ok(value.as_ref())
-    }
 }
 
 macro_rules! all_the_tuples {
@@ -108,3 +99,32 @@ macro_rules! impl_native_function_callback {
 }
 
 all_the_tuples!(impl_native_function_callback);
+
+////////////////////////////////// impls //////////////////////////////////
+
+impl IntoHebiResult for () {
+    #[inline]
+    unsafe fn into_hebi_result(self, _cx: &Context<'_>) -> Result<ValueRaw> {
+        Ok(ValueRaw::Nil)
+    }
+}
+
+impl TryIntoHebiValue for () {
+    unsafe fn try_into_hebi_value(self, cx: &Context<'_>) -> Result<ValueRaw> {
+        Ok(ValueRaw::Nil)
+    }
+}
+
+impl<T: TryIntoHebiValue> IntoHebiResult for Result<T> {
+    #[inline]
+    unsafe fn into_hebi_result(self, cx: &Context<'_>) -> Result<ValueRaw> {
+        self.and_then(|v| <T as TryIntoHebiValue>::try_into_hebi_value(v, cx))
+    }
+}
+
+impl<'a> TryFromHebiValue for ValueRef<'a> {
+    unsafe fn try_from_hebi_value(cx: &Context<'_>, value: ValueRaw) -> Result<Self> {
+        // UNROOTED: must be rooted in `cx` stack or elsewhere
+        Ok(value.as_ref())
+    }
+}
