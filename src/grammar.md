@@ -62,12 +62,13 @@ program =
     stmt* EOF
 ```
 
-the language supports variables, functions, infinite loops, and various expressions
+the language supports variables, functions, infinite loops, imports, and various expressions
 ```
 stmt =
     stmt_var
     stmt_fn
     stmt_loop
+    stmt_import
     stmt_expr
 ```
 
@@ -93,6 +94,27 @@ loops are infinite by default, and must be manually broken out of with `break` t
 ```
 stmt_loop =
     "loop" "{" stmt* "}"
+```
+
+an import statement brings names from another module into the current scope.
+there are two forms: named imports and bare imports.
+
+named imports consist of a comma-separated list of import items (name with optional alias), followed by `from`, followed by a string path.
+bare imports consist of just a string path followed by `as` and a binding name.
+```
+stmt_import =
+    stmt_import_named
+    stmt_import_bare
+
+stmt_import_named =
+    "import" import_item,+ "from" STRING
+
+stmt_import_bare =
+    "import" STRING "as" IDENT
+
+import_item =
+    IDENT
+    IDENT "as" IDENT
 ```
 
 an expression statement is an expression executed purely for its side-effects
@@ -336,6 +358,10 @@ expr_nil =
 ## Examples
 
 ```
+import list, map from "std/collections"
+import request as req, response from "std/http"
+import "std/math" as math
+
 fn fib_rec(n) {
     if n < 2 { n }
     else { fib(n-1) + fib(n-2) }

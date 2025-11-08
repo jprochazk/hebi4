@@ -1,0 +1,50 @@
+---
+source: src/parser/tests.rs
+expression: snapshot
+---
+SOURCE
+//parse
+
+import "std/math" as math
+import "std/collections" as collections
+import "http" as http_module
+
+let x = 42
+
+OK
+Root(
+    [
+        ImportBare(
+            Str(
+                "std/math",
+            ),
+            Ident(
+                "math",
+            ),
+        ),
+        ImportBare(
+            Str(
+                "std/collections",
+            ),
+            Ident(
+                "collections",
+            ),
+        ),
+        ImportBare(
+            Str(
+                "http",
+            ),
+            Ident(
+                "http_module",
+            ),
+        ),
+        Var(
+            Ident(
+                "x",
+            ),
+            Int32(
+                42,
+            ),
+        ),
+    ],
+)

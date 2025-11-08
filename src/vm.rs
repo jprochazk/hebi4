@@ -845,11 +845,11 @@ unsafe fn lkeyc(vm: Vm, jt: Jt, ip: Ip, args: Lkeyc, sp: Sp, lp: Lp) -> Control 
 
     // UNROOTED: reachable through the stack
     // TODO: inline caching
-    let Some(value) = table.as_ref().get(key.as_ref()) else {
+    let Some(value) = table.as_ref().get_raw(key) else {
         return missing_key_error(ip, vm);
     };
 
-    *dst = value.raw();
+    *dst = value;
 
     dispatch_next(vm, jt, ip, sp, lp)
 }
@@ -1153,8 +1153,8 @@ unsafe fn isnes(vm: Vm, jt: Jt, ip: Ip, args: Isnes, sp: Sp, lp: Lp) -> Control 
     let rhs = lp.str_unchecked(args.rhs());
 
     let Some(lhs) = lhs.into_object::<String>() else {
-        // execute `jmp`
-        let ip = ip.offset(1);
+        // skip `jmp`
+        let ip = ip.offset(2);
         return dispatch_current(vm, jt, ip, sp, lp);
     };
 
@@ -1216,8 +1216,8 @@ unsafe fn isnei(vm: Vm, jt: Jt, ip: Ip, args: Isnei, sp: Sp, lp: Lp) -> Control 
         ValueRaw::Int(v) => v,
         ValueRaw::Float(v) => v as i64,
         _ => {
-            // execute `jmp`
-            let ip = ip.offset(1);
+            // skip `jmp`
+            let ip = ip.offset(2);
             return dispatch_current(vm, jt, ip, sp, lp);
         }
     };
@@ -1274,8 +1274,8 @@ unsafe fn isnef(vm: Vm, jt: Jt, ip: Ip, args: Isnef, sp: Sp, lp: Lp) -> Control 
         ValueRaw::Int(v) => v as f64,
         ValueRaw::Float(v) => v,
         _ => {
-            // execute `jmp`
-            let ip = ip.offset(1);
+            // skip `jmp`
+            let ip = ip.offset(2);
             return dispatch_current(vm, jt, ip, sp, lp);
         }
     };
@@ -2156,7 +2156,7 @@ impl<'vm> Runtime<'vm> {
 
                 if ctrl.is_error() {
                     let err = ctrl.error_code();
-                    if err.is_external() {
+                    if err.is_host() {
                         let err = vm.take_error();
                         return Err(err.unwrap());
                     } else {

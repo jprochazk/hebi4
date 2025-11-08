@@ -1,0 +1,225 @@
+---
+source: src/parser/tests.rs
+expression: snapshot
+---
+SOURCE
+//parse
+
+import foo from "module"
+
+import bar, baz, qux from "another_module"
+
+import request as req from "http"
+
+import a as x, b, c as z from "mixed"
+
+import list, map from "std/collections"
+
+import handler from "api/v1/routes/users"
+
+import x from "mod1"
+import y from "mod2"
+import z from "mod3"
+
+let value = 42
+
+fn main() {
+    print("imports work!")
+}
+
+OK
+Root(
+    [
+        Import(
+            Str(
+                "module",
+            ),
+            [
+                ImportItem(
+                    Ident(
+                        "foo",
+                    ),
+                    None,
+                ),
+            ],
+        ),
+        Import(
+            Str(
+                "another_module",
+            ),
+            [
+                ImportItem(
+                    Ident(
+                        "bar",
+                    ),
+                    None,
+                ),
+                ImportItem(
+                    Ident(
+                        "baz",
+                    ),
+                    None,
+                ),
+                ImportItem(
+                    Ident(
+                        "qux",
+                    ),
+                    None,
+                ),
+            ],
+        ),
+        Import(
+            Str(
+                "http",
+            ),
+            [
+                ImportItem(
+                    Ident(
+                        "request",
+                    ),
+                    Some(
+                        Ident(
+                            "req",
+                        ),
+                    ),
+                ),
+            ],
+        ),
+        Import(
+            Str(
+                "mixed",
+            ),
+            [
+                ImportItem(
+                    Ident(
+                        "a",
+                    ),
+                    Some(
+                        Ident(
+                            "x",
+                        ),
+                    ),
+                ),
+                ImportItem(
+                    Ident(
+                        "b",
+                    ),
+                    None,
+                ),
+                ImportItem(
+                    Ident(
+                        "c",
+                    ),
+                    Some(
+                        Ident(
+                            "z",
+                        ),
+                    ),
+                ),
+            ],
+        ),
+        Import(
+            Str(
+                "std/collections",
+            ),
+            [
+                ImportItem(
+                    Ident(
+                        "list",
+                    ),
+                    None,
+                ),
+                ImportItem(
+                    Ident(
+                        "map",
+                    ),
+                    None,
+                ),
+            ],
+        ),
+        Import(
+            Str(
+                "api/v1/routes/users",
+            ),
+            [
+                ImportItem(
+                    Ident(
+                        "handler",
+                    ),
+                    None,
+                ),
+            ],
+        ),
+        Import(
+            Str(
+                "mod1",
+            ),
+            [
+                ImportItem(
+                    Ident(
+                        "x",
+                    ),
+                    None,
+                ),
+            ],
+        ),
+        Import(
+            Str(
+                "mod2",
+            ),
+            [
+                ImportItem(
+                    Ident(
+                        "y",
+                    ),
+                    None,
+                ),
+            ],
+        ),
+        Import(
+            Str(
+                "mod3",
+            ),
+            [
+                ImportItem(
+                    Ident(
+                        "z",
+                    ),
+                    None,
+                ),
+            ],
+        ),
+        Var(
+            Ident(
+                "value",
+            ),
+            Int32(
+                42,
+            ),
+        ),
+        FuncDecl(
+            Ident(
+                "main",
+            ),
+            Block(
+                [
+                    StmtExpr(
+                        Call(
+                            GetVar(
+                                Ident(
+                                    "print",
+                                ),
+                            ),
+                            [
+                                Str(
+                                    "imports work!",
+                                ),
+                            ],
+                        ),
+                    ),
+                ],
+            ),
+            [],
+        ),
+    ],
+)

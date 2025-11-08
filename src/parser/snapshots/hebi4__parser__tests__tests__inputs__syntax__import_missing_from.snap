@@ -1,0 +1,13 @@
+---
+source: src/parser/tests.rs
+expression: snapshot
+---
+SOURCE
+//parse
+
+import foo "module"
+
+ERROR
+expected 'from', found '"module"'
+3 |  import foo "module"
+  |             ^^^^^^^^

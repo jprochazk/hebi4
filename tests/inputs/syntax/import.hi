@@ -1,0 +1,23 @@
+//parse
+
+import foo from "module"
+
+import bar, baz, qux from "another_module"
+
+import request as req from "http"
+
+import a as x, b, c as z from "mixed"
+
+import list, map from "std/collections"
+
+import handler from "api/v1/routes/users"
+
+import x from "mod1"
+import y from "mod2"
+import z from "mod3"
+
+let value = 42
+
+fn main() {
+    print("imports work!")
+}

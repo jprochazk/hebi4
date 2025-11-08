@@ -81,6 +81,32 @@ impl<'a> GcRef<'a, Table> {
         Some(v)
     }
 
+    // TODO: string interning
+    #[inline]
+    pub(crate) unsafe fn get_raw(&self, key: GcPtr<String>) -> Option<ValueRaw> {
+        let this: &Table = &*self;
+        let hash = key.as_ref().hash;
+        let entry = this.map.raw_entry().from_hash(hash, |&Opaque(index)| {
+            // SAFETY: `index` is guaranteed to be valid
+            let (stored_key, _) = unsafe { this.kv.get_unchecked(index as usize) };
+            // SAFETY: dereferencing inner Gc'd pointers is safe,
+            // because we are rooted (by `RefMut`), and the table
+            // is traced.
+            let stored_key = unsafe { stored_key.as_ref() };
+
+            stored_key.as_str() == key.as_ref().as_str()
+        });
+
+        let Some((&Opaque(index), &())) = entry else {
+            return None;
+        };
+
+        // SAFETY: `index` is guaranteed to be valid
+        let (_, v) = unsafe { this.kv.get_unchecked(index as usize) };
+
+        Some(*v)
+    }
+
     #[inline]
     pub fn entry(&self, index: usize) -> Option<(GcRef<'a, String>, ValueRef<'a>)> {
         // TODO: can this use `Ref::map`?
@@ -140,12 +166,10 @@ impl GcRefMut<'_, Table> {
     /// ## Safety
     ///
     /// - `key` and `value` must be alive
-    #[inline(never)]
+    #[inline(always)]
     pub unsafe fn insert_raw(&mut self, key: GcPtr<String>, value: ValueRaw) {
         let this: &mut Table = &mut *self;
-        let key = unsafe { key.as_ref() };
-
-        let hash = this.hash.hash_str(key.as_str());
+        let hash = key.as_ref().hash;
         let entry = this.map.raw_entry_mut().from_hash(hash, |&Opaque(index)| {
             // SAFETY: `index` is guaranteed to be valid
             let (stored_key, _) = unsafe { this.kv.get_unchecked(index as usize) };
@@ -154,7 +178,7 @@ impl GcRefMut<'_, Table> {
             // is traced.
             let stored_key = unsafe { stored_key.as_ref() };
 
-            stored_key.as_str() == key.as_str()
+            stored_key.as_str() == key.as_ref().as_str()
         });
 
         match entry {
@@ -162,14 +186,14 @@ impl GcRefMut<'_, Table> {
                 let index = entry.key().0 as usize;
                 // SAFETY: `index` is guaranteed to be valid
                 let (k, v) = unsafe { this.kv.get_unchecked_mut(index) };
-                *k = key.as_ptr();
+                *k = key;
                 *v = value;
             }
             RawEntryMut::Vacant(entry) => {
                 let index = this.kv.len() as u32;
                 // NOTE: the newly stored key is rooted at least for the duration
                 // of this call to `insert`, proven by being passed in as `Ref`
-                this.kv.push((key.as_ptr(), value));
+                this.kv.push((key, value));
                 entry.insert_with_hasher(hash, Opaque(index), (), |&Opaque(index)| {
                     // SAFETY: `index` is guaranteed to be valid, because we just pushed it into `kv`
                     let (stored_key, _) = unsafe { this.kv.get_unchecked(index as usize) };

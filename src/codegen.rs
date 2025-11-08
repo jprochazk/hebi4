@@ -1458,6 +1458,12 @@ fn emit_stmt<'a>(m: &mut State<'a>, stmt: Node<'a, Stmt>) -> Result<()> {
             let value = eval_expr(m, node.inner(), node.inner_span())?;
             free_value(m, value);
         }
+        ast::StmtKind::Import(_node) => {
+            todo!("import statement codegen not yet implemented")
+        }
+        ast::StmtKind::ImportBare(_node) => {
+            todo!("bare import statement codegen not yet implemented")
+        }
     }
 
     Ok(())

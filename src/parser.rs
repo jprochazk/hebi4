@@ -159,6 +159,7 @@ fn parse_stmt(p: &mut State, buf: &Bump) -> Result<Spanned<Stmt>> {
         t![let] => parse_stmt_var(p, buf),
         t![fn] => parse_stmt_func_decl(p, buf),
         t![loop] => parse_stmt_loop(p, buf),
+        t![import] => parse_stmt_import(p, buf),
         _ => parse_stmt_expr(p, buf),
     }
 }
@@ -205,6 +206,70 @@ fn parse_stmt_loop(p: &mut State, buf: &Bump) -> Result<Spanned<Stmt>> {
     p.loop_depth -= 1;
 
     Ok(p.close(node, Loop { body }).map_into())
+}
+
+/// `"import" import_item,+ "from" STRING` or `"import" STRING "as" IDENT`
+///
+/// `p` must be at "import"
+fn parse_stmt_import(p: &mut State, buf: &Bump) -> Result<Spanned<Stmt>> {
+    p.must(t![import])?;
+
+    // Check if bare import (string) or named import (identifier)
+    if p.at(t![str]) {
+        parse_stmt_import_bare(p, buf)
+    } else {
+        parse_stmt_import_named(p, buf)
+    }
+}
+
+/// `"import" import_item,+ "from" STRING`
+///
+/// `p` must be after "import" keyword
+fn parse_stmt_import_named(p: &mut State, buf: &Bump) -> Result<Spanned<Stmt>> {
+    let node = p.open();
+
+    // Parse comma-separated list of import items (at least one)
+    let mut items = temp(buf);
+    loop {
+        items.push(parse_import_item(p, buf)?);
+        if !p.eat(t![,]) {
+            break;
+        }
+    }
+
+    p.must(t![from])?;
+    let path = parse_str(p, buf)?;
+
+    let items = items.as_slice();
+
+    Ok(p.close(node, Import { items, path }).map_into())
+}
+
+/// `"import" STRING "as" IDENT`
+///
+/// `p` must be after "import" keyword
+fn parse_stmt_import_bare(p: &mut State, buf: &Bump) -> Result<Spanned<Stmt>> {
+    let node = p.open();
+
+    let path = parse_str(p, buf)?;
+    p.must(t![as])?;
+    let binding = parse_ident(p, buf)?;
+
+    Ok(p.close(node, ImportBare { path, binding }).map_into())
+}
+
+/// `IDENT` or `IDENT "as" IDENT`
+fn parse_import_item(p: &mut State, buf: &Bump) -> Result<Spanned<ast::ImportItem>> {
+    let node = p.open();
+
+    let name = parse_ident(p, buf)?;
+    let alias = if p.eat(t![as]) {
+        parse_ident(p, buf)?.map(Opt::some)
+    } else {
+        Spanned::empty(Opt::none())
+    };
+
+    Ok(p.close(node, ImportItem { name, alias }))
 }
 
 fn parse_stmt_expr(p: &mut State, buf: &Bump) -> Result<Spanned<Stmt>> {

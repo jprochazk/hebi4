@@ -209,6 +209,9 @@ macro_rules! t {
     (continue) => ($crate::token::TokenKind::Continue);
     (if) => ($crate::token::TokenKind::If);
     (else) => ($crate::token::TokenKind::Else);
+    (import) => ($crate::token::TokenKind::Import);
+    (from) => ($crate::token::TokenKind::From);
+    (as) => ($crate::token::TokenKind::As);
     ("(") => ($crate::token::TokenKind::ParenL);
     (")") => ($crate::token::TokenKind::ParenR);
     ("{") => ($crate::token::TokenKind::BraceL);
@@ -338,6 +341,12 @@ pub enum TokenKind {
     If,
     #[token("else")]
     Else,
+    #[token("import")]
+    Import,
+    #[token("from")]
+    From,
+    #[token("as")]
+    As,
 
     #[token("(")]
     ParenL,
@@ -436,6 +445,9 @@ impl TokenKind {
             TokenKind::Continue => "continue",
             TokenKind::If => "if",
             TokenKind::Else => "else",
+            TokenKind::Import => "import",
+            TokenKind::From => "from",
+            TokenKind::As => "as",
             TokenKind::ParenL => "(",
             TokenKind::ParenR => ")",
             TokenKind::BraceL => "{",

@@ -1,0 +1,13 @@
+---
+source: src/parser/tests.rs
+expression: snapshot
+---
+SOURCE
+//parse
+
+import from "module"
+
+ERROR
+expected '<ident>', found 'from'
+3 |  import from "module"
+  |         ^^^^

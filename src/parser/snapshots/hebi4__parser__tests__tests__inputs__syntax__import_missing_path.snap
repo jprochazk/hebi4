@@ -1,0 +1,13 @@
+---
+source: src/parser/tests.rs
+expression: snapshot
+---
+SOURCE
+//parse
+
+import foo from
+
+ERROR
+expected '<string>', found '<eof>'
+3 |  import foo from
+  |                 ^

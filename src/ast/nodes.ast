@@ -14,6 +14,21 @@ stmt func_decl {
     params: [ident],
 };
 
+stmt import {
+    items: [import_item],
+    path: str,
+};
+
+stmt import_bare {
+    path: str,
+    binding: ident,
+};
+
+data import_item {
+    name: ident,
+    alias: ident?,
+};
+
 stmt stmt_expr {
     inner: expr,
 };

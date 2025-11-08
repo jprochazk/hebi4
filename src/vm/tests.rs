@@ -112,12 +112,8 @@ fn run(path: &Path) {
 
         #[cfg(miri)]
         {
-            let failure = failure1;
-            if failure {
-                panic!("{snapshot1}");
-            } else {
-                eprintln!("{snapshot1}");
-            }
+            // on miri all we care about is if there's any undefined behavior.
+            eprintln!("{snapshot1}");
         }
     });
 }
