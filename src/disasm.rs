@@ -205,6 +205,9 @@ impl<'a> std::fmt::Display for DisasmFuncWithSrc<'a> {
                     "call {dst}, {id}   ; {id}={name}",
                     name = module.host_function_at(id).name,
                 )?,
+                I::Import { _unused, id } => {
+                    writeln!(f, "import {id}   ; {v}", v = func.literal(id.zx()))?
+                }
                 I::Ret {} => writeln!(f, "ret")?,
                 I::Retv { src } => writeln!(f, "retv {src}")?,
                 I::Stop {} => writeln!(f, "stop")?,

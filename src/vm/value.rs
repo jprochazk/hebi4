@@ -1,8 +1,3 @@
-#[macro_use]
-mod macros;
-
-pub use macros::{list, string, table};
-
 use crate::gc::{GcAnyPtr, GcPtr, Trace};
 
 // TODO: string interning
@@ -98,19 +93,24 @@ pub use self::{
     function::FunctionProto,
     list::{List, ListIter},
     module::ModuleProto,
-    string::String,
+    string::Str,
     table::{Table, TableEntries},
     userdata::UserData,
 };
 
 #[cfg(test)]
 mod tests {
-    use crate::vm::gc::Heap;
+    use crate::{
+        value::List,
+        vm::gc::{Heap, let_root},
+    };
 
     #[test]
     fn heap_collect_on_drop() {
         // `heap` frees all managed objects on drop
+
         let heap = &mut Heap::new();
-        crate::value::list!(in heap; v = 0);
+        let_root!(in heap; v);
+        let v = List::new(heap, v, 0);
     }
 }

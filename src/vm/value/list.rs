@@ -2,7 +2,10 @@ use super::{
     super::gc::{GcRef, GcRefMut, Trace, Tracer, ValueRef, ValueRoot},
     ValueRaw,
 };
-use crate::vm::gc::{GcPtr, Heap};
+use crate::{
+    gc::{GcRoot, GcUninitRoot},
+    vm::gc::{GcPtr, Heap},
+};
 
 #[repr(align(16))]
 pub struct List {
@@ -34,6 +37,16 @@ impl List {
 
             (*ptr).write(Self { items });
         })
+    }
+
+    pub fn new_zeroed<'a>(heap: &mut Heap, root: GcUninitRoot<'a>, len: usize) -> GcRoot<'a, Self> {
+        let ptr = Self::alloc_zeroed(heap, len);
+        unsafe { root.init_raw(heap, ptr) }
+    }
+
+    pub fn new<'a>(heap: &mut Heap, root: GcUninitRoot<'a>, capacity: usize) -> GcRoot<'a, Self> {
+        let ptr = Self::alloc(heap, capacity);
+        unsafe { root.init_raw(heap, ptr) }
     }
 }
 
@@ -212,17 +225,15 @@ impl std::fmt::Debug for GcRefMut<'_, List> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        gc::{Heap, ValueRef, ValueRoot},
-        value::list,
-    };
+    use crate::gc::{Heap, ValueRef, ValueRoot, let_root};
 
     #[test]
     fn list() {
         let heap = &mut Heap::new();
 
         {
-            list!(in heap; list = 128);
+            let_root!(in heap; list);
+            let list = List::new(heap, list, 128);
 
             list.as_mut(heap).push(ValueRoot::Int(10));
 

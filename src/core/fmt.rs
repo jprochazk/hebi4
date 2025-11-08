@@ -1,20 +1,19 @@
 use crate::error::{Result, error};
+use crate::gc::ValueRef;
 use crate::span::Span;
-use crate::value::{ValueRaw, host_function::Context};
+use crate::value::host_function::Context;
 
-pub fn print(mut cx: Context) -> Result<ValueRaw> {
-    let [value] = cx.args()?;
+pub fn print<'a>(mut cx: Context<'a>, v: ValueRef<'a>) -> Result<()> {
+    // let [value] = cx.args()?;
 
     let o = &mut cx.stdio().stdout;
-    match value {
-        crate::gc::ValueRef::Nil => writeln!(o, "nil"),
-        crate::gc::ValueRef::Bool(v) => writeln!(o, "{v}"),
-        crate::gc::ValueRef::Int(v) => writeln!(o, "{v}"),
-        crate::gc::ValueRef::Float(v) => writeln!(o, "{v:?}"),
-        crate::gc::ValueRef::Object(v) => writeln!(o, "{v:?}"),
+    match v {
+        ValueRef::Nil => writeln!(o, "nil"),
+        ValueRef::Bool(v) => writeln!(o, "{v}"),
+        ValueRef::Int(v) => writeln!(o, "{v}"),
+        ValueRef::Float(v) => writeln!(o, "{v:?}"),
+        ValueRef::Object(v) => writeln!(o, "{v:?}"), //unsafe { writeln!(o, "{:?}", v.as_ref()) },
     }
     // TODO: span here
-    .map_err(|err| error(err.to_string(), Span::empty()))?;
-
-    Ok(ValueRaw::Nil)
+    .map_err(|err| error(err.to_string(), Span::empty()))
 }

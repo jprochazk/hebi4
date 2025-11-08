@@ -118,7 +118,7 @@ use crate::{
     codegen::opcodes::{Cap, HostId, Mvar},
     core::CoreLib,
     error::{Result, error},
-    module::{Capture, CaptureInfo, ClosureInfo, FuncDebugInfo, FuncInfo, Literal, Local, Module},
+    module::{Capture, CaptureInfo, ClosureInfo, FuncDebugInfo, FuncInfo, ImportInfo, Literal, Local, Module},
     span::Span,
     vm::{Control, VmState, value::ValueRaw},
 };
@@ -734,6 +734,12 @@ impl<'a> Literals<'a> {
     fn closure(&mut self, closure: ClosureInfo, span: Span) -> Result<Lit> {
         let id = Self::next_id(&mut self.flat, span)?;
         self.flat.push(Literal::ClosureInfo(closure));
+        Ok(id)
+    }
+
+    fn import(&mut self, import: ImportInfo, span: Span) -> Result<Lit> {
+        let id = Self::next_id(&mut self.flat, span)?;
+        self.flat.push(Literal::ImportInfo(import));
         Ok(id)
     }
 }
@@ -1458,12 +1464,8 @@ fn emit_stmt<'a>(m: &mut State<'a>, stmt: Node<'a, Stmt>) -> Result<()> {
             let value = eval_expr(m, node.inner(), node.inner_span())?;
             free_value(m, value);
         }
-        ast::StmtKind::Import(_node) => {
-            todo!("import statement codegen not yet implemented")
-        }
-        ast::StmtKind::ImportBare(_node) => {
-            todo!("bare import statement codegen not yet implemented")
-        }
+        ast::StmtKind::Import(node) => emit_stmt_import(m, Import::Named(node))?,
+        ast::StmtKind::ImportBare(node) => emit_stmt_import(m, Import::Bare(node))?
     }
 
     Ok(())
@@ -1527,6 +1529,54 @@ fn emit_stmt_func<'a>(m: &mut State<'a>, func: Node<'a, ast::FuncDecl>) -> Resul
     )?;
 
     m.define_function(id, f);
+
+    Ok(())
+}
+
+enum Import<'a> {
+    Named(Node<'a, ast::Import>),
+    Bare(Node<'a, ast::ImportBare>),
+}
+
+fn emit_stmt_import<'a>(m: &mut State<'a>, node: Import<'a>) -> Result<()> {
+    let (import_info, span) = match node {
+        Import::Named(node) => {
+            // import a as x, b as y, c as z from "spec"
+            let spec = node.path().get();
+            let span = node.path_span();
+
+            let mut bindings = vec![in m.buf];
+            for item in node.items() {
+                let name = item.name().get();
+                let alias = match item.alias().as_option() {
+                    Some(alias) => alias.get(),
+                    None => name,
+                };
+
+                let reg = fresh_var(m, item.alias_span())?;
+                m.declare_local(alias, reg, item.alias_span());
+                bindings.push((name.to_string(), reg));
+            }
+
+            let info = ImportInfo::named(spec.to_string(), bindings.into_iter().collect());
+            (info, span)
+        }
+        Import::Bare(node) => {
+            // import "spec" as name
+            let spec = node.path().get();
+            let binding = node.binding().get();
+            let span = node.path_span();
+
+            let reg = fresh_var(m, node.binding_span())?;
+            m.declare_local(binding, reg, node.binding_span());
+
+            let info = ImportInfo::bare(spec.to_string(), reg);
+            (info, span)
+        }
+    };
+
+    let lit = f!(m).literals.import(import_info, span)?;
+    m.emit(asm::import(unsafe { Reg::new_unchecked(0) }, lit), span);
 
     Ok(())
 }
@@ -3277,7 +3327,8 @@ fn is_basic_block_exit(prev: Insn, insn: Insn) -> bool {
         | Opcode::Not
         | Opcode::Call
         | Opcode::Fastcall
-        | Opcode::Hostcall => false,
+        | Opcode::Hostcall
+        | Opcode::Import => false,
     }
 }
 
@@ -3352,7 +3403,8 @@ fn is_jump_condition(insn: Insn) -> bool {
         | Opcode::Hostcall
         | Opcode::Ret
         | Opcode::Retv
-        | Opcode::Stop => false,
+        | Opcode::Stop
+        | Opcode::Import => false,
     }
 }
 

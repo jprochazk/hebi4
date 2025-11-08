@@ -1,0 +1,18 @@
+---
+source: src/codegen/tests.rs
+expression: snapshot
+---
+SOURCE
+import read_file as read, write_file as write from "fs"
+
+OK
+.fn @main
+  params 0
+  stack 3
+  .locals
+    read = r1
+    write = r2
+  .code
+  0  import l0   ; {import "fs", n=2}
+  1  lnil r0
+  2  ret

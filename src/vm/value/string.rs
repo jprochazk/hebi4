@@ -1,15 +1,18 @@
 use rustc_hash::FxBuildHasher;
 
-use crate::vm::gc::{GcPtr, GcRef, Heap, Trace, Tracer};
+use crate::{
+    gc::{GcRoot, GcUninitRoot},
+    vm::gc::{GcPtr, GcRef, Heap, Trace, Tracer},
+};
 
 // TODO: intern all strings?
 #[repr(align(16))]
-pub struct String {
+pub struct Str {
     pub(crate) hash: u64,
-    pub(crate) inner: std::string::String,
+    pub(crate) inner: String,
 }
 
-impl String {
+impl Str {
     #[inline(never)]
     pub fn alloc(heap: &Heap, s: &str) -> GcPtr<Self> {
         heap.alloc_no_gc(|ptr| unsafe {
@@ -20,21 +23,27 @@ impl String {
         })
     }
 
+    #[inline(never)]
+    pub fn new<'a>(heap: &mut Heap, root: GcUninitRoot<'a>, s: &str) -> GcRoot<'a, Self> {
+        let ptr = Self::alloc(heap, s);
+        unsafe { root.init_raw(heap, ptr) }
+    }
+
     #[inline]
     pub fn len(&self) -> usize {
         self.inner.len()
     }
 }
 
-impl GcRef<'_, String> {
+impl GcRef<'_, Str> {
     #[inline]
     pub fn as_str(&self) -> &str {
         self.inner.as_str()
     }
 }
 
-unsafe impl Trace for String {
-    vtable!(String);
+unsafe impl Trace for Str {
+    vtable!(Str);
 
     #[inline]
     unsafe fn trace(&self, tracer: &Tracer) {
@@ -42,13 +51,13 @@ unsafe impl Trace for String {
     }
 }
 
-impl std::fmt::Display for GcRef<'_, String> {
+impl std::fmt::Display for GcRef<'_, Str> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         std::fmt::Display::fmt(self.as_str(), f)
     }
 }
 
-impl std::fmt::Debug for GcRef<'_, String> {
+impl std::fmt::Debug for GcRef<'_, Str> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         std::fmt::Debug::fmt(self.as_str(), f)
     }

@@ -53,7 +53,7 @@ use std::{marker::PhantomData, ptr::NonNull};
 
 use array::{DynArray, DynStack};
 use gc::{GcPtr, Heap};
-use value::{List, ModuleProto, String, Table};
+use value::{List, ModuleProto, Str, Table};
 
 use crate::{
     codegen::opcodes::*,
@@ -65,6 +65,7 @@ use crate::{
         Closure,
         closure::{CaptureInfo, ClosureProto},
         host_function::{Context, HostFunction, HostFunctionCallback},
+        module::ImportProto,
     },
     vm::value::{FunctionProto, ValueRaw, module::ModuleRegistry},
 };
@@ -142,11 +143,11 @@ impl Lp {
     }
 
     #[inline(always)]
-    pub unsafe fn str_unchecked(self, r: impl LpIdx) -> GcPtr<String> {
+    pub unsafe fn str_unchecked(self, r: impl LpIdx) -> GcPtr<Str> {
         let v = self._at(r.idx());
 
-        debug_assert!(matches!(&*v, ValueRaw::Object(gc) if gc.is::<String>()));
-        v.cast::<u64>().add(1).cast::<GcPtr<String>>().read()
+        debug_assert!(matches!(&*v, ValueRaw::Object(gc) if gc.is::<Str>()));
+        v.cast::<u64>().add(1).cast::<GcPtr<Str>>().read()
     }
 
     #[inline(always)]
@@ -155,6 +156,14 @@ impl Lp {
 
         debug_assert!(matches!(&*v, ValueRaw::Object(gc) if gc.is::<ClosureProto>()));
         v.cast::<u64>().add(1).cast::<GcPtr<ClosureProto>>().read()
+    }
+
+    #[inline(always)]
+    pub unsafe fn import_proto_unchecked(self, r: impl LpIdx) -> GcPtr<ImportProto> {
+        let v = self._at(r.idx());
+
+        debug_assert!(matches!(&*v, ValueRaw::Object(gc) if gc.is::<ClosureProto>()));
+        v.cast::<u64>().add(1).cast::<GcPtr<ImportProto>>().read()
     }
 }
 
@@ -553,6 +562,7 @@ static JT: JumpTable = jump_table! {
     call,
     fastcall,
     hostcall,
+    import,
     ret,
     retv,
     stop,
@@ -695,7 +705,7 @@ unsafe fn lidx(vm: Vm, jt: Jt, ip: Ip, args: Lidx, sp: Sp, lp: Lp) -> Control {
 
         *dst = value.raw();
     } else if let Some(table) = target.into_object::<Table>() {
-        let Some(key) = idx.into_object::<String>() else {
+        let Some(key) = idx.into_object::<Str>() else {
             return invalid_table_key_error(ip, vm);
         };
 
@@ -753,7 +763,7 @@ unsafe fn sidx(vm: Vm, jt: Jt, ip: Ip, args: Sidx, sp: Sp, lp: Lp) -> Control {
 
         list.as_mut().set_raw_unchecked(idx, src);
     } else if let Some(table) = target.into_object::<Table>() {
-        let Some(key) = idx.into_object::<String>() else {
+        let Some(key) = idx.into_object::<Str>() else {
             return invalid_table_key_error(ip, vm);
         };
 
@@ -818,7 +828,7 @@ unsafe fn lkey(vm: Vm, jt: Jt, ip: Ip, args: Lkey, sp: Sp, lp: Lp) -> Control {
         return not_a_table_error(ip, vm);
     };
 
-    let Some(key) = key.into_object::<String>() else {
+    let Some(key) = key.into_object::<Str>() else {
         return invalid_table_key_error(ip, vm);
     };
 
@@ -869,7 +879,7 @@ unsafe fn skey(vm: Vm, jt: Jt, ip: Ip, args: Skey, sp: Sp, lp: Lp) -> Control {
         return not_a_table_error(ip, vm);
     };
 
-    let Some(key) = key.into_object::<String>() else {
+    let Some(key) = key.into_object::<Str>() else {
         return invalid_table_key_error(ip, vm);
     };
 
@@ -1120,7 +1130,7 @@ unsafe fn iseqs(vm: Vm, jt: Jt, ip: Ip, args: Iseqs, sp: Sp, lp: Lp) -> Control 
     let lhs = *sp.at(args.lhs());
     let rhs = lp.str_unchecked(args.rhs());
 
-    let Some(lhs) = lhs.into_object::<String>() else {
+    let Some(lhs) = lhs.into_object::<Str>() else {
         // execute `jmp`
         let ip = ip.offset(1);
         return dispatch_current(vm, jt, ip, sp, lp);
@@ -1152,7 +1162,7 @@ unsafe fn isnes(vm: Vm, jt: Jt, ip: Ip, args: Isnes, sp: Sp, lp: Lp) -> Control 
     let lhs = *sp.at(args.lhs());
     let rhs = lp.str_unchecked(args.rhs());
 
-    let Some(lhs) = lhs.into_object::<String>() else {
+    let Some(lhs) = lhs.into_object::<Str>() else {
         // skip `jmp`
         let ip = ip.offset(2);
         return dispatch_current(vm, jt, ip, sp, lp);
@@ -1745,6 +1755,12 @@ unsafe fn hostcall(vm: Vm, jt: Jt, ip: Ip, args: Hostcall, sp: Sp, lp: Lp) -> Co
     let callee = callee.as_ref().f;
 
     do_host_call(callee, vm, jt, ip, sp, lp, ret, nargs)
+}
+
+unsafe fn import(vm: Vm, jt: Jt, ip: Ip, args: Import, sp: Sp, lp: Lp) -> Control {
+    let info = lp.import_proto_unchecked(args.id());
+
+    todo!("import instruction not yet implemented")
 }
 
 #[inline(always)]

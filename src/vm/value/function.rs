@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use super::String;
+use super::Str;
 use crate::{
     codegen::opcodes::Insn,
     module::FuncDebugInfo,
@@ -13,7 +13,7 @@ use crate::{
 
 #[repr(align(16))]
 pub struct FunctionProto {
-    pub(crate) name: GcPtr<String>,
+    pub(crate) name: GcPtr<Str>,
     pub(crate) nparams: u8,
     pub(crate) nstack: u8,
     pub(crate) code: Box<[Insn]>,
@@ -24,7 +24,7 @@ pub struct FunctionProto {
 
 impl<'a> GcRef<'a, FunctionProto> {
     #[inline]
-    pub fn name(&self) -> GcRef<'a, String> {
+    pub fn name(&self) -> GcRef<'a, Str> {
         GcRef::map(self, |this| &this.name)
     }
 

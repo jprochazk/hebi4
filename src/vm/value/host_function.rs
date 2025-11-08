@@ -2,15 +2,16 @@ use std::marker::PhantomData;
 
 use crate::codegen::opcodes::{Reg, Sp, Vm};
 use crate::error::{Result, error};
-use crate::gc::{GcPtr, GcRef, Heap, Trace, ValueRef};
+use crate::gc::{GcPtr, GcRef, Heap, Trace};
 use crate::span::Span;
-use crate::value::{String, ValueRaw};
+use crate::value::{Str, ValueRaw};
 use crate::vm::{Invariant, Stdio};
 
 pub struct Context<'a> {
     vm: Vm,
     sp: Sp,
     nargs: u8,
+    // _lifetime: PhantomData<&'a ()>,
     _lifetime: Invariant<'a>,
 }
 
@@ -24,13 +25,14 @@ impl<'a> Context<'a> {
         }
     }
 
-    pub fn args<const N: usize>(&self) -> Result<[ValueRef<'a>; N]> {
+    #[inline]
+    pub(crate) fn args<const N: usize>(&self) -> Result<[ValueRaw; N]> {
         if (self.nargs as usize) < N {
             // TODO: span here
             return error("invalid number of arguments", Span::empty()).into();
         }
 
-        let mut args = [const { ValueRef::Nil }; N];
+        let mut args = [const { ValueRaw::Nil }; N];
         for i in 0..N {
             unsafe {
                 args[i] = self.arg_unchecked(i as u8);
@@ -39,16 +41,28 @@ impl<'a> Context<'a> {
         Ok(args)
     }
 
-    pub fn arg(&self, i: u8) -> Option<ValueRef<'a>> {
+    #[inline]
+    pub(crate) fn arg(&self, i: u8) -> Option<ValueRaw> {
         if i >= self.nargs {
             return None;
         }
 
-        Some(unsafe { self.sp.at(Reg::new_unchecked(i + 1)).read().as_ref() })
+        Some(unsafe { self.arg_unchecked(i) })
     }
 
-    pub unsafe fn arg_unchecked(&self, i: u8) -> ValueRef<'a> {
-        self.sp.at(Reg::new_unchecked(i + 1)).read().as_ref()
+    #[inline]
+    pub(crate) unsafe fn arg_unchecked(&self, i: u8) -> ValueRaw {
+        self.sp.at(Reg::new_unchecked(i + 1)).read()
+    }
+
+    #[inline]
+    pub(crate) fn private_clone(&self) -> Self {
+        Self {
+            vm: self.vm,
+            sp: self.sp,
+            nargs: self.nargs,
+            _lifetime: PhantomData,
+        }
     }
 
     pub fn stdio(&mut self) -> &mut Stdio {
@@ -56,22 +70,17 @@ impl<'a> Context<'a> {
     }
 }
 
-pub type HostFunctionCallback = for<'a> fn(Context<'a>) -> Result<ValueRaw>;
+pub type HostFunctionCallback = for<'a> unsafe fn(Context<'a>) -> Result<ValueRaw>;
 
 pub struct HostFunction {
-    pub(crate) name: GcPtr<String>,
+    pub(crate) name: GcPtr<Str>,
     pub(crate) arity: u8,
     pub(crate) f: HostFunctionCallback,
 }
 
 impl HostFunction {
     #[inline(never)]
-    pub fn alloc(
-        heap: &Heap,
-        name: GcPtr<String>,
-        arity: u8,
-        f: HostFunctionCallback,
-    ) -> GcPtr<Self> {
+    pub fn alloc(heap: &Heap, name: GcPtr<Str>, arity: u8, f: HostFunctionCallback) -> GcPtr<Self> {
         heap.alloc_no_gc(|ptr| unsafe {
             (*ptr).write(Self { name, arity, f });
         })

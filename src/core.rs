@@ -2,9 +2,10 @@ mod fmt;
 use crate::{
     codegen::opcodes::HostId,
     gc::{GcPtr, Heap},
+    module::native::NativeFunctionCallback,
     value::{
         host_function::{HostFunction, HostFunctionCallback},
-        string::String,
+        string::Str,
     },
 };
 use hashbrown::HashMap;
@@ -12,14 +13,31 @@ use rustc_hash::FxBuildHasher;
 use std::sync::LazyLock;
 
 #[derive(Clone, Copy)]
-pub struct CoreLib {
-    functions: &'static [CoreFunction],
+struct CoreLibData {
+    functions: &'static LazyLock<Box<[CoreFunction]>>,
     by_name: &'static LazyLock<HashMap<&'static str, HostId, FxBuildHasher>>,
 }
 
-// TODO: nicer bindings with fromvalue/intovalue
 macro_rules! functions {
-    ($($module:ident :: $name:ident ($arity:expr)),* $(,)?) => {{
+    ($($module:ident :: $name:ident),* $(,)?) => {{
+
+        static FUNCTIONS: LazyLock<Box<[CoreFunction]>> = LazyLock::new(|| {
+            [$(
+                CoreFunction {
+                    name: stringify!($name),
+                    arity: arity_of(&$crate::core::$module::$name),
+                    f: {
+                        unsafe fn _shim(cx: $crate::value::host_function::Context<'_>) -> $crate::error::Result<$crate::value::ValueRaw> {
+                            let f = $crate::core::$module::$name;
+                            $crate::module::native::NativeFunctionCallback::call(&f, cx)
+                        }
+
+                        _shim
+                    },
+                }
+            )*].into_iter().collect()
+        });
+
         static BY_NAME: LazyLock<HashMap<&'static str, HostId, FxBuildHasher>> = LazyLock::new(|| {
             let mut map = HashMap::default();
 
@@ -34,29 +52,33 @@ macro_rules! functions {
             map
         });
 
-        CoreLib {
-            functions: &[
-                $(
-                    CoreFunction {
-                        name: stringify!($name),
-                        arity: $arity,
-                        f: $crate::core::$module::$name,
-                    }
-                )*
-            ],
+        CoreLibData {
+            functions: &FUNCTIONS,
             by_name: &BY_NAME
         }
     }};
 }
 
+fn arity_of<'a, F: NativeFunctionCallback<'a, T>, T>(f: &F) -> u8 {
+    F::ARITY
+}
+
 // TODO: better sync for arity
-static CORE_LIB: CoreLib = functions! {
-    fmt::print(1)
+static CORE_LIB: CoreLibData = functions! {
+    fmt::print
 };
 
+pub struct CoreLib {
+    functions: &'static [CoreFunction],
+    by_name: &'static HashMap<&'static str, HostId, FxBuildHasher>,
+}
+
 impl CoreLib {
-    pub fn get() -> &'static Self {
-        &CORE_LIB
+    pub fn get() -> Self {
+        CoreLib {
+            functions: &CORE_LIB.functions,
+            by_name: &CORE_LIB.by_name,
+        }
     }
 
     pub fn find(&self, name: &str) -> Option<(HostId, &'static CoreFunction)> {
@@ -91,7 +113,7 @@ impl RuntimeCoreLib {
             .iter()
             .map(|function| {
                 // TODO: string interning
-                let name = String::alloc(heap, function.name);
+                let name = Str::alloc(heap, function.name);
 
                 HostFunction::alloc(heap, name, function.arity, function.f)
             })

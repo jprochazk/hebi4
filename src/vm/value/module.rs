@@ -1,3 +1,5 @@
+mod native;
+
 use hashbrown::HashMap;
 use rustc_hash::FxBuildHasher;
 
@@ -6,15 +8,15 @@ use crate::{
     codegen::opcodes::{FnId, Insn, Reg, asm},
     gc::GcUninitRoot,
     module::{FuncInfo, Literal, Module},
-    value::{closure::ClosureProto, string},
+    value::{closure::ClosureProto, module::native::NativeModuleProto},
     vm::{
         gc::{GcPtr, GcRef, GcRefMut, GcRoot, Heap, Trace, let_root},
-        value::String,
+        value::Str,
     },
 };
 
 pub struct ModuleProto {
-    pub(crate) name: GcPtr<String>,
+    pub(crate) name: GcPtr<Str>,
     pub(crate) module_id: ModuleId,
     pub(crate) entrypoint: Option<GcPtr<FunctionProto>>,
     pub(crate) functions: Box<[GcPtr<FunctionProto>]>,
@@ -52,7 +54,7 @@ impl<'a> GcRef<'a, ModuleProto> {
     }
 
     #[inline]
-    pub fn name(&self) -> GcRef<'a, String> {
+    pub fn name(&self) -> GcRef<'a, Str> {
         GcRef::map(self, |this| &this.name)
     }
 }
@@ -109,7 +111,9 @@ impl<'a> std::fmt::Debug for GcRef<'a, ModuleProto> {
 #[derive(Default)]
 pub(crate) struct ModuleRegistry {
     modules: Vec<GcPtr<ModuleProto>>,
-    by_name: HashMap<std::string::String, ModuleId, FxBuildHasher>,
+    by_name: HashMap<String, ModuleId, FxBuildHasher>,
+
+    native_modules: HashMap<String, GcPtr<NativeModuleProto>>,
 }
 
 impl ModuleRegistry {
@@ -143,6 +147,42 @@ impl ModuleRegistry {
 #[repr(transparent)]
 pub(crate) struct ModuleId(u32);
 
+pub struct ImportProto {
+    spec: GcPtr<Str>,
+    bindings: ImportBindings,
+}
+
+pub enum ImportBindings {
+    Bare(Reg),
+    Named(Box<[Reg]>),
+}
+
+impl<'a> GcRef<'a, ImportProto> {
+    pub fn spec(&self) -> GcRef<'a, Str> {
+        GcRef::map(self, |this| &this.spec)
+    }
+
+    pub fn bindings(&self) -> &ImportBindings {
+        &self.bindings
+    }
+}
+
+unsafe impl Trace for ImportProto {
+    vtable!(ImportProto);
+
+    unsafe fn trace(&self, tracer: &crate::gc::Tracer) {
+        tracer.visit(self.spec);
+    }
+}
+
+impl std::fmt::Debug for GcRef<'_, ImportProto> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ImportProto")
+            .field("spec", &self.spec())
+            .finish_non_exhaustive()
+    }
+}
+
 // `ret`, assumes that it always returns _into_ something.
 // That allows `ret` to `pop_frame_unchecked`, removing a
 // branch from a very hot code path.
@@ -164,7 +204,8 @@ fn canonicalize<'a>(
     info: &Module,
     id: ModuleId,
 ) -> GcRoot<'a, ModuleProto> {
-    string!(in heap; name = info.name());
+    let_root!(in heap; name);
+    let name = Str::new(heap, name, info.name());
 
     let module = unsafe {
         root.init_raw(
@@ -212,7 +253,8 @@ fn canonicalize_function<'a>(
     function: &FuncInfo,
     module: &GcRoot<'a, ModuleProto>,
 ) -> GcRoot<'a, FunctionProto> {
-    string!(in heap; name = function.name());
+    let_root!(in heap; name);
+    let name = Str::new(heap, name, function.name());
 
     let name = name.as_ptr();
     let code = function.code().into();
@@ -251,10 +293,13 @@ fn canonicalize_literals(
             Literal::Bool(v) => ValueRaw::Bool(*v),
             Literal::Int(v) => ValueRaw::Int(*v),
             Literal::Float(v) => ValueRaw::Float(*v),
-            Literal::String(v) => ValueRaw::Object(String::alloc(heap, v.as_str()).as_any()),
+            Literal::String(v) => ValueRaw::Object(Str::alloc(heap, v.as_str()).as_any()),
             Literal::ClosureInfo(v) => ValueRaw::Object(
                 ClosureProto::alloc(heap, functions[v.func.zx()], &v.capture_info).as_any(),
             ),
+            Literal::ImportInfo(_) => {
+                todo!("ImportInfo literal conversion not yet implemented")
+            }
         };
         out.push(value);
     }
@@ -267,7 +312,8 @@ fn generate_entrypoint<'a>(
     name: &str,
     module: &GcRoot<'a, ModuleProto>,
 ) -> GcRoot<'a, FunctionProto> {
-    string!(in heap; name = &format!("{name}#start"));
+    let_root!(in heap; name_gc);
+    let name = Str::new(heap, name_gc, &format!("{name}#start"));
 
     unsafe {
         root.init_raw(

@@ -1,3 +1,5 @@
+pub mod native;
+
 use std::sync::Arc;
 
 use beef::lean::Cow;
@@ -199,6 +201,33 @@ pub enum CaptureInfo {
     Cap(Cap),
 }
 
+/// Information about an import statement.
+#[derive(Debug)]
+pub enum ImportInfo {
+    /// Bare import: `import "spec" as name`
+    /// Imports the entire module into a single register.
+    Bare { spec: String, dst: Reg },
+    /// Named imports: `import a as x, b as y from "spec"`
+    /// Imports specific names from the module into separate registers.
+    Named {
+        spec: String,
+        bindings: Box<[(String, Reg)]>,
+    },
+}
+
+impl ImportInfo {
+    pub(crate) fn bare(spec: String, dst: Reg) -> Self {
+        Self::Bare { spec, dst }
+    }
+
+    pub(crate) fn named(spec: String, bindings: std::vec::Vec<(String, Reg)>) -> Self {
+        Self::Named {
+            spec,
+            bindings: bindings.into_boxed_slice(),
+        }
+    }
+}
+
 #[derive(Debug)]
 pub enum Literal {
     Nil,
@@ -207,6 +236,7 @@ pub enum Literal {
     Float(f64),
     String(String),
     ClosureInfo(ClosureInfo),
+    ImportInfo(ImportInfo),
 }
 
 impl Literal {
@@ -253,6 +283,14 @@ impl Literal {
             None
         }
     }
+
+    pub fn import(&self) -> Option<&ImportInfo> {
+        if let Self::ImportInfo(v) = self {
+            Some(v)
+        } else {
+            None
+        }
+    }
 }
 
 impl std::fmt::Display for Literal {
@@ -272,6 +310,14 @@ impl std::fmt::Display for Literal {
             Literal::ClosureInfo(v) => {
                 write!(f, "{{{f}, n={n}}}", f = v.func, n = v.capture_info.len())
             }
+            Literal::ImportInfo(v) => match v {
+                ImportInfo::Bare { spec, dst } => {
+                    write!(f, "{{import {:?} -> {}}}", spec, dst)
+                }
+                ImportInfo::Named { spec, bindings } => {
+                    write!(f, "{{import {:?}, n={}}}", spec, bindings.len())
+                }
+            },
         }
     }
 }

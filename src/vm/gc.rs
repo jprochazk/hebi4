@@ -971,9 +971,10 @@ impl<'a, T: Trace> GcRoot<'a, T> {
     /// getting a mutable reference to the first root, and appending the second root:
     ///
     /// ```rust
-    /// # use hebi4::{gc::{Heap, reroot}, value::list};
+    /// # use hebi4::{gc::{Heap, let_root, reroot}, value::List};
     /// # let heap = unsafe { &mut Heap::__testing() };
-    /// list!(in heap; a0 = 0);
+    /// let_root!(in heap; a0);
+    /// let a0 = List::new(heap, a0, 0);
     /// reroot!(in heap; a1 = a0);
     /// a0.as_mut(heap).push(a1.as_any().into());
     /// ```
@@ -1027,10 +1028,13 @@ impl<'a, T: Trace> GcRoot<'a, T> {
     /// This function only accepts pointers to objects of the same type.
     ///
     /// ```rust
-    /// # use hebi4::{gc::Heap, value::{string}};
+    /// # use hebi4::{gc::{Heap, let_root}, value::Str};
     /// # let heap = unsafe { &mut Heap::__testing() };
-    /// string!(in heap; a = "foo");
-    /// string!(in heap; mut b = "bar");
+    /// let_root!(in heap; a);
+    /// let_root!(in heap; b);
+    ///
+    /// let a = Str::new(heap, a, "foo");
+    /// let mut b = Str::new(heap, b, "bar");
     ///
     /// # assert_eq!(b.as_ref(heap).to_string(), "bar");
     /// b.update(heap, &a);
@@ -1065,10 +1069,13 @@ impl<'a, T: Sized + 'static> GcRoot<'a, T> {
     /// For example, a [`GcRef`] is a valid argument to this function:
     ///
     /// ```rust
-    /// # use hebi4::{gc::Heap, value::{list, string}};
+    /// # use hebi4::{gc::{Heap, let_root}, value::{List, Str}};
     /// # let heap = unsafe { &mut Heap::__testing() };
-    /// list!(in heap; a = 0);
-    /// string!(in heap; b = "foo");
+    /// let_root!(in heap; a);
+    /// let_root!(in heap; b);
+    ///
+    /// let a = List::new(heap, a, 0);
+    /// let b = Str::new(heap, b, "foo");
     ///
     /// # assert_eq!(b.as_ref(heap).to_string(), "foo");
     /// let b = b.set(heap, &a);
@@ -1786,11 +1793,10 @@ macro_rules! __let_root {
 /// Create an uninitialized root on the stack.
 ///
 /// ```rust
-/// # use hebi4::{gc::{Heap, let_root}, value::list};
+/// # use hebi4::{gc::{Heap, let_root}, value::List};
 /// # let heap = unsafe { &mut Heap::__testing() };
-/// # list!(in heap; list = 0);
 /// let_root!(in heap; obj);
-/// let obj = obj.init(heap, &list);
+/// let obj = List::new(heap, obj, 0);
 /// ```
 ///
 /// This operation is always safe, because the root is initialized to
@@ -1817,9 +1823,10 @@ macro_rules! __reroot {
 /// Note that the type must be known, `GcAnyRoot` is not a valid target.
 ///
 /// ```rust
-/// # use hebi4::{gc::{Heap, reroot}, value::list};
+/// # use hebi4::{gc::{Heap, reroot, let_root}, value::List};
 /// # let heap = unsafe { &mut Heap::__testing() };
-/// list!(in heap; a0 = 100);
+/// let_root!(in heap; a0);
+/// let a0 = List::new(heap, a0, 100);
 /// reroot!(in heap; a1 = a0);
 /// println!("{}", a1.as_ref(heap).capacity());
 /// ```

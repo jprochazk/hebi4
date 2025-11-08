@@ -290,6 +290,14 @@ fastcall dst:reg id:fnid;
  */
 hostcall dst:reg id:hostid;
 
+/*
+ * Import a module.
+ *
+ * `id` holds an `ImportInfo` literal that contains the module spec
+ * and the mapping of module names to local registers.
+ */
+import _unused:reg id:lit;
+
 # Note that `ret` and `stop` are separate, to avoid a branch in `ret` which
 # would otherwise be required to check if there are any call frames left to
 # return to. There is always at least one call frame on the call frame stack.

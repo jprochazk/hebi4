@@ -1,14 +1,17 @@
 use hashbrown::{HashMap, hash_map::RawEntryMut};
 
-use super::{String, StringHasher, ValueRaw};
-use crate::vm::gc::{GcPtr, GcRef, GcRefMut, GcRoot, Heap, Trace, Tracer, ValueRef, ValueRoot};
+use super::{Str, StringHasher, ValueRaw};
+use crate::{
+    gc::GcUninitRoot,
+    vm::gc::{GcPtr, GcRef, GcRefMut, GcRoot, Heap, Trace, Tracer, ValueRef, ValueRoot},
+};
 
 pub(crate) struct Opaque(u32);
 
 #[repr(align(16))]
 pub struct Table {
     pub(crate) map: HashMap<Opaque, (), ()>,
-    pub(crate) kv: Vec<(GcPtr<String>, ValueRaw)>,
+    pub(crate) kv: Vec<(GcPtr<Str>, ValueRaw)>,
     pub(crate) hash: StringHasher,
 }
 
@@ -23,6 +26,12 @@ impl Table {
             });
         })
     }
+
+    #[inline(never)]
+    pub fn new<'a>(heap: &mut Heap, root: GcUninitRoot<'a>, capacity: usize) -> GcRoot<'a, Self> {
+        let ptr = Self::alloc(heap, capacity);
+        unsafe { root.init_raw(heap, ptr) }
+    }
 }
 
 pub trait AsStr {
@@ -35,13 +44,13 @@ impl AsStr for &str {
     }
 }
 
-impl AsStr for &std::string::String {
+impl AsStr for &String {
     fn as_str(&self) -> &str {
         self
     }
 }
 
-impl AsStr for GcRef<'_, String> {
+impl AsStr for GcRef<'_, Str> {
     fn as_str(&self) -> &str {
         self.as_str()
     }
@@ -83,7 +92,7 @@ impl<'a> GcRef<'a, Table> {
 
     // TODO: string interning
     #[inline]
-    pub(crate) unsafe fn get_raw(&self, key: GcPtr<String>) -> Option<ValueRaw> {
+    pub(crate) unsafe fn get_raw(&self, key: GcPtr<Str>) -> Option<ValueRaw> {
         let this: &Table = &*self;
         let hash = key.as_ref().hash;
         let entry = this.map.raw_entry().from_hash(hash, |&Opaque(index)| {
@@ -108,7 +117,7 @@ impl<'a> GcRef<'a, Table> {
     }
 
     #[inline]
-    pub fn entry(&self, index: usize) -> Option<(GcRef<'a, String>, ValueRef<'a>)> {
+    pub fn entry(&self, index: usize) -> Option<(GcRef<'a, Str>, ValueRef<'a>)> {
         // TODO: can this use `Ref::map`?
         let this: &Table = &*self;
 
@@ -143,7 +152,7 @@ impl<'a> GcRef<'a, Table> {
 }
 
 impl<'a> IntoIterator for GcRef<'a, Table> {
-    type Item = (GcRef<'a, String>, ValueRef<'a>);
+    type Item = (GcRef<'a, Str>, ValueRef<'a>);
 
     type IntoIter = TableEntries<'a>;
 
@@ -155,7 +164,7 @@ impl<'a> IntoIterator for GcRef<'a, Table> {
 impl GcRefMut<'_, Table> {
     /// `self[key] = value`
     #[inline(never)]
-    pub fn insert(&mut self, key: &GcRoot<'_, String>, value: ValueRoot<'_>) {
+    pub fn insert(&mut self, key: &GcRoot<'_, Str>, value: ValueRoot<'_>) {
         unsafe { self.insert_raw(key.as_ptr(), value.raw()) }
     }
 
@@ -167,7 +176,7 @@ impl GcRefMut<'_, Table> {
     ///
     /// - `key` and `value` must be alive
     #[inline(always)]
-    pub unsafe fn insert_raw(&mut self, key: GcPtr<String>, value: ValueRaw) {
+    pub unsafe fn insert_raw(&mut self, key: GcPtr<Str>, value: ValueRaw) {
         let this: &mut Table = &mut *self;
         let hash = key.as_ref().hash;
         let entry = this.map.raw_entry_mut().from_hash(hash, |&Opaque(index)| {
@@ -213,7 +222,7 @@ pub struct TableEntries<'a> {
 }
 
 impl<'a> Iterator for TableEntries<'a> {
-    type Item = (GcRef<'a, String>, ValueRef<'a>);
+    type Item = (GcRef<'a, Str>, ValueRef<'a>);
 
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
@@ -260,30 +269,29 @@ impl std::fmt::Debug for GcRef<'_, Table> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        gc::{Heap, ValueRef, ValueRoot},
-        value::{string, table},
-    };
+    use crate::gc::{Heap, ValueRef, ValueRoot, let_root};
 
     #[test]
     fn table() {
         let heap = &mut Heap::new();
 
         {
-            table!(in heap; table = 128);
+            let_root!(in heap; table);
+            let table = Table::new(heap, table, 128);
 
-            string!(in heap; string_a = "a");
+            let_root!(in heap; string_a);
+            let string_a = Str::new(heap, string_a, "a");
             table.as_mut(heap).insert(&string_a, ValueRoot::Int(10));
 
             // `table` is safe from collection
             assert_eq!(
                 heap.stats().bytes(),
-                core::mem::size_of::<Table>() + core::mem::size_of::<String>()
+                core::mem::size_of::<Table>() + core::mem::size_of::<Str>()
             );
             heap.collect_no_external_roots();
             assert_eq!(
                 heap.stats().bytes(),
-                core::mem::size_of::<Table>() + core::mem::size_of::<String>()
+                core::mem::size_of::<Table>() + core::mem::size_of::<Str>()
             );
 
             {
@@ -300,18 +308,19 @@ mod tests {
             }
 
             // insert another entry
-            string!(in heap; string_b = "b");
+            let_root!(in heap; string_b);
+            let string_b = Str::new(heap, string_b, "b");
             table.as_mut(heap).insert(&string_b, ValueRoot::Int(20));
 
             // `table` is safe from collection
             assert_eq!(
                 heap.stats().bytes(),
-                core::mem::size_of::<Table>() + (core::mem::size_of::<String>() * 2)
+                core::mem::size_of::<Table>() + (core::mem::size_of::<Str>() * 2)
             );
             heap.collect_no_external_roots();
             assert_eq!(
                 heap.stats().bytes(),
-                core::mem::size_of::<Table>() + (core::mem::size_of::<String>() * 2)
+                core::mem::size_of::<Table>() + (core::mem::size_of::<Str>() * 2)
             );
 
             {

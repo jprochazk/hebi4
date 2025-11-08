@@ -1,0 +1,17 @@
+---
+source: src/codegen/tests.rs
+expression: snapshot
+---
+SOURCE
+import "fs" as fs
+
+OK
+.fn @main
+  params 0
+  stack 2
+  .locals
+    fs = r1
+  .code
+  0  import l0   ; {import "fs" -> r1}
+  1  lnil r0
+  2  ret
