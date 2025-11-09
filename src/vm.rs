@@ -63,7 +63,7 @@ use crate::{
     span::Span,
     value::module::ImportBindings,
     vm::value::{
-        Closure, FunctionProto, ValueRaw,
+        Closure, Function, ValueRaw,
         closure::{CaptureInfo, ClosureProto},
         host_function::{Context, HostFunction, HostFunctionCallback},
         module::{ImportProto, ModuleRegistry},
@@ -102,7 +102,7 @@ impl LpIdx for Lit8 {
 
 impl Lp {
     #[inline]
-    fn from_fn(f: GcPtr<FunctionProto>) -> Self {
+    fn from_fn(f: GcPtr<Function>) -> Self {
         unsafe {
             let ptr = f.as_ref().literals().as_ptr().cast_mut();
             Self(NonNull::new_unchecked(ptr))
@@ -176,7 +176,7 @@ impl Jt {
 
 impl Ip {
     #[inline]
-    fn from_fn(f: GcPtr<FunctionProto>) -> Self {
+    fn from_fn(f: GcPtr<Function>) -> Self {
         unsafe {
             let ptr = f.as_mut().code_mut().as_mut_ptr();
             Self(NonNull::new_unchecked(ptr))
@@ -218,7 +218,7 @@ impl Captures {
 // TODO: native call frames
 #[derive(Clone, Copy)]
 struct CallFrame {
-    callee: GcPtr<FunctionProto>,
+    callee: GcPtr<Function>,
 
     /// Stack base of _this_ frame.
     stack_base: u32,
@@ -244,7 +244,7 @@ impl CallFramePtr {
     }
 
     #[inline]
-    unsafe fn callee(self) -> GcPtr<FunctionProto> {
+    unsafe fn callee(self) -> GcPtr<Function> {
         (*self.0).callee
     }
 
@@ -298,7 +298,7 @@ impl Vm {
     }
 
     #[inline]
-    unsafe fn get_function_in_current_module(self, id: FnId) -> GcPtr<FunctionProto> {
+    unsafe fn get_function_in_current_module(self, id: FnId) -> GcPtr<Function> {
         self.current_module()
             .as_ref()
             .get_function_unchecked(id)
@@ -322,7 +322,7 @@ impl Vm {
     }
 
     #[inline]
-    unsafe fn set_current_module_for(self, f: GcPtr<FunctionProto>) {
+    unsafe fn set_current_module_for(self, f: GcPtr<Function>) {
         let module = f.as_ref().module().as_ptr();
         (*self.0.as_ptr()).current_module = Some(module);
     }
@@ -1711,7 +1711,7 @@ unsafe fn call(vm: Vm, jt: Jt, ip: Ip, args: Call, sp: Sp, lp: Lp) -> Control {
     let callee = *sp.at(args.callee());
     let nargs = args.args().get();
 
-    if let Some(callee) = callee.into_object::<FunctionProto>() {
+    if let Some(callee) = callee.into_object::<Function>() {
         if callee.as_ref().nparams != nargs {
             return arity_mismatch_error(ip, vm);
         }
@@ -1846,7 +1846,7 @@ unsafe fn stop(vm: Vm, jt: Jt, ip: Ip, args: Stop, sp: Sp, lp: Lp) -> Control {
 /// `r0` in the new frame will be in the same location as `r6`
 /// in the previous frame.
 #[inline(always)]
-unsafe fn do_call(callee: GcPtr<FunctionProto>, ret: Reg, ip: Ip, vm: Vm) -> (Sp, Lp, Ip) {
+unsafe fn do_call(callee: GcPtr<Function>, ret: Reg, ip: Ip, vm: Vm) -> (Sp, Lp, Ip) {
     // See doc comment.
     let stack_base = vm.current_frame().stack_base() + (ret.get() as u32);
     let frame_size = callee.as_ref().stack_size();

@@ -1311,12 +1311,12 @@ impl<'a> Value<'a> {
     #[inline]
     fn type_name(self) -> &'static str {
         match self.kind {
-            ValueKind::Nil => "nil",
-            ValueKind::Bool(_) => "bool",
-            ValueKind::Int(_) => "int",
-            ValueKind::Float(_) => "float",
-            ValueKind::Str(_) => "str",
-            ValueKind::Dynamic(_) => "unknown",
+            ValueKind::Nil => "Nil",
+            ValueKind::Bool(_) => "Bool",
+            ValueKind::Int(_) => "Int",
+            ValueKind::Float(_) => "Float",
+            ValueKind::Str(_) => "Str",
+            ValueKind::Dynamic(_) => "Unknown",
         }
     }
 

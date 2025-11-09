@@ -57,10 +57,10 @@ impl ValueRaw {
     #[inline]
     pub unsafe fn type_name(self) -> &'static str {
         match self {
-            ValueRaw::Nil => "nil",
-            ValueRaw::Bool(_) => "bool",
-            ValueRaw::Int(_) => "int",
-            ValueRaw::Float(_) => "float",
+            ValueRaw::Nil => "Nil",
+            ValueRaw::Bool(_) => "Bool",
+            ValueRaw::Int(_) => "Int",
+            ValueRaw::Float(_) => "Float",
             ValueRaw::Object(gc) => gc.type_name(),
         }
     }
@@ -90,7 +90,7 @@ pub(crate) use self::string::StringHasher;
 #[allow(unused_imports)] // re-exports
 pub use self::{
     closure::Closure,
-    function::FunctionProto,
+    function::Function,
     list::{List, ListIter},
     module::ModuleProto,
     string::Str,

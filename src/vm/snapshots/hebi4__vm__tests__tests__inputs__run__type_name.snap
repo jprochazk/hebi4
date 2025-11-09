@@ -1,0 +1,30 @@
+---
+source: src/vm/tests.rs
+expression: snapshot
+---
+SOURCE
+fn f() {}
+
+print(type_name(nil))
+print(type_name(true))
+print(type_name(1))
+print(type_name(1.0))
+print(type_name("test"))
+print(type_name({}))
+print(type_name([]))
+print(type_name(f))
+print(type_name(print))
+
+OK
+Nil
+
+STDOUT
+"Nil"
+"Bool"
+"Int"
+"Float"
+"Str"
+"Table"
+"List"
+"Function"
+"HostFunction"

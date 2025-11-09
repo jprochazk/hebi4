@@ -11,7 +11,7 @@ use crate::{
 };
 
 #[repr(align(16))]
-pub struct FunctionProto {
+pub struct Function {
     pub(crate) name: GcPtr<Str>,
     pub(crate) nparams: u8,
     pub(crate) nstack: u8,
@@ -21,7 +21,7 @@ pub struct FunctionProto {
     pub(crate) dbg: Option<Arc<FuncDebugInfo>>,
 }
 
-impl<'a> GcRef<'a, FunctionProto> {
+impl<'a> GcRef<'a, Function> {
     #[inline]
     pub fn name(&self) -> GcRef<'a, Str> {
         GcRef::map(self, |this| &this.name)
@@ -61,15 +61,15 @@ impl<'a> GcRef<'a, FunctionProto> {
     }
 }
 
-impl<'a> GcRefMut<'a, FunctionProto> {
+impl<'a> GcRefMut<'a, Function> {
     #[inline]
     pub(crate) fn code_mut(&mut self) -> &mut [Insn] {
         &mut self.code[..]
     }
 }
 
-unsafe impl Trace for FunctionProto {
-    vtable!(FunctionProto);
+unsafe impl Trace for Function {
+    vtable!(Function);
 
     unsafe fn trace(&self, tracer: &crate::vm::gc::Tracer) {
         tracer.visit(self.name);
@@ -81,10 +81,10 @@ unsafe impl Trace for FunctionProto {
     }
 }
 
-impl std::fmt::Debug for GcRef<'_, FunctionProto> {
+impl std::fmt::Debug for GcRef<'_, Function> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         // SAFETY: interior pointers are transitively rooted
-        f.debug_struct("FunctionProto")
+        f.debug_struct("Function")
             .field("name", &self.name())
             .field("nparams", &self.nparams)
             .field("nstack", &self.nstack)

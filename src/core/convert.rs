@@ -1,6 +1,6 @@
 use crate::prelude::*;
 
-pub fn to_str(_cx: Context, v: ValueRef<'_>) -> String {
+pub fn to_str(_cx: Context, v: ValueRef) -> String {
     match v {
         ValueRef::Nil => "nil".to_owned(),
         ValueRef::Bool(v) => v.to_string(),
@@ -30,4 +30,10 @@ pub fn to_int(_cx: Context, v: f64) -> i64 {
 
 pub fn to_float(_cx: Context, v: i64) -> f64 {
     v as f64
+}
+
+pub fn type_name<'a>(cx: Context<'a>, v: ValueRef<'a>) -> &'static str {
+    // TODO: string interning
+
+    v.type_name()
 }

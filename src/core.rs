@@ -128,4 +128,5 @@ static CORE_LIB: CoreLibData = functions! {
     convert::to_float,
     convert::parse_int,
     convert::parse_float,
+    convert::type_name,
 };

@@ -3,7 +3,7 @@ mod native;
 use hashbrown::HashMap;
 use rustc_hash::FxBuildHasher;
 
-use super::{FunctionProto, ValueRaw};
+use super::{Function, ValueRaw};
 use crate::{
     codegen::opcodes::{FnId, Insn, Reg, asm},
     gc::Tracer,
@@ -17,26 +17,26 @@ use crate::{
 
 pub struct ModuleProto {
     pub(crate) name: GcPtr<Str>,
-    pub(crate) entrypoint: Option<GcPtr<FunctionProto>>,
-    pub(crate) functions: Box<[GcPtr<FunctionProto>]>,
+    pub(crate) entrypoint: Option<GcPtr<Function>>,
+    pub(crate) functions: Box<[GcPtr<Function>]>,
     pub(crate) module_vars: Box<[ValueRaw]>,
 }
 
 impl<'a> GcRef<'a, ModuleProto> {
     #[inline]
-    pub(crate) fn get_function(&self, id: FnId) -> Option<GcRef<'a, FunctionProto>> {
+    pub(crate) fn get_function(&self, id: FnId) -> Option<GcRef<'a, Function>> {
         GcRef::map_opt(self, |this| this.functions.get(id.zx()))
     }
 
     #[inline]
-    pub(crate) unsafe fn get_function_unchecked(&self, id: FnId) -> GcRef<'a, FunctionProto> {
+    pub(crate) unsafe fn get_function_unchecked(&self, id: FnId) -> GcRef<'a, Function> {
         GcRef::map(self, |this| unsafe {
             this.functions.get_unchecked(id.zx())
         })
     }
 
     #[inline]
-    pub(crate) fn entrypoint(&self) -> GcRef<'a, FunctionProto> {
+    pub(crate) fn entrypoint(&self) -> GcRef<'a, Function> {
         GcRef::map(self, |this| match &this.entrypoint {
             Some(entrypoint) => entrypoint,
             // SAFETY: after initialization, `entrypoint` is never `None`
@@ -64,7 +64,7 @@ pub(crate) struct Functions<'a> {
 }
 
 impl<'a> Iterator for Functions<'a> {
-    type Item = GcRef<'a, FunctionProto>;
+    type Item = GcRef<'a, Function>;
 
     fn next(&mut self) -> Option<Self::Item> {
         GcRef::map_opt(&self.module, |module| {
@@ -316,7 +316,7 @@ fn canonicalize_function<'a>(
     root: GcUninitRoot<'a>,
     function: &FuncInfo,
     module: &GcRoot<'a, ModuleProto>,
-) -> GcRoot<'a, FunctionProto> {
+) -> GcRoot<'a, Function> {
     let_root!(in heap; name);
     let name = Str::new(heap, name, function.name());
 
@@ -330,7 +330,7 @@ fn canonicalize_function<'a>(
         root.init_raw(
             heap,
             heap.alloc_no_gc(|ptr| {
-                (*ptr).write(FunctionProto {
+                (*ptr).write(Function {
                     name,
                     nparams: 0,
                     nstack: 1,
@@ -346,7 +346,7 @@ fn canonicalize_function<'a>(
 
 fn canonicalize_literals(
     heap: &mut Heap,
-    functions: &[GcPtr<FunctionProto>],
+    functions: &[GcPtr<Function>],
     literals: &[Literal],
 ) -> Box<[ValueRaw]> {
     let mut out = Vec::new();
@@ -398,7 +398,7 @@ fn generate_entrypoint<'a>(
     root: GcUninitRoot<'a>,
     name: &str,
     module: &GcRoot<'a, ModuleProto>,
-) -> GcRoot<'a, FunctionProto> {
+) -> GcRoot<'a, Function> {
     let_root!(in heap; name_gc);
     let name = Str::new(heap, name_gc, &format!("{name}#start"));
 
@@ -406,7 +406,7 @@ fn generate_entrypoint<'a>(
         root.init_raw(
             heap,
             heap.alloc_no_gc(|ptr| {
-                (*ptr).write(FunctionProto {
+                (*ptr).write(Function {
                     name: name.as_ptr(),
                     nparams: 0,
                     nstack: 1,

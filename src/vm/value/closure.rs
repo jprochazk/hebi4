@@ -3,12 +3,12 @@ use crate::{
     module,
     vm::{
         gc::{GcPtr, GcRef, Heap, Trace, Tracer},
-        value::{FunctionProto, ValueRaw},
+        value::{Function, ValueRaw},
     },
 };
 
 pub struct ClosureProto {
-    pub(crate) func: GcPtr<FunctionProto>,
+    pub(crate) func: GcPtr<Function>,
     pub(crate) capture_info: Box<[CaptureInfo]>,
 }
 
@@ -16,7 +16,7 @@ impl ClosureProto {
     #[inline(never)]
     pub fn alloc(
         heap: &Heap,
-        func: GcPtr<FunctionProto>,
+        func: GcPtr<Function>,
         capture_info: &[module::CaptureInfo],
     ) -> GcPtr<Self> {
         let capture_info = capture_info
@@ -54,7 +54,7 @@ impl std::fmt::Debug for GcRef<'_, ClosureProto> {
 }
 
 pub struct Closure {
-    pub(crate) func: GcPtr<FunctionProto>,
+    pub(crate) func: GcPtr<Function>,
     pub(crate) captures: Box<[ValueRaw]>,
 }
 
