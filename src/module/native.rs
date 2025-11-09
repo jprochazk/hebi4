@@ -5,9 +5,9 @@ use hashbrown::HashMap;
 use rustc_hash::FxBuildHasher;
 
 use crate::{
-    error::Result,
+    error::{Error, Result, error},
     vm::{
-        gc::ValueRef,
+        gc::{GcRef, ValueRef},
         value::{
             ValueRaw,
             host_function::{Context, HostFunctionCallback},
@@ -147,16 +147,16 @@ pub unsafe trait NativeFunctionCallback<'cx, T> {
     unsafe fn call(&self, cx: Context<'cx>) -> Result<ValueRaw>;
 }
 
-pub trait IntoHebiResult: Sized {
-    unsafe fn into_hebi_result(self, cx: &mut Context<'_>) -> Result<ValueRaw>;
+pub trait IntoHebiResultRaw: Sized {
+    unsafe fn into_hebi_result_raw(self, cx: &mut Context<'_>) -> Result<ValueRaw>;
 }
 
-pub trait TryIntoHebiValue: Sized {
-    unsafe fn try_into_hebi_value(self, cx: &mut Context<'_>) -> Result<ValueRaw>;
+pub trait TryIntoHebiValueRaw: Sized {
+    unsafe fn try_into_hebi_value_raw(self, cx: &mut Context<'_>) -> Result<ValueRaw>;
 }
 
-pub trait TryFromHebiValue: Sized {
-    unsafe fn try_from_hebi_value(cx: &Context<'_>, value: ValueRaw) -> Result<Self>;
+pub trait TryFromHebiValue<'a>: Sized {
+    fn try_from_hebi_value(cx: &Context<'a>, value: ValueRef<'a>) -> Result<Self>;
 }
 
 macro_rules! all_the_tuples {
@@ -181,13 +181,17 @@ macro_rules! impl_native_function_callback {
         unsafe impl<'cx, Func, R, $($T,)*> NativeFunctionCallback<'cx, (R, $($T,)*)> for Func
         where
             Func: Fn(Context<'cx>, $($T,)*) -> R,
-            R: IntoHebiResult + 'cx,
-            $($T: TryFromHebiValue + 'cx,)*
+            R: IntoHebiResultRaw + 'cx,
+            $($T: TryFromHebiValue<'cx> + 'cx,)*
         {
             const ARITY: u8 = $count;
 
             unsafe fn call(&self, mut cx: Context<'cx>) -> Result<ValueRaw> {
                 let [$($T,)*] = cx.args()?;
+                // SAFETY: rooted on the stack
+                let ($($T,)*) = (
+                    $($T.as_ref(),)*
+                );
                 let ($($T,)*) = (
                     $(<$T as TryFromHebiValue>::try_from_hebi_value(&cx, $T)?,)*
                 );
@@ -197,7 +201,7 @@ macro_rules! impl_native_function_callback {
                     (self)(cx, $($T,)*)
                 };
 
-                <R as IntoHebiResult>::into_hebi_result(result, &mut cx)
+                <R as IntoHebiResultRaw>::into_hebi_result_raw(result, &mut cx)
             }
         }
     };
@@ -207,28 +211,46 @@ all_the_tuples!(impl_native_function_callback);
 
 ////////////////////////////////// impls //////////////////////////////////
 
-impl<T: TryIntoHebiValue> IntoHebiResult for T {
+impl<T: TryIntoHebiValueRaw> IntoHebiResultRaw for T {
     #[inline]
-    unsafe fn into_hebi_result(self, cx: &mut Context<'_>) -> Result<ValueRaw> {
-        <T as TryIntoHebiValue>::try_into_hebi_value(self, cx)
+    unsafe fn into_hebi_result_raw(self, cx: &mut Context<'_>) -> Result<ValueRaw> {
+        <T as TryIntoHebiValueRaw>::try_into_hebi_value_raw(self, cx)
     }
 }
 
-impl<T: TryIntoHebiValue> IntoHebiResult for Result<T> {
+impl<T: TryIntoHebiValueRaw> IntoHebiResultRaw for Result<T> {
     #[inline]
-    unsafe fn into_hebi_result(self, cx: &mut Context<'_>) -> Result<ValueRaw> {
-        self.and_then(|v| <T as TryIntoHebiValue>::try_into_hebi_value(v, cx))
+    unsafe fn into_hebi_result_raw(self, cx: &mut Context<'_>) -> Result<ValueRaw> {
+        self.and_then(|v| <T as TryIntoHebiValueRaw>::try_into_hebi_value_raw(v, cx))
     }
 }
 
-impl TryIntoHebiValue for () {
-    unsafe fn try_into_hebi_value(self, cx: &mut Context<'_>) -> Result<ValueRaw> {
+impl TryIntoHebiValueRaw for () {
+    unsafe fn try_into_hebi_value_raw(self, cx: &mut Context<'_>) -> Result<ValueRaw> {
         Ok(ValueRaw::Nil)
     }
 }
 
-impl TryIntoHebiValue for &'static str {
-    unsafe fn try_into_hebi_value(self, cx: &mut Context<'_>) -> Result<ValueRaw> {
+impl TryIntoHebiValueRaw for bool {
+    unsafe fn try_into_hebi_value_raw(self, cx: &mut Context<'_>) -> Result<ValueRaw> {
+        Ok(ValueRaw::Bool(self))
+    }
+}
+
+impl TryIntoHebiValueRaw for i64 {
+    unsafe fn try_into_hebi_value_raw(self, cx: &mut Context<'_>) -> Result<ValueRaw> {
+        Ok(ValueRaw::Int(self))
+    }
+}
+
+impl TryIntoHebiValueRaw for f64 {
+    unsafe fn try_into_hebi_value_raw(self, cx: &mut Context<'_>) -> Result<ValueRaw> {
+        Ok(ValueRaw::Float(self))
+    }
+}
+
+impl TryIntoHebiValueRaw for &'static str {
+    unsafe fn try_into_hebi_value_raw(self, cx: &mut Context<'_>) -> Result<ValueRaw> {
         // TODO: string interning
 
         let ptr = crate::value::Str::alloc(cx.heap(), self);
@@ -236,9 +258,80 @@ impl TryIntoHebiValue for &'static str {
     }
 }
 
-impl<'a> TryFromHebiValue for ValueRef<'a> {
-    unsafe fn try_from_hebi_value(cx: &Context<'_>, value: ValueRaw) -> Result<Self> {
-        // UNROOTED: must be rooted in `cx` stack or elsewhere
-        Ok(value.as_ref())
+impl TryIntoHebiValueRaw for String {
+    unsafe fn try_into_hebi_value_raw(self, cx: &mut Context<'_>) -> Result<ValueRaw> {
+        // TODO: string interning
+
+        let ptr = crate::value::Str::alloc(cx.heap(), self.as_str());
+        Ok(ValueRaw::Object(ptr.as_any()))
+    }
+}
+
+impl<'a> TryFromHebiValue<'a> for ValueRef<'a> {
+    fn try_from_hebi_value(cx: &Context<'a>, value: ValueRef<'a>) -> Result<Self> {
+        Ok(value)
+    }
+}
+
+fn mismatched_type_error(expected: &'static str, actual: &ValueRef<'_>) -> Error {
+    error(format!(
+        "mismatched type, expected {expected} but got {}",
+        actual.type_name()
+    ))
+}
+
+impl<'a> TryFromHebiValue<'a> for () {
+    fn try_from_hebi_value(cx: &Context<'a>, value: ValueRef<'a>) -> Result<Self> {
+        match value {
+            ValueRef::Nil => Ok(()),
+            v => Err(mismatched_type_error("Nil", &v)),
+        }
+    }
+}
+
+impl<'a> TryFromHebiValue<'a> for bool {
+    fn try_from_hebi_value(cx: &Context<'a>, value: ValueRef<'a>) -> Result<Self> {
+        match value {
+            ValueRef::Bool(v) => Ok(v),
+            v => Err(mismatched_type_error("Bool", &v)),
+        }
+    }
+}
+
+impl<'a> TryFromHebiValue<'a> for i64 {
+    fn try_from_hebi_value(cx: &Context<'a>, value: ValueRef<'a>) -> Result<Self> {
+        match value {
+            ValueRef::Int(v) => Ok(v),
+            v => Err(mismatched_type_error("Int", &v)),
+        }
+    }
+}
+
+impl<'a> TryFromHebiValue<'a> for f64 {
+    fn try_from_hebi_value(cx: &Context<'a>, value: ValueRef<'a>) -> Result<Self> {
+        match value {
+            ValueRef::Float(v) => Ok(v),
+            v => Err(mismatched_type_error("Float", &v)),
+        }
+    }
+}
+
+impl<'a> TryFromHebiValue<'a> for String {
+    fn try_from_hebi_value(cx: &Context<'a>, value: ValueRef<'a>) -> Result<Self> {
+        let Some(value) = value.into_object::<crate::value::Str>() else {
+            return Err(mismatched_type_error("Str", &value));
+        };
+
+        Ok(value.as_str().to_owned())
+    }
+}
+
+impl<'a> TryFromHebiValue<'a> for GcRef<'a, crate::value::Str> {
+    fn try_from_hebi_value(cx: &Context<'a>, value: ValueRef<'a>) -> Result<Self> {
+        let Some(value) = value.into_object::<crate::value::Str>() else {
+            return Err(mismatched_type_error("Str", &value));
+        };
+
+        Ok(value)
     }
 }

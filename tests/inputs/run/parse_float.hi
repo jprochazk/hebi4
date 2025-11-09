@@ -1,0 +1,1 @@
+print(parse_float("3.14"))

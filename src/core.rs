@@ -116,10 +116,16 @@ impl RuntimeCoreLib {
     }
 }
 
+mod convert;
 mod fmt;
 mod panic;
 
 static CORE_LIB: CoreLibData = functions! {
     fmt::print,
     panic::panic,
+    convert::to_str,
+    convert::to_int,
+    convert::to_float,
+    convert::parse_int,
+    convert::parse_float,
 };

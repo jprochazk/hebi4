@@ -1368,6 +1368,15 @@ impl<'a> GcAnyRef<'a> {
         GcRef(this, PhantomData)
     }
 
+    // #[inline]
+    // pub fn cast_by_ref<T: Trace>(&self) -> Option<&GcRef<'a, T>> {
+    //     if !self.is::<T>() {
+    //         return None;
+    //     }
+    //     // SAFETY: `GcAnyRef` and `GcRef` are bit-compatible
+    //     Some(unsafe { core::mem::transmute::<&GcAnyRef<'a>, &GcRef<'a, T>>(self) })
+    // }
+
     /// Returns `true` if `self` is an instance of `T`.
     #[inline]
     pub fn is<T: Trace>(&self) -> bool {
@@ -1599,6 +1608,27 @@ impl<'a> ValueRef<'a> {
             ValueRef::Object(v) => ValueRaw::Object(v.as_ptr()),
         }
     }
+
+    #[inline]
+    pub fn type_name(&self) -> &'static str {
+        unsafe { self.raw().type_name() }
+    }
+
+    #[inline]
+    pub fn into_object<T: Trace>(self) -> Option<GcRef<'a, T>> {
+        match self {
+            ValueRef::Object(v) => v.cast(),
+            _ => None,
+        }
+    }
+
+    // #[inline]
+    // pub fn as_object<T: Trace>(&self) -> Option<&GcRef<'a, T>> {
+    //     match self {
+    //         ValueRef::Object(v) => v.cast_by_ref(),
+    //         _ => None,
+    //     }
+    // }
 }
 
 impl<'a> From<()> for ValueRef<'a> {
@@ -1647,6 +1677,14 @@ impl<'a> std::fmt::Debug for ValueRef<'a> {
         }
     }
 }
+
+impl<'a> Clone for ValueRef<'a> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<'a> Copy for ValueRef<'a> {}
 
 impl ValueRaw {
     #[inline]
@@ -1732,14 +1770,14 @@ impl<T: Trace> Rooted<T> for &GcRoot<'_, T> {
 #[macro_export]
 #[doc(hidden)]
 macro_rules! __let_root_unchecked {
-    (unsafe in $heap:ident; mut $place:ident = $ptr:expr) => {
+    (unsafe in $heap:expr; mut $place:ident = $ptr:expr) => {
         let ptr = $ptr;
         let mut place = unsafe { $crate::gc::StackRoot::from_heap_ptr($heap, ptr) };
         let mut $place = unsafe {
             $crate::gc::GcRoot::__new($heap, ::core::pin::Pin::new_unchecked(&mut place))
         };
     };
-    (unsafe in $heap:ident; $place:ident = $ptr:expr) => {
+    (unsafe in $heap:expr; $place:ident = $ptr:expr) => {
         let ptr = $ptr;
         let mut place = unsafe { $crate::gc::StackRoot::from_heap_ptr($heap, ptr) };
         let $place = unsafe {
@@ -1774,7 +1812,7 @@ pub use crate::__let_root_unchecked as let_root_unchecked;
 #[macro_export]
 #[doc(hidden)]
 macro_rules! __let_root {
-    (in $heap:ident; mut $place:ident) => {
+    (in $heap:expr; mut $place:ident) => {
         #[allow(unused_unsafe)]
         let ptr = unsafe { $crate::gc::__Empty::__get() };
         #[allow(unused_unsafe)]
@@ -1784,7 +1822,7 @@ macro_rules! __let_root {
             $crate::gc::GcUninitRoot::__new($heap, ::core::pin::Pin::new_unchecked(&mut place))
         };
     };
-    (in $heap:ident; $place:ident) => {
+    (in $heap:expr; $place:ident) => {
         #[allow(unused_unsafe)]
         let ptr = unsafe { $crate::gc::__Empty::__get() };
         #[allow(unused_unsafe)]
@@ -1812,11 +1850,11 @@ pub use crate::__let_root as let_root;
 #[macro_export]
 #[doc(hidden)]
 macro_rules! __reroot {
-    (in $heap:ident; mut $place:ident = $ptr:expr) => {
+    (in $heap:expr; mut $place:ident = $ptr:expr) => {
         let ptr = $crate::gc::Rooted::as_ptr(&$ptr);
         $crate::gc::let_root_unchecked!(unsafe in $heap; mut $place = ptr);
     };
-    (in $heap:ident; $place:ident = $ptr:expr) => {
+    (in $heap:expr; $place:ident = $ptr:expr) => {
         let ptr = $crate::gc::Rooted::as_ptr(&$ptr);
         $crate::gc::let_root_unchecked!(unsafe in $heap; $place = ptr);
     };

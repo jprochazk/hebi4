@@ -1,0 +1,12 @@
+---
+source: src/vm/tests.rs
+expression: snapshot
+---
+SOURCE
+print(to_int(3.14))
+
+OK
+Nil
+
+STDOUT
+3

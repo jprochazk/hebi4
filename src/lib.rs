@@ -41,8 +41,8 @@ pub mod prelude {
         vm::{
             Hebi, Stdio, StdioWrite,
             gc::{
-                self, GcAnyRef, GcAnyRoot, GcRef, GcRoot, GcUninitRoot, Heap, let_root,
-                let_root_unchecked, reroot,
+                self, GcAnyRef, GcAnyRoot, GcRef, GcRoot, GcUninitRoot, Heap, ValueRef, ValueRoot,
+                let_root, let_root_unchecked, reroot,
             },
             value::{self, List, Str, Table, host_function::Context},
         },

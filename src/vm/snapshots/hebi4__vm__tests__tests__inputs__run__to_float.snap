@@ -1,0 +1,12 @@
+---
+source: src/vm/tests.rs
+expression: snapshot
+---
+SOURCE
+print(to_float(100))
+
+OK
+Nil
+
+STDOUT
+100.0

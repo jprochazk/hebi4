@@ -1,0 +1,12 @@
+---
+source: src/vm/tests.rs
+expression: snapshot
+---
+SOURCE
+print(parse_float("3.14"))
+
+OK
+Nil
+
+STDOUT
+3.14

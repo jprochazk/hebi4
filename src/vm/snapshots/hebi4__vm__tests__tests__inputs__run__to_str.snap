@@ -1,0 +1,12 @@
+---
+source: src/vm/tests.rs
+expression: snapshot
+---
+SOURCE
+print(to_str(10000))
+
+OK
+Nil
+
+STDOUT
+"10000"
