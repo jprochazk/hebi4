@@ -1775,15 +1775,21 @@ pub use crate::__let_root_unchecked as let_root_unchecked;
 #[doc(hidden)]
 macro_rules! __let_root {
     (in $heap:ident; mut $place:ident) => {
+        #[allow(unused_unsafe)]
         let ptr = unsafe { $crate::gc::__Empty::__get() };
+        #[allow(unused_unsafe)]
         let mut place = unsafe { $crate::gc::StackRoot::from_heap_ptr($heap, ptr) };
+        #[allow(unused_unsafe)]
         let mut $place = unsafe {
             $crate::gc::GcUninitRoot::__new($heap, ::core::pin::Pin::new_unchecked(&mut place))
         };
     };
     (in $heap:ident; $place:ident) => {
+        #[allow(unused_unsafe)]
         let ptr = unsafe { $crate::gc::__Empty::__get() };
+        #[allow(unused_unsafe)]
         let mut place = unsafe { $crate::gc::StackRoot::from_heap_ptr($heap, ptr) };
+        #[allow(unused_unsafe)]
         let $place = unsafe {
             $crate::gc::GcUninitRoot::__new($heap, ::core::pin::Pin::new_unchecked(&mut place))
         };

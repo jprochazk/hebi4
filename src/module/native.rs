@@ -1,3 +1,6 @@
+use std::sync::Arc;
+
+use beef::lean::Cow;
 use hashbrown::HashMap;
 use rustc_hash::FxBuildHasher;
 
@@ -12,28 +15,130 @@ use crate::{
     },
 };
 
-pub struct NativeModule {}
+#[derive(Clone)]
+pub struct NativeModule(Arc<NativeModuleInner>);
 
 impl NativeModule {
-    pub fn builder(name: String) -> NativeModuleBuilder {
+    pub fn name(&self) -> &str {
+        &self.0.name
+    }
+
+    pub fn num_functions(&self) -> usize {
+        self.0.functions.len()
+    }
+
+    pub fn functions(&self) -> impl Iterator<Item = (&str, &NativeFunction)> {
+        self.0
+            .functions_by_name
+            .iter()
+            .map(|(k, v)| (k.as_ref(), unsafe { self.0.functions.get_unchecked(*v) }))
+    }
+}
+
+struct NativeModuleInner {
+    name: Cow<'static, str>,
+    functions: Vec<NativeFunction>,
+    functions_by_name: HashMap<Cow<'static, str>, usize, FxBuildHasher>,
+}
+
+impl NativeModule {
+    pub fn builder(name: impl Into<Cow<'static, str>>) -> NativeModuleBuilder {
         NativeModuleBuilder {
-            name,
-            functions: Vec::new(),
-            functions_by_name: Default::default(),
+            inner: NativeModuleInner {
+                name: name.into(),
+                functions: Vec::new(),
+                functions_by_name: Default::default(),
+            },
         }
     }
 }
 
 pub struct NativeModuleBuilder {
-    name: String,
-    functions: Vec<NativeFunction>,
-    functions_by_name: HashMap<String, usize, FxBuildHasher>,
+    inner: NativeModuleInner,
 }
 
+impl NativeModuleBuilder {
+    pub fn function(mut self, f: NativeFunction) -> Self {
+        let id = self.inner.functions.len();
+        let name = f.name.clone();
+        self.inner.functions.push(f);
+        self.inner.functions_by_name.insert(name, id);
+        self
+    }
+
+    pub fn finish(self) -> NativeModule {
+        NativeModule(Arc::new(self.inner))
+    }
+}
+
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __function_shim {
+    ($name:path) => {{
+        unsafe fn _shim(
+            cx: $crate::vm::value::host_function::Context<'_>,
+        ) -> $crate::error::Result<$crate::vm::value::ValueRaw> {
+            let f = $name;
+            $crate::module::native::NativeFunctionCallback::call(&f, cx)
+        }
+
+        _shim
+    }};
+}
+
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __function {
+    ($name:tt) => {{
+        unsafe {
+            $crate::module::native::NativeFunction::from_callback(
+                $crate::module::native::function!(@stem $name),
+                $crate::module::native::arity_of(&$name),
+                $crate::__function_shim!($name),
+            )
+        }
+    }};
+
+    (@stem $tail:ident) => (stringify!($tail));
+    (@stem $($asdf:ident ::)* $tail:ident) => (stringify!($tail));
+}
+
+pub use crate::__function as function;
+
 pub struct NativeFunction {
-    name: String,
+    name: Cow<'static, str>,
     arity: u8,
     callback: HostFunctionCallback,
+}
+
+impl NativeFunction {
+    pub unsafe fn from_callback(
+        name: impl Into<Cow<'static, str>>,
+        arity: u8,
+        callback: HostFunctionCallback,
+    ) -> Self {
+        Self {
+            name: name.into(),
+            arity,
+            callback,
+        }
+    }
+
+    pub fn name(&self) -> &str {
+        self.name.as_ref()
+    }
+
+    pub fn arity(&self) -> u8 {
+        self.arity
+    }
+
+    pub fn callback(&self) -> HostFunctionCallback {
+        self.callback
+    }
+}
+
+pub(crate) fn arity_of<'a, F: NativeFunctionCallback<'a, T>, T>(f: &F) -> u8 {
+    F::ARITY
 }
 
 pub unsafe trait NativeFunctionCallback<'cx, T> {
@@ -43,11 +148,11 @@ pub unsafe trait NativeFunctionCallback<'cx, T> {
 }
 
 pub trait IntoHebiResult: Sized {
-    unsafe fn into_hebi_result(self, cx: &Context<'_>) -> Result<ValueRaw>;
+    unsafe fn into_hebi_result(self, cx: &mut Context<'_>) -> Result<ValueRaw>;
 }
 
 pub trait TryIntoHebiValue: Sized {
-    unsafe fn try_into_hebi_value(self, cx: &Context<'_>) -> Result<ValueRaw>;
+    unsafe fn try_into_hebi_value(self, cx: &mut Context<'_>) -> Result<ValueRaw>;
 }
 
 pub trait TryFromHebiValue: Sized {
@@ -81,7 +186,7 @@ macro_rules! impl_native_function_callback {
         {
             const ARITY: u8 = $count;
 
-            unsafe fn call(&self, cx: Context<'cx>) -> Result<ValueRaw> {
+            unsafe fn call(&self, mut cx: Context<'cx>) -> Result<ValueRaw> {
                 let [$($T,)*] = cx.args()?;
                 let ($($T,)*) = (
                     $(<$T as TryFromHebiValue>::try_from_hebi_value(&cx, $T)?,)*
@@ -92,7 +197,7 @@ macro_rules! impl_native_function_callback {
                     (self)(cx, $($T,)*)
                 };
 
-                <R as IntoHebiResult>::into_hebi_result(result, &cx)
+                <R as IntoHebiResult>::into_hebi_result(result, &mut cx)
             }
         }
     };
@@ -102,23 +207,32 @@ all_the_tuples!(impl_native_function_callback);
 
 ////////////////////////////////// impls //////////////////////////////////
 
-impl IntoHebiResult for () {
+impl<T: TryIntoHebiValue> IntoHebiResult for T {
     #[inline]
-    unsafe fn into_hebi_result(self, _cx: &Context<'_>) -> Result<ValueRaw> {
-        Ok(ValueRaw::Nil)
-    }
-}
-
-impl TryIntoHebiValue for () {
-    unsafe fn try_into_hebi_value(self, cx: &Context<'_>) -> Result<ValueRaw> {
-        Ok(ValueRaw::Nil)
+    unsafe fn into_hebi_result(self, cx: &mut Context<'_>) -> Result<ValueRaw> {
+        <T as TryIntoHebiValue>::try_into_hebi_value(self, cx)
     }
 }
 
 impl<T: TryIntoHebiValue> IntoHebiResult for Result<T> {
     #[inline]
-    unsafe fn into_hebi_result(self, cx: &Context<'_>) -> Result<ValueRaw> {
+    unsafe fn into_hebi_result(self, cx: &mut Context<'_>) -> Result<ValueRaw> {
         self.and_then(|v| <T as TryIntoHebiValue>::try_into_hebi_value(v, cx))
+    }
+}
+
+impl TryIntoHebiValue for () {
+    unsafe fn try_into_hebi_value(self, cx: &mut Context<'_>) -> Result<ValueRaw> {
+        Ok(ValueRaw::Nil)
+    }
+}
+
+impl TryIntoHebiValue for &'static str {
+    unsafe fn try_into_hebi_value(self, cx: &mut Context<'_>) -> Result<ValueRaw> {
+        // TODO: string interning
+
+        let ptr = crate::value::Str::alloc(cx.heap(), self);
+        Ok(ValueRaw::Object(ptr.as_any()))
     }
 }
 

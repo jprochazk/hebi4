@@ -3,6 +3,7 @@ use std::marker::PhantomData;
 use crate::{
     codegen::opcodes::{Reg, Sp, Vm},
     error::{Result, error_span},
+    gc::{GcRoot, GcUninitRoot},
     span::Span,
     vm::{
         Invariant, Stdio,
@@ -69,6 +70,10 @@ impl<'a> Context<'a> {
         }
     }
 
+    pub fn heap(&mut self) -> &mut Heap {
+        unsafe { &mut *self.vm.heap() }
+    }
+
     pub fn stdio(&mut self) -> &mut Stdio {
         unsafe { &mut *self.vm.stdio() }
     }
@@ -88,6 +93,18 @@ impl HostFunction {
         heap.alloc_no_gc(|ptr| unsafe {
             (*ptr).write(Self { name, arity, f });
         })
+    }
+
+    #[inline(never)]
+    pub fn new<'a>(
+        heap: &mut Heap,
+        root: GcUninitRoot<'a>,
+        name: &GcRoot<'a, Str>,
+        arity: u8,
+        f: HostFunctionCallback,
+    ) -> GcRoot<'a, Self> {
+        let ptr = Self::alloc(heap, name.as_ptr(), arity, f);
+        unsafe { root.init_raw(heap, ptr) }
     }
 }
 

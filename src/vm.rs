@@ -61,6 +61,7 @@ use crate::{
     error::{Error, Result, error_span},
     module,
     span::Span,
+    value::module::ImportBindings,
     vm::value::{
         Closure, FunctionProto, ValueRaw,
         closure::{CaptureInfo, ClosureProto},
@@ -161,7 +162,7 @@ impl Lp {
     pub(crate) unsafe fn import_proto_unchecked(self, r: impl LpIdx) -> GcPtr<ImportProto> {
         let v = self._at(r.idx());
 
-        debug_assert!(matches!(&*v, ValueRaw::Object(gc) if gc.is::<ClosureProto>()));
+        debug_assert!(matches!(&*v, ValueRaw::Object(gc) if gc.is::<ImportProto>()));
         v.cast::<u64>().add(1).cast::<GcPtr<ImportProto>>().read()
     }
 }
@@ -428,6 +429,8 @@ pub enum VmError {
     NotIndexable,
     ArityMismatch,
     NotCallable,
+    ModuleNotFound,
+    ModuleItemNotFound,
 
     Host,
 }
@@ -464,6 +467,8 @@ impl VmError {
             Self::NotIndexable => error_span("this value cannot be indexed", span),
             Self::ArityMismatch => error_span("invalid number of arguments", span),
             Self::NotCallable => error_span("this value cannot be called", span),
+            Self::ModuleNotFound => error_span("module with this name does not exist", span),
+            Self::ModuleItemNotFound => error_span("module has no such item", span),
 
             Self::Host => error_span("<host error>", span),
         }
@@ -487,7 +492,9 @@ impl VmError {
             | Self::MissingKey
             | Self::NotIndexable
             | Self::ArityMismatch
-            | Self::NotCallable => false,
+            | Self::NotCallable
+            | Self::ModuleNotFound
+            | Self::ModuleItemNotFound => false,
         }
     }
 }
@@ -1766,7 +1773,38 @@ unsafe fn hostcall(vm: Vm, jt: Jt, ip: Ip, args: Hostcall, sp: Sp, lp: Lp) -> Co
 unsafe fn import(vm: Vm, jt: Jt, ip: Ip, args: Import, sp: Sp, lp: Lp) -> Control {
     let info = lp.import_proto_unchecked(args.id());
 
-    todo!("import instruction not yet implemented")
+    let spec = info.as_ref().spec();
+    let Some(module) = (*vm.0.as_ptr()).registry.get(spec.as_ptr()) else {
+        return module_not_found_error(ip, vm);
+    };
+
+    match info.as_ref().bindings() {
+        ImportBindings::Bare(dst) => {
+            // load the whole module object
+            *sp.at(*dst) = ValueRaw::Object(module.as_any());
+        }
+        ImportBindings::Named(items) => {
+            // load parts of the module
+            for (key, dst) in items {
+                let Some(item) = module.as_ref().get(*key) else {
+                    return module_item_not_found_error(ip, vm);
+                };
+                *sp.at(*dst) = ValueRaw::Object(item);
+            }
+        }
+    }
+
+    dispatch_next(vm, jt, ip, sp, lp)
+}
+
+#[cold]
+unsafe fn module_not_found_error(ip: Ip, vm: Vm) -> Control {
+    vm_exit!(vm, ip, ModuleNotFound);
+}
+
+#[cold]
+unsafe fn module_item_not_found_error(ip: Ip, vm: Vm) -> Control {
+    vm_exit!(vm, ip, ModuleItemNotFound);
 }
 
 #[inline(always)]
@@ -2062,14 +2100,10 @@ impl gc::ExternalRoots for VmRoots {
         }
 
         // modules
-        for module in this!().registry.iter() {
-            tracer.visit(module);
-        }
+        this!().registry.trace(tracer);
 
-        // host functions
-        for func in this!().core.functions.iter() {
-            tracer.visit(*func);
-        }
+        // core lib
+        this!().core.trace(tracer);
     }
 }
 
@@ -2094,6 +2128,10 @@ impl<'vm> Runtime<'vm> {
     }
 
     /// Load a module into the VM's module registry.
+    ///
+    /// If you want to load a _native_ module, use [`Self::register`] instead.
+    ///
+    /// NOTE: Currently, only native modules may be imported by scripts.
     pub fn load(&mut self, m: &module::Module) -> Module<'vm> {
         let vm = unsafe { self.vm.as_mut() };
         let heap = &mut vm.heap;
@@ -2103,6 +2141,15 @@ impl<'vm> Runtime<'vm> {
             inner: m,
             _lifetime: PhantomData,
         }
+    }
+
+    /// Register a native module in the VM's module registry,
+    /// allowing it to be imported by scripts.
+    pub fn register(&mut self, m: &module::NativeModule) {
+        let vm = unsafe { self.vm.as_mut() };
+        let heap = &mut vm.heap;
+        let registry = &mut vm.registry;
+        registry.add_native(heap, m);
     }
 
     /// Execute the main entrypoint of the module to completion.

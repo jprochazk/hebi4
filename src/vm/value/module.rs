@@ -6,7 +6,9 @@ use rustc_hash::FxBuildHasher;
 use super::{FunctionProto, ValueRaw};
 use crate::{
     codegen::opcodes::{FnId, Insn, Reg, asm},
-    module::{FuncInfo, Literal, Module},
+    gc::Tracer,
+    module::{FuncInfo, Literal, Module, NativeModule},
+    value::host_function::HostFunction,
     vm::{
         gc::{GcPtr, GcRef, GcRefMut, GcRoot, GcUninitRoot, Heap, Trace, let_root},
         value::{Str, closure::ClosureProto, module::native::NativeModuleProto},
@@ -15,7 +17,6 @@ use crate::{
 
 pub struct ModuleProto {
     pub(crate) name: GcPtr<Str>,
-    pub(crate) module_id: ModuleId,
     pub(crate) entrypoint: Option<GcPtr<FunctionProto>>,
     pub(crate) functions: Box<[GcPtr<FunctionProto>]>,
     pub(crate) module_vars: Box<[ValueRaw]>,
@@ -108,9 +109,7 @@ impl<'a> std::fmt::Debug for GcRef<'a, ModuleProto> {
 
 #[derive(Default)]
 pub(crate) struct ModuleRegistry {
-    modules: Vec<GcPtr<ModuleProto>>,
-    by_name: HashMap<String, ModuleId, FxBuildHasher>,
-
+    modules: HashMap<String, GcPtr<ModuleProto>, FxBuildHasher>,
     native_modules: HashMap<String, GcPtr<NativeModuleProto>>,
 }
 
@@ -120,24 +119,76 @@ impl ModuleRegistry {
     }
 
     pub(crate) fn add(&mut self, heap: &mut Heap, module: &Module) -> GcPtr<ModuleProto> {
-        let id = ModuleId(self.modules.len() as u32);
         let name = module.name().to_owned();
 
-        let_root!(in heap; module_root);
-        let module = canonicalize(heap, module_root, module, id);
-
-        if let Some(idx) = self.by_name.get(&name) {
-            self.modules[idx.0 as usize] = module.as_ptr();
-        } else {
-            self.modules.push(module.as_ptr());
-            self.by_name.insert(name, id);
-        }
-
-        module.as_ptr()
+        let_root!(in heap; m);
+        let m = canonicalize(heap, m, module);
+        self.modules.insert(name, m.as_ptr());
+        m.as_ptr()
     }
 
-    pub(crate) fn iter(&self) -> impl Iterator<Item = GcPtr<ModuleProto>> {
-        self.modules.iter().copied()
+    pub(crate) fn add_native(&mut self, heap: &mut Heap, module: &NativeModule) {
+        let name = module.name().to_owned();
+
+        let_root!(in heap; m);
+        let m = unsafe {
+            let_root!(in heap; name_root);
+            let name = Str::new(heap, name_root, name.as_str());
+
+            let (functions, functions_by_name) = {
+                let mut functions = Box::new_uninit_slice(module.num_functions());
+                let mut functions_by_name: HashMap<String, usize, _> = Default::default();
+
+                for (i, ((func_name, orig_func), func_slot)) in
+                    module.functions().zip(functions.iter_mut()).enumerate()
+                {
+                    // TODO: improve root in loop ergonomics
+                    let_root!(in heap; func_name_root);
+                    let func_name = Str::new(heap, func_name_root, func_name);
+
+                    let_root!(in heap; func_root);
+                    let func = HostFunction::new(
+                        heap,
+                        func_root,
+                        &func_name,
+                        orig_func.arity(),
+                        orig_func.callback(),
+                    );
+
+                    func_slot.write(func.as_ptr());
+                    functions_by_name.insert(orig_func.name().to_owned(), i);
+                }
+
+                (functions.assume_init(), functions_by_name)
+            };
+
+            m.init_raw(
+                heap,
+                heap.alloc_no_gc(|ptr| {
+                    (*ptr).write(NativeModuleProto {
+                        name: name.as_ptr(),
+                        functions,
+                        functions_by_name,
+                    });
+                }),
+            )
+        };
+        self.native_modules.insert(name, m.as_ptr());
+    }
+
+    pub(crate) unsafe fn get(&self, spec: GcPtr<Str>) -> Option<GcPtr<NativeModuleProto>> {
+        // TODO: string interning
+        self.native_modules.get(spec.as_ref().as_str()).copied()
+    }
+
+    pub(crate) fn trace(&self, tracer: &Tracer) {
+        for m in self.modules.values() {
+            tracer.visit(*m);
+        }
+
+        for m in self.native_modules.values() {
+            tracer.visit(*m)
+        }
     }
 }
 
@@ -150,9 +201,17 @@ pub struct ImportProto {
     bindings: ImportBindings,
 }
 
+impl ImportProto {
+    pub(crate) fn alloc(heap: &Heap, spec: GcPtr<Str>, bindings: ImportBindings) -> GcPtr<Self> {
+        heap.alloc_no_gc(|ptr| unsafe {
+            (*ptr).write(Self { spec, bindings });
+        })
+    }
+}
+
 pub enum ImportBindings {
     Bare(Reg),
-    Named(Box<[Reg]>),
+    Named(Box<[(GcPtr<Str>, Reg)]>),
 }
 
 impl<'a> GcRef<'a, ImportProto> {
@@ -170,6 +229,15 @@ unsafe impl Trace for ImportProto {
 
     unsafe fn trace(&self, tracer: &crate::vm::gc::Tracer) {
         tracer.visit(self.spec);
+
+        match &self.bindings {
+            ImportBindings::Bare(reg) => {}
+            ImportBindings::Named(items) => {
+                for (key, _) in items {
+                    tracer.visit(*key);
+                }
+            }
+        }
     }
 }
 
@@ -200,7 +268,6 @@ fn canonicalize<'a>(
     heap: &mut Heap,
     root: GcUninitRoot<'a>,
     info: &Module,
-    id: ModuleId,
 ) -> GcRoot<'a, ModuleProto> {
     let_root!(in heap; name);
     let name = Str::new(heap, name, info.name());
@@ -211,7 +278,6 @@ fn canonicalize<'a>(
             heap.alloc_no_gc(|ptr| {
                 (*ptr).write(ModuleProto {
                     name: name.as_ptr(),
-                    module_id: id,
                     entrypoint: None,
                     functions: Box::new([]),
                     // TODO: module vars
@@ -295,9 +361,32 @@ fn canonicalize_literals(
             Literal::ClosureInfo(v) => ValueRaw::Object(
                 ClosureProto::alloc(heap, functions[v.func.zx()], &v.capture_info).as_any(),
             ),
-            Literal::ImportInfo(_) => {
-                todo!("ImportInfo literal conversion not yet implemented")
-            }
+            Literal::ImportInfo(v) => match v {
+                crate::module::ImportInfo::Bare { spec, dst } => {
+                    let_root!(in heap; spec_root);
+                    let spec = Str::new(heap, spec_root, spec);
+                    let bindings = ImportBindings::Bare(*dst);
+                    ValueRaw::Object(ImportProto::alloc(heap, spec.as_ptr(), bindings).as_any())
+                }
+                crate::module::ImportInfo::Named { spec, bindings } => {
+                    let_root!(in heap; spec_root);
+                    let spec = Str::new(heap, spec_root, spec);
+
+                    let bindings = ImportBindings::Named(
+                        bindings
+                            .iter()
+                            .map(|(key, dst)| {
+                                // TODO: root in loop ergonomics
+                                let_root!(in heap; key_root);
+                                let key = Str::new(heap, key_root, key);
+
+                                (key.as_ptr(), *dst)
+                            })
+                            .collect(),
+                    );
+                    ValueRaw::Object(ImportProto::alloc(heap, spec.as_ptr(), bindings).as_any())
+                }
+            },
         };
         out.push(value);
     }

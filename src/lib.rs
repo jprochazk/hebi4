@@ -37,7 +37,7 @@ pub mod prelude {
     pub use crate::{
         codegen::EmitOptions,
         error::{Result as HebiResult, error},
-        module::Module,
+        module::{Module, NativeModule, function},
         vm::{
             Hebi, Stdio, StdioWrite,
             gc::{

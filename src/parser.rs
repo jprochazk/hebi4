@@ -219,21 +219,27 @@ fn parse_stmt_loop(p: &mut State, buf: &Bump) -> Result<Spanned<Stmt>> {
 ///
 /// `p` must be at "import"
 fn parse_stmt_import(p: &mut State, buf: &Bump) -> Result<Spanned<Stmt>> {
+    let import_token_span = p.span();
     p.must(t![import])?;
 
     // Check if bare import (string) or named import (identifier)
     if p.at(t![str]) {
-        parse_stmt_import_bare(p, buf)
+        parse_stmt_import_bare(p, buf, import_token_span)
     } else {
-        parse_stmt_import_named(p, buf)
+        parse_stmt_import_named(p, buf, import_token_span)
     }
 }
 
 /// `"import" import_item,+ "from" STRING`
 ///
 /// `p` must be after "import" keyword
-fn parse_stmt_import_named(p: &mut State, buf: &Bump) -> Result<Spanned<Stmt>> {
-    let node = p.open();
+fn parse_stmt_import_named(
+    p: &mut State,
+    buf: &Bump,
+    import_token_span: Span,
+) -> Result<Spanned<Stmt>> {
+    let mut node = p.open();
+    node.start = import_token_span.start;
 
     // Parse comma-separated list of import items (at least one)
     let mut items = temp(buf);
@@ -255,8 +261,13 @@ fn parse_stmt_import_named(p: &mut State, buf: &Bump) -> Result<Spanned<Stmt>> {
 /// `"import" STRING "as" IDENT`
 ///
 /// `p` must be after "import" keyword
-fn parse_stmt_import_bare(p: &mut State, buf: &Bump) -> Result<Spanned<Stmt>> {
-    let node = p.open();
+fn parse_stmt_import_bare(
+    p: &mut State,
+    buf: &Bump,
+    import_token_span: Span,
+) -> Result<Spanned<Stmt>> {
+    let mut node = p.open();
+    node.start = import_token_span.start;
 
     let path = parse_str(p, buf)?;
     p.must(t![as])?;

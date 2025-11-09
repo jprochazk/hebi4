@@ -1446,7 +1446,12 @@ fn emit_field_getters(nodes: &Nodes, out: &mut String) {
                         let index = repr.index as usize;
                         let length = repr.length.get() as usize;
                         let nodes = unsafe {{ self.ast.nodes.get_unchecked(index + OFFSET..index + OFFSET + length) }};
-                        NodeList {{ ast: self.ast, nodes: unsafe {{ {ty}::from_packed_slice(nodes) }} }}
+                        NodeList {{
+                            ast: self.ast,
+                            first_node_index: index + OFFSET,
+                            len: length,
+                            _type: PhantomData,
+                        }}
                     }}\n
                     ",
                     tail = tail.name,
@@ -1484,7 +1489,12 @@ fn emit_field_getters(nodes: &Nodes, out: &mut String) {
                         let index = repr.index as usize;
                         let length = repr.tail_length.get() as usize;
                         let nodes = unsafe {{ self.ast.nodes.get_unchecked(index + OFFSET..index + OFFSET + length) }};
-                        NodeList {{ ast: self.ast, nodes: unsafe {{ {ty}::from_packed_slice(nodes) }} }}
+                        NodeList {{
+                            ast: self.ast,
+                            first_node_index: index + OFFSET,
+                            len: length,
+                            _type: PhantomData,
+                        }}
                     }}\n
                     ",
                     tail = tail.name,

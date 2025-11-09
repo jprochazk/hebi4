@@ -5,7 +5,7 @@ use rustc_hash::FxBuildHasher;
 
 use crate::{
     codegen::opcodes::HostId,
-    module::native::NativeFunctionCallback,
+    gc::Tracer,
     vm::{
         gc::{GcPtr, Heap},
         value::{
@@ -28,17 +28,8 @@ macro_rules! functions {
             [$(
                 CoreFunction {
                     name: stringify!($name),
-                    arity: arity_of(&$crate::core::$module::$name),
-                    f: {
-                        unsafe fn _shim(
-                            cx: $crate::vm::value::host_function::Context<'_>
-                        ) -> $crate::error::Result<$crate::vm::value::ValueRaw> {
-                            let f = $crate::core::$module::$name;
-                            $crate::module::native::NativeFunctionCallback::call(&f, cx)
-                        }
-
-                        _shim
-                    },
+                    arity: $crate::module::native::arity_of(&$crate::core::$module::$name),
+                    f: $crate::__function_shim!($crate::core::$module::$name),
                 },
             )*].into_iter().collect()
         });
@@ -62,10 +53,6 @@ macro_rules! functions {
             by_name: &BY_NAME
         }
     }};
-}
-
-fn arity_of<'a, F: NativeFunctionCallback<'a, T>, T>(f: &F) -> u8 {
-    F::ARITY
 }
 
 pub struct CoreLib {
@@ -120,6 +107,12 @@ impl RuntimeCoreLib {
             .collect();
 
         Self { functions }
+    }
+
+    pub(crate) fn trace(&self, tracer: &Tracer) {
+        for f in &self.functions {
+            tracer.visit(*f);
+        }
     }
 }
 

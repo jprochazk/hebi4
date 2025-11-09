@@ -1,0 +1,13 @@
+---
+source: src/vm/tests.rs
+expression: s
+---
+SOURCE
+import foo from "test"
+print(foo())
+
+OK
+Nil
+
+STDOUT
+"hello"

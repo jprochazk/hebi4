@@ -1411,7 +1411,7 @@ fn eval_block<'a>(
     dst: Option<Reg>,
 ) -> Result<Value<'a>> {
     let (stmt_list, tail) = match list.last().map(|node| node.kind()) {
-        Some(ast::StmtKind::StmtExpr(tail)) => (list.slice(0..list.len() - 1).unwrap(), Some(tail)),
+        Some(ast::StmtKind::StmtExpr(tail)) => (list.slice(0..list.len() - 1), Some(tail)),
         _ => (list, None),
     };
 
@@ -1451,14 +1451,15 @@ fn emit_stmt_list<'a>(m: &mut State<'a>, list: NodeList<'a, Stmt>) -> Result<()>
     // at which point we _define_ the given function.
     // to get its id, we `pop` from the `undefined_functions` list,
     // because we are guaranteed to process them in the same order.
-    for stmt in list {
-        emit_stmt(m, stmt)?;
+    for (i, stmt) in list.iter().enumerate() {
+        let span = list.get_span(i).unwrap();
+        emit_stmt(m, stmt, span)?;
     }
 
     Ok(())
 }
 
-fn emit_stmt<'a>(m: &mut State<'a>, stmt: Node<'a, Stmt>) -> Result<()> {
+fn emit_stmt<'a>(m: &mut State<'a>, stmt: Node<'a, Stmt>, span: Span) -> Result<()> {
     match stmt.kind() {
         ast::StmtKind::Var(node) => emit_stmt_var(m, node)?,
         ast::StmtKind::Loop(node) => emit_stmt_loop(m, node)?,
@@ -1467,8 +1468,8 @@ fn emit_stmt<'a>(m: &mut State<'a>, stmt: Node<'a, Stmt>) -> Result<()> {
             let value = eval_expr(m, node.inner(), node.inner_span())?;
             free_value(m, value);
         }
-        ast::StmtKind::Import(node) => emit_stmt_import(m, Import::Named(node))?,
-        ast::StmtKind::ImportBare(node) => emit_stmt_import(m, Import::Bare(node))?,
+        ast::StmtKind::Import(node) => emit_stmt_import(m, Import::Named(node), span)?,
+        ast::StmtKind::ImportBare(node) => emit_stmt_import(m, Import::Bare(node), span)?,
     }
 
     Ok(())
@@ -1541,12 +1542,11 @@ enum Import<'a> {
     Bare(Node<'a, ast::ImportBare>),
 }
 
-fn emit_stmt_import<'a>(m: &mut State<'a>, node: Import<'a>) -> Result<()> {
-    let (import_info, span) = match node {
+fn emit_stmt_import<'a>(m: &mut State<'a>, node: Import<'a>, span: Span) -> Result<()> {
+    let import_info = match node {
         Import::Named(node) => {
             // import a as x, b as y, c as z from "spec"
             let spec = node.path().get();
-            let span = node.path_span();
 
             let mut bindings = vec![in m.buf];
             for item in node.items() {
@@ -1561,20 +1561,17 @@ fn emit_stmt_import<'a>(m: &mut State<'a>, node: Import<'a>) -> Result<()> {
                 bindings.push((name.to_string(), reg));
             }
 
-            let info = ImportInfo::named(spec.to_string(), bindings.into_iter().collect());
-            (info, span)
+            ImportInfo::named(spec.to_string(), bindings.into_iter().collect())
         }
         Import::Bare(node) => {
             // import "spec" as name
             let spec = node.path().get();
             let binding = node.binding().get();
-            let span = node.path_span();
 
             let reg = fresh_var(m, node.binding_span())?;
             m.declare_local(binding, reg, node.binding_span());
 
-            let info = ImportInfo::bare(spec.to_string(), reg);
-            (info, span)
+            ImportInfo::bare(spec.to_string(), reg)
         }
     };
 

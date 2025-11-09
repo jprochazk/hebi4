@@ -83,16 +83,20 @@ fn snapshot<'vm>(
     }
 }
 
+fn vm() -> Hebi {
+    Hebi::new().with_stdio(Stdio {
+        stdout: Box::new(Vec::new()),
+        stderr: Box::new(Vec::new()),
+    })
+}
+
 #[glob_test::glob("../../tests/inputs/run/*.hi")]
 fn run(path: &Path) {
     let input = read_to_string(path).unwrap();
     let input = input.trim();
     let module = module(input);
 
-    let mut vm = Hebi::new().with_stdio(Stdio {
-        stdout: Box::new(Vec::new()),
-        stderr: Box::new(Vec::new()),
-    });
+    let mut vm = vm();
     vm.with(|mut r| {
         let loaded_module = r.load(&module);
 
@@ -125,7 +129,7 @@ fn separate_modules() {
     let a = module(r#"fn f(a) { a } f(10)"#);
     let b = module(r#"100 + 200"#);
 
-    Hebi::new().with(|mut r| {
+    vm().with(|mut r| {
         let a = r.load(&a);
         let a = r.run(&a).unwrap();
         let a = unsafe { a.as_ref() };
@@ -138,4 +142,43 @@ fn separate_modules() {
         assert_eq!(a, "Int(10)");
         assert_eq!(b, "Int(300)");
     })
+}
+
+mod native_modules {
+    use super::{module, snapshot, vm};
+    use crate::prelude::*;
+
+    #[test]
+    fn usage() {
+        fn foo(cx: Context<'_>) -> &'static str {
+            "hello"
+        }
+
+        let m = NativeModule::builder("test")
+            .function(function!(foo))
+            .finish();
+
+        let input = "\
+import foo from \"test\"
+print(foo())";
+        let test = module(input);
+
+        vm().with(|mut vm| {
+            vm.register(&m);
+
+            let loaded_test = vm.load(&test);
+            let (snapshot, _) = snapshot(input, &test, &mut vm, &loaded_test);
+
+            #[cfg(not(miri))]
+            {
+                insta::assert_snapshot!(snapshot);
+            }
+
+            #[cfg(miri)]
+            {
+                // on miri all we care about is if there's any undefined behavior.
+                eprintln!("{snapshot}");
+            }
+        });
+    }
 }
