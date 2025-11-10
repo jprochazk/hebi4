@@ -1,7 +1,10 @@
 use std::{fmt::Write as _, fs::read_to_string, path::Path};
 
 use super::Hebi;
-use crate::vm::{self, Runtime, Stdio};
+use crate::{
+    module::{NativeModule, function},
+    vm::{self, Context, Runtime, Stdio},
+};
 
 fn module(input: &str) -> crate::module::Module {
     let tokens = crate::token::tokenize(&input);
@@ -83,6 +86,16 @@ fn snapshot<'vm>(
     }
 }
 
+fn native_module() -> NativeModule {
+    fn foo(cx: Context<'_>) -> &'static str {
+        "hello"
+    }
+
+    NativeModule::builder("test")
+        .function(function!(foo))
+        .finish()
+}
+
 fn vm() -> Hebi {
     Hebi::new().with_stdio(Stdio {
         stdout: Box::new(Vec::new()),
@@ -95,9 +108,12 @@ fn run(path: &Path) {
     let input = read_to_string(path).unwrap();
     let input = input.trim();
     let module = module(input);
+    let test = native_module();
 
     let mut vm = vm();
     vm.with(|mut r| {
+        r.register(&test);
+
         let loaded_module = r.load(&module);
 
         // run each code snippet twice using the same VM,
@@ -142,43 +158,4 @@ fn separate_modules() {
         assert_eq!(a, "Int(10)");
         assert_eq!(b, "Int(300)");
     })
-}
-
-mod native_modules {
-    use super::{module, snapshot, vm};
-    use crate::prelude::*;
-
-    #[test]
-    fn usage() {
-        fn foo(cx: Context<'_>) -> &'static str {
-            "hello"
-        }
-
-        let m = NativeModule::builder("test")
-            .function(function!(foo))
-            .finish();
-
-        let input = "\
-import foo from \"test\"
-print(foo())";
-        let test = module(input);
-
-        vm().with(|mut vm| {
-            vm.register(&m);
-
-            let loaded_test = vm.load(&test);
-            let (snapshot, _) = snapshot(input, &test, &mut vm, &loaded_test);
-
-            #[cfg(not(miri))]
-            {
-                insta::assert_snapshot!(snapshot);
-            }
-
-            #[cfg(miri)]
-            {
-                // on miri all we care about is if there's any undefined behavior.
-                eprintln!("{snapshot}");
-            }
-        });
-    }
 }

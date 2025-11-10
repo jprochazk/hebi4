@@ -1754,6 +1754,13 @@ impl<T: Trace> Rooted<T> for &GcRoot<'_, T> {
     }
 }
 
+impl<T: Trace> private::Sealed for crate::module::native::Param<'_, T> {}
+impl<'a, T: Trace> Rooted<T> for crate::module::native::Param<'a, T> {
+    fn as_ptr(&self) -> GcPtr<T> {
+        self.as_ptr()
+    }
+}
+
 // #[repr(C, u64)]
 // pub enum ValueRefMut<'a> {
 //     Nil = 0,

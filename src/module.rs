@@ -16,7 +16,7 @@ use crate::{
     vm::value::StringHasher,
 };
 
-pub use native::{NativeModule, function};
+pub use native::{NativeModule, Param, TryFromHebiValueRaw, TryIntoHebiValueRaw, Value, function};
 
 /// Represents the result of code generation: A list of functions with
 /// one of them marked as the entrypoint.

@@ -1,9 +1,10 @@
 ---
 source: src/vm/tests.rs
-expression: s
+expression: snapshot
 ---
 SOURCE
 import foo from "test"
+
 print(foo())
 
 OK

@@ -70,10 +70,17 @@ impl<'a> Context<'a> {
         }
     }
 
-    pub fn heap(&mut self) -> &mut Heap {
+    #[inline]
+    pub fn heap_mut(&mut self) -> &mut Heap {
         unsafe { &mut *self.vm.heap() }
     }
 
+    #[inline]
+    pub fn heap(&self) -> &Heap {
+        unsafe { &*self.vm.heap() }
+    }
+
+    #[inline]
     pub fn stdio(&mut self) -> &mut Stdio {
         unsafe { &mut *self.vm.stdio() }
     }

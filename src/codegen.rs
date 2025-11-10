@@ -172,6 +172,7 @@ pub fn emit(name: Cow<'static, str>, ast: &Ast, options: EmitOptions) -> Result<
         buf,
         func_stack: vec![in buf],
         func_table: FunctionTable::new(buf),
+        module_vars: vec![in buf],
     };
 
     // note: `main` cannot be called, so does not need a symbol
@@ -202,6 +203,12 @@ struct State<'a> {
     buf: &'a Bump,
     func_stack: Vec<'a, FunctionState<'a>>,
     func_table: FunctionTable<'a>,
+    module_vars: Vec<'a, ModuleVar<'a>>,
+}
+
+struct ModuleVar<'a> {
+    name: &'a str,
+    id: Mvar,
 }
 
 struct FunctionTable<'a> {
@@ -1049,6 +1056,10 @@ impl<'a> State<'a> {
         f!(self).end_loop(prev)
     }
 
+    fn is_top_level(&self) -> bool {
+        self.func_stack.len() == 1 && f!(&self).scopes.len() == 1
+    }
+
     fn declare_local(&mut self, name: &'a str, reg: Reg, span: Span) {
         f!(self).declare_local(name, reg, span)
     }
@@ -1069,7 +1080,7 @@ impl<'a> State<'a> {
             };
 
             match symbol {
-                Symbol::Local { reg, span, .. } if i >= 1 => {
+                Symbol::Local { reg, span, .. } => {
                     // Found a variable in the enclosing scope.
                     // Declare it as a capture in all functions up the stack,
                     // including current function:
@@ -1089,7 +1100,7 @@ impl<'a> State<'a> {
 
                     return Ok(Some(Symbol::Capture { span, idx }));
                 }
-                Symbol::Capture { idx, span, .. } if i >= 1 => {
+                Symbol::Capture { idx, span, .. } => {
                     // Found a capture in the enclosing scope.
                     // Declare it as a capture in all functions up the stack,
                     // including current function:
@@ -1107,7 +1118,12 @@ impl<'a> State<'a> {
                     // Found a function in the enclosing scope, return it as-is.
                     return Ok(Some(symbol));
                 }
-                _ => unreachable!(),
+                Symbol::ModuleVar { span, idx } => {
+                    unreachable!("ICE: symbols should never resolve to module vars");
+                }
+                Symbol::HostFunction { arity, id } => {
+                    unreachable!("ICE: symbols should never resolve to host functions")
+                }
             }
         }
 
