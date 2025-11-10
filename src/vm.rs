@@ -361,6 +361,17 @@ impl Vm {
     }
 
     #[inline]
+    unsafe fn unwind(mut self) {
+        let this = self.0.as_mut();
+
+        for frame in self.0.as_mut().frames.iter().rev() {
+            // TODO: print stack trace
+        }
+
+        self.0.as_mut().frames.clear();
+    }
+
+    #[inline]
     unsafe fn get_span(self, ip: Ip) -> Option<Span> {
         let pc = ip.offset_from_unsigned(Ip::from_fn(self.current_frame().callee()));
         match self.current_frame().callee().as_ref().dbg() {
@@ -582,7 +593,7 @@ static JT: JumpTable = jump_table! {
 };
 
 #[cfg(not(any(debug_assertions, target_arch = "wasm32")))]
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 #[repr(transparent)]
 pub(crate) struct Control(u8);
 
@@ -595,7 +606,7 @@ impl Control {
 
     #[inline]
     fn error(code: VmError) -> Control {
-        Control(1 & ((code as u8) << 1))
+        Control(1 | ((code as u8) << 1))
     }
 
     #[inline]
@@ -2202,11 +2213,15 @@ impl<'vm> Runtime<'vm> {
                     let op = jt.at(insn);
                     match op(vm, jt, ip, insn, sp, lp) {
                         Control::Stop => return Ok(()),
-                        Control::Error(err) if err.is_host() => {
-                            let err = vm.take_error().unwrap();
-                            return Err(err.annotate(vm));
+                        Control::Error(err) => {
+                            let err = if err.is_host() {
+                                vm.take_error().unwrap().annotate(vm)
+                            } else {
+                                err.annotate(vm)
+                            };
+                            vm.unwind();
+                            return Err(err);
                         }
-                        Control::Error(err) => return Err(err.annotate(vm)),
 
                         #[cfg(any(debug_assertions, target_arch = "wasm32"))]
                         Control::Continue(new_sp, new_lp, new_ip) => {
@@ -2225,12 +2240,13 @@ impl<'vm> Runtime<'vm> {
 
                 if ctrl.is_error() {
                     let err = ctrl.error_code();
-                    if err.is_host() {
-                        let err = vm.take_error();
-                        return Err(err.unwrap());
+                    let err = if err.is_host() {
+                        vm.take_error().unwrap().annotate(vm)
                     } else {
-                        return Err(err.annotate(vm));
-                    }
+                        err.annotate(vm)
+                    };
+                    vm.unwind();
+                    return Err(err);
                 }
 
                 return Ok(());

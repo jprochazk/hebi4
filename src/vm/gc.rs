@@ -1851,7 +1851,7 @@ macro_rules! __let_root {
 /// ```
 ///
 /// This operation is always safe, because the root is initialized to
-/// a valid sentinel value, and cannot be used in any until initialized.
+/// a valid sentinel value, and cannot be used in any way until initialized.
 pub use crate::__let_root as let_root;
 
 #[macro_export]

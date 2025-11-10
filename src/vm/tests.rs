@@ -45,8 +45,8 @@ fn take_stdio(r: &mut Runtime<'_>) -> (String, String) {
 
 fn snapshot<'vm>(
     input: &str,
-    module: &crate::module::Module,
     r: &mut Runtime<'vm>,
+    module: &crate::module::Module,
     loaded_module: &vm::Module<'vm>,
 ) -> (String, bool) {
     match r.run(&loaded_module) {
@@ -118,8 +118,8 @@ fn run(path: &Path) {
 
         // run each code snippet twice using the same VM,
         // ensuring it has the same result.
-        let (snapshot1, failure1) = snapshot(input, &module, &mut r, &loaded_module);
-        let (snapshot2, failure2) = snapshot(input, &module, &mut r, &loaded_module);
+        let (snapshot1, failure1) = snapshot(input, &mut r, &module, &loaded_module);
+        let (snapshot2, failure2) = snapshot(input, &mut r, &module, &loaded_module);
 
         assert_eq!(snapshot1, snapshot2);
         assert_eq!(failure1, failure2);

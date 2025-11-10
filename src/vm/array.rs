@@ -29,6 +29,14 @@ impl<T: Sized + Copy> DynStack<T> {
         }
     }
 
+    /// Clear the stack.
+    ///
+    /// This only sets the length to `0`.
+    #[inline]
+    pub fn clear(&mut self) {
+        self.length = 0;
+    }
+
     /// Push a value onto the stack.
     ///
     /// This grows the array if necessary.
@@ -83,26 +91,41 @@ impl<T: Sized + Copy> DynStack<T> {
     pub fn iter(&self) -> DynStackIter<'_, T> {
         DynStackIter {
             stack: self,
-            index: 0,
+            front: 0,
+            back: self.len().wrapping_sub(1),
         }
     }
 }
 
 pub struct DynStackIter<'a, T: Sized + Copy> {
     stack: &'a DynStack<T>,
-    index: usize,
+    front: usize,
+    back: usize,
 }
 
 impl<'a, T: Sized + Copy> Iterator for DynStackIter<'a, T> {
     type Item = &'a T;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.index >= self.stack.length {
+        if self.front >= self.stack.length {
             return None;
         }
 
-        let index = self.index;
-        self.index += 1;
+        let index = self.front;
+        self.front = self.front.wrapping_add(1);
+
+        Some(unsafe { &*self.stack.inner.offset(index) })
+    }
+}
+
+impl<'a, T: Sized + Copy> DoubleEndedIterator for DynStackIter<'a, T> {
+    fn next_back(&mut self) -> Option<Self::Item> {
+        if self.back >= self.stack.length {
+            return None;
+        }
+
+        let index = self.back;
+        self.back = self.back.wrapping_sub(1);
 
         Some(unsafe { &*self.stack.inner.offset(index) })
     }

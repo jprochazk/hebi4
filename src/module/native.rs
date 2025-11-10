@@ -6,7 +6,7 @@ use rustc_hash::FxBuildHasher;
 
 use crate::{
     error::{Error, Result, error},
-    gc::{GcAnyPtr, GcAnyRef, GcAnyRefMut, GcPtr, GcRefMut, Heap, HeapId, Trace},
+    gc::{GcAnyPtr, GcAnyRef, GcAnyRefMut, GcPtr, GcRefMut, Heap, Trace},
     vm::{
         gc::{GcRef, ValueRef},
         value::{
@@ -283,7 +283,7 @@ pub struct Param<'a, T: Sized + 'static> {
     ptr: GcPtr<T>,
 
     #[cfg(debug_assertions)]
-    heap_id: HeapId,
+    heap_id: crate::gc::HeapId,
     _lifetime: InvariantLifetime<'a>,
 }
 
@@ -314,7 +314,7 @@ pub struct Any<'a> {
     ptr: GcAnyPtr,
 
     #[cfg(debug_assertions)]
-    heap_id: HeapId,
+    heap_id: crate::gc::HeapId,
     _lifetime: InvariantLifetime<'a>,
 }
 
@@ -324,6 +324,7 @@ impl<'a> Any<'a> {
         Self {
             ptr,
 
+            #[cfg(debug_assertions)]
             heap_id: heap.id(),
             _lifetime: PhantomData,
         }
@@ -372,6 +373,7 @@ impl<'a> Any<'a> {
     pub unsafe fn cast_unchecked<T: Trace>(&self) -> Param<'a, T> {
         Param {
             ptr: self.ptr.cast_unchecked(),
+
             #[cfg(debug_assertions)]
             heap_id: self.heap_id,
             _lifetime: PhantomData,
