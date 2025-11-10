@@ -159,3 +159,22 @@ fn separate_modules() {
         assert_eq!(b, "Int(300)");
     })
 }
+
+#[test]
+fn stack_unwinding() {
+    let src = "panic()";
+    let m = module(src);
+
+    vm().with(|mut r| {
+        let l = r.load(&m);
+        let (s0, f0) = snapshot(src, &mut r, &m, &l);
+        let (s1, f1) = snapshot(src, &mut r, &m, &l);
+
+        assert_eq!(s0, s1);
+        assert_eq!(f0, f1);
+
+        unsafe {
+            assert!(r.vm.as_mut().frames.is_empty());
+        }
+    })
+}
