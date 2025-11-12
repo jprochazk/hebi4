@@ -22,18 +22,20 @@ jobs:
         with:
           shared-key: "xtask"
 
+      - name: Cache xtask binary
+        id: cache-xtask
+        uses: actions/cache@v4
+        with:
+          path: xtask
+          key: xtask-${{ hashFiles('xtask/**/*.rs', 'xtask/**/Cargo.toml', 'Cargo.lock') }}
+
       - name: Build xtask
-        run: cargo build --release -p xtask
+        if: steps.cache-xtask.outputs.cache-hit != 'true'
+        run: cargo build --release -p xtask && cp target/release/xtask xtask
 
       - name: Generate CI matrix
         id: matrix
-        run: echo "matrix=$(./target/release/xtask ci-jobs)" >> $GITHUB_OUTPUT
-
-      - name: Cache xtask binary
-        uses: actions/cache/save@v4
-        with:
-          path: target/release/xtask
-          key: xtask-${{ github.sha }}
+        run: echo "matrix=$(./xtask ci-jobs)" >> $GITHUB_OUTPUT
 
   ci:
     name: "${{ matrix.command }}"
@@ -58,8 +60,8 @@ jobs:
       - name: Restore xtask binary
         uses: actions/cache/restore@v4
         with:
-          path: target/release/xtask
-          key: xtask-${{ github.sha }}
+          path: xtask
+          key: xtask-${{ hashFiles('xtask/**/*.rs', 'xtask/**/Cargo.toml', 'Cargo.lock') }}
           fail-on-cache-miss: true
 
       - name: Get tool names
