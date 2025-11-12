@@ -18,9 +18,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: "xtask"
 
       - name: Cache xtask binary
         id: cache-xtask
@@ -28,6 +25,11 @@ jobs:
         with:
           path: target/release/xtask
           key: xtask-${{ hashFiles('xtask/**/*.rs', 'xtask/**/Cargo.toml', 'Cargo.lock') }}
+
+      - uses: Swatinem/rust-cache@v2
+        if: steps.cache-xtask.outputs.cache-hit != 'true'
+        with:
+          shared-key: "xtask"
 
       - name: Build xtask
         if: steps.cache-xtask.outputs.cache-hit != 'true'
@@ -64,6 +66,7 @@ jobs:
           key: xtask-${{ hashFiles('xtask/**/*.rs', 'xtask/**/Cargo.toml', 'Cargo.lock') }}
           fail-on-cache-miss: true
 
+      # NOTE: This is load bearing, `matrix` can't be access in `if`.
       - name: Get tool names
         id: tools
         run: echo "list=${{ join(matrix.install, ',') }}" >> $GITHUB_OUTPUT
@@ -74,4 +77,4 @@ jobs:
         with:
           tool: ${{ steps.tools.outputs.list }}
 
-      - run: chmod +x target/release/xtask && target/release/xtask ${{ matrix.command }}
+      - run: ./target/release/xtask ${{ matrix.command }}
