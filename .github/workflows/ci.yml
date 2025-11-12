@@ -21,7 +21,6 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: "xtask"
-          workspaces: "xtask"
 
       - name: Build xtask
         run: cargo build --release -p xtask
