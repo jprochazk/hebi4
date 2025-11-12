@@ -1,14 +1,4 @@
 [alias]
 review = "insta test --test-runner nextest --review --unreferenced delete"
 x = "run --release --quiet -p xtask"
-codegen = "x codegen"
-ub = "x miri"
-check-tco = "x check-tco"
-sort-imports = "x sort-imports"
 cli = "run --release --quiet -p hebi4-cli --"
-playground = "x playground"
-# CI-related aliases (can't override built-in commands like 'test' or 'clippy')
-clippy-ci = "x clippy"
-fmt-check = "x fmt-check"
-codegen-check = "x codegen-check"
-ci = "x ci"
