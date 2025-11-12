@@ -29,12 +29,11 @@ jobs:
         id: matrix
         run: echo "matrix=$(./target/release/xtask ci-jobs)" >> $GITHUB_OUTPUT
 
-      - name: Upload xtask binary
-        uses: actions/upload-artifact@v4
+      - name: Cache xtask binary
+        uses: actions/cache/save@v4
         with:
-          name: xtask
           path: target/release/xtask
-          retention-days: 1
+          key: xtask-${{ github.sha }}
 
   ci:
     name: "${{ matrix.command }}"
@@ -56,9 +55,12 @@ jobs:
         with:
           shared-key: ${{ matrix.cache_key }}
 
-      - uses: actions/download-artifact@v4
+      - name: Restore xtask binary
+        uses: actions/cache/restore@v4
         with:
-          name: xtask
+          path: target/release/xtask
+          key: xtask-${{ github.sha }}
+          fail-on-cache-miss: true
 
       - name: Get tool names
         id: tools
