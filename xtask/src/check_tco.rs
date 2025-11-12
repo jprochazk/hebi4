@@ -3,6 +3,12 @@ use std::collections::BTreeSet;
 use super::*;
 
 const JUMP_TABLE_PREFIX: &str = "hebi4::vm::JT::";
+const TCO_EXCEPTIONS: &[&str] = &[
+    // `stop` mean stop, so it shouldn't tail call anything else.
+    "::stop",
+    // host calls use the machine stack, which is fine.
+    "::hostcall",
+];
 
 pub fn check_tco() {
     let o = {
@@ -27,7 +33,7 @@ pub fn check_tco() {
 
         if !has_jump_to_reg(&section) {
             // this one is allowed to have no tail-call jump
-            if section.name.ends_with("::stop") {
+            if TCO_EXCEPTIONS.iter().any(|ex| section.name.ends_with(ex)) {
                 continue;
             }
             missing_tco.push(section.name.to_string());
