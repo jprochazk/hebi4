@@ -43,7 +43,8 @@ jobs:
     needs: [build-xtask]
     strategy:
       fail-fast: false
-      matrix: ${{ fromJson(needs.build-xtask.outputs.matrix) }}
+      matrix:
+        include: ${{ fromJson(needs.build-xtask.outputs.matrix) }}
     steps:
       - uses: actions/checkout@v4
 

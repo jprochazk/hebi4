@@ -74,11 +74,6 @@ pub fn ci_jobs() -> Vec<Job> {
     ]
 }
 
-#[derive(Serialize)]
-struct MatrixOutput {
-    include: Vec<Job>,
-}
-
 fn validate(jobs: &[Job]) {
     let mut cache_keys = HashSet::new();
     for job in jobs {
@@ -92,7 +87,7 @@ fn validate(jobs: &[Job]) {
 }
 
 pub fn output_matrix() {
-    let matrix = MatrixOutput { include: ci_jobs() };
-    validate(&matrix.include);
-    println!("{}", serde_json::to_string(&matrix).unwrap());
+    let jobs = ci_jobs();
+    validate(&jobs);
+    println!("{}", serde_json::to_string(&jobs).unwrap());
 }
