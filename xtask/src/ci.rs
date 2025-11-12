@@ -66,11 +66,11 @@ pub fn ci_jobs() -> Vec<Job> {
         // TODO: re-enable at some point
         // job("clippy").component("clippy"),
         job("fmt-check").nightly().component("rustfmt"),
-        job("codegen-check"),
+        job("codegen-check").nightly().component("rustfmt"),
         job("deny").install("cargo-deny"),
         job("shear").install("cargo-shear"),
         job("check-tco"),
-        job("miri").nightly().component("miri"),
+        job("miri").nightly().component("miri").install("nextest"),
     ]
 }
 
