@@ -73,10 +73,14 @@ generated code. It is concatenated together with the generated code to produce t
 After changing anything, run
 
 ```
-cargo codegen
+cargo x codegen
 ```
 
 To re-generate code.
+
+### CI
+
+CI is driven by [xtask](./xtask). Run `cargo x ci` to execute the full suite of checks locally.
 
 ## License
 
