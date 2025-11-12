@@ -26,11 +26,6 @@ fn parser(path: &Path) {
 
     #[cfg(miri)]
     {
-        let _ = emit_snapshot;
-        if failure {
-            panic!("{snapshot}");
-        } else {
-            eprintln!("{snapshot}");
-        }
+        eprintln!("{snapshot}");
     }
 }

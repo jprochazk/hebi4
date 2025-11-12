@@ -1,0 +1,44 @@
+# cargo-deny configuration
+# See https://embarkstudios.github.io/cargo-deny/
+
+[advisories]
+version = 2
+db-path = "~/.cargo/advisory-db"
+db-urls = ["https://github.com/rustsec/advisory-db"]
+# Warn about unmaintained crates
+unmaintained = "warn"
+# Warn about yanked crates
+yanked = "warn"
+# Deny crates with security vulnerabilities
+vulnerability = "deny"
+
+[licenses]
+version = 2
+# Allow common permissive licenses
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Unicode-DFS-2016",
+    "Zlib",
+]
+# Confidence threshold for license detection
+confidence-threshold = 0.8
+
+[bans]
+# Warn on multiple versions of the same crate
+multiple-versions = "warn"
+# Allow certain crates to have multiple versions (if needed)
+skip = []
+# Deny specific crates (if needed)
+deny = []
+
+[sources]
+# Ensure all crates come from crates.io
+unknown-registry = "deny"
+unknown-git = "deny"
+# Allow git sources from specific repos (if needed)
+allow-git = []

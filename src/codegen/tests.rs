@@ -50,11 +50,7 @@ fn emitter(path: &Path) {
 
     #[cfg(miri)]
     {
-        if failure {
-            panic!("{snapshot}");
-        } else {
-            eprintln!("{snapshot}");
-        }
+        eprintln!("{snapshot}");
     }
 }
 

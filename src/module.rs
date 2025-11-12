@@ -3,6 +3,7 @@ pub mod native;
 use std::sync::Arc;
 
 use beef::lean::Cow;
+pub use native::{NativeModule, Param, TryFromHebiValueRaw, TryIntoHebiValueRaw, Value, function};
 
 use crate::{
     codegen::{
@@ -15,8 +16,6 @@ use crate::{
     token::tokenize,
     vm::value::StringHasher,
 };
-
-pub use native::{NativeModule, Param, TryFromHebiValueRaw, TryIntoHebiValueRaw, Value, function};
 
 /// Represents the result of code generation: A list of functions with
 /// one of them marked as the entrypoint.

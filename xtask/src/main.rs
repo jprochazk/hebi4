@@ -3,22 +3,35 @@ use std::ffi::OsStr;
 mod check_tco;
 use check_tco::check_tco;
 
+mod ci;
+use ci::{ci_jobs, output_matrix};
+
 fn main() {
     let args = std::env::args().skip(1).collect::<Vec<_>>();
 
     match args[0].as_str() {
-        "codegen" => codegen(),
-        "miri" => miri(&args[1..]),
-        "check-tco" => check_tco(),
-        "sort-imports" => sort_imports(),
         "playground" => playground(),
+
+        "miri" => miri(&args[1..]),
+
+        "check-tco" => check_tco(),
+
+        "test" => test(&args[1..]),
+
+        "clippy" => clippy(),
+
+        "fmt" => fmt(),
+        "fmt-check" => fmt_check(),
+
+        "codegen" => codegen(),
+        "codegen-check" => codegen_check(),
+
+        "deny" => deny(),
+
+        "ci" => ci(),
+        "ci-jobs" => output_matrix(),
         _ => help(),
     }
-}
-
-fn codegen() {
-    cargo("run --release -p astgen -- src/ast/nodes.ast src/ast/nodes.rs").run();
-    cargo("run --release -p asmgen -- src/codegen/opcodes.s src/codegen/opcodes.rs").run();
 }
 
 fn miri(args: &[String]) {
@@ -30,13 +43,51 @@ fn miri(args: &[String]) {
         .run();
 }
 
-fn sort_imports() {
+fn playground() {
+    cmd("npm --prefix playground run dev").exec();
+}
+
+fn test(args: &[String]) {
+    cargo("nextest run --all-features").with_args(args).run();
+}
+
+fn clippy() {
+    cargo("clippy --all-targets --all-features -- -D warnings").run();
+}
+
+fn fmt() {
     cargo("+nightly fmt -- --unstable-features --config imports_granularity=Crate,group_imports=StdExternalCrate")
         .run();
 }
 
-fn playground() {
-    cmd("npm --prefix playground run dev").exec();
+fn fmt_check() {
+    cargo("+nightly fmt --all -- --check").run();
+}
+
+fn codegen() {
+    cargo("run --release -p astgen -- src/ast/nodes.ast src/ast/nodes.rs").run();
+    cargo("run --release -p asmgen -- src/codegen/opcodes.s src/codegen/opcodes.rs").run();
+}
+
+fn codegen_check() {
+    codegen();
+    cmd("git diff --exit-code").run();
+}
+
+fn deny() {
+    cargo("deny check").run();
+}
+
+fn ci() {
+    let jobs = ci_jobs();
+    for (i, job) in jobs.iter().enumerate() {
+        if i > 0 {
+            eprintln!();
+        }
+        eprintln!("Running {}...", job.name);
+        cargo(&format!("x {}", job.command)).run();
+    }
+    eprintln!("\n✓ All CI checks passed!");
 }
 
 fn help() {
@@ -47,7 +98,14 @@ commands:
     codegen       generate AST and bytecode
     miri          run tests under miri
     check-tco     check if tail-call optimization kicked in (linux-x64 only)
-    sort-imports  run nightly rustfmt with import config
+    test          run test suite with nextest
+    clippy        run clippy with all features
+    fmt           run nightly rustfmt with import config
+    fmt-check     check formatting with nightly rustfmt
+    codegen-check check if codegen is up to date
+    deny          run cargo deny checks
+    ci            run all CI checks locally
+    ci-jobs       output CI job matrix as JSON (for GitHub Actions)
 ";
     eprint!("{s}");
 
