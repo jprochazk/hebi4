@@ -1,8 +1,9 @@
+use std::collections::HashSet;
+
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Job {
-    pub name: String,
     pub command: String,
     pub toolchain: Toolchain,
     #[serde(skip_serializing_if = "Vec::is_empty", default)]
@@ -20,21 +21,6 @@ pub enum Toolchain {
 }
 
 impl Job {
-    pub fn new(name: impl Into<String>, command: impl Into<String>) -> Self {
-        let name = name.into();
-        let command = command.into();
-        let cache_key = command.clone();
-
-        Self {
-            name,
-            command,
-            toolchain: Toolchain::Stable,
-            components: vec![],
-            install: vec![],
-            cache_key,
-        }
-    }
-
     pub fn nightly(mut self) -> Self {
         self.toolchain = Toolchain::Nightly;
         self
@@ -50,24 +36,41 @@ impl Job {
         self
     }
 
+    #[allow(dead_code)]
     pub fn cache_key(mut self, key: impl Into<String>) -> Self {
         self.cache_key = key.into();
         self
     }
 }
 
+pub fn job(command: impl Into<String>) -> Job {
+    let command = command.into();
+    let cache_key = command
+        .split_ascii_whitespace()
+        .next()
+        .unwrap_or(command.as_str())
+        .to_owned();
+
+    Job {
+        command,
+        toolchain: Toolchain::Stable,
+        components: vec![],
+        install: vec![],
+        cache_key,
+    }
+}
+
 pub fn ci_jobs() -> Vec<Job> {
     vec![
-        Job::new("Test Suite", "test").install("nextest"),
-        Job::new("Miri", "miri").nightly().component("miri"),
+        job("test").install("nextest"),
         // TODO: re-enable at some point
-        // Job::new("Clippy", "clippy").component("clippy"),
-        Job::new("Rustfmt", "fmt-check")
-            .nightly()
-            .component("rustfmt")
-            .cache_key("fmt"),
-        Job::new("Codegen Check", "codegen-check").cache_key("codegen"),
-        Job::new("Cargo Deny", "deny").install("cargo-deny"),
+        // job("clippy").component("clippy"),
+        job("fmt-check").nightly().component("rustfmt"),
+        job("codegen-check"),
+        job("deny").install("cargo-deny"),
+        job("shear").install("cargo-shear"),
+        job("check-tco"),
+        job("miri").nightly().component("miri"),
     ]
 }
 
@@ -76,7 +79,20 @@ struct MatrixOutput {
     include: Vec<Job>,
 }
 
+fn validate(jobs: &[Job]) {
+    let mut cache_keys = HashSet::new();
+    for job in jobs {
+        if !cache_keys.insert(job.cache_key.as_str()) {
+            panic!(
+                "duplicate cache key {}; set a unique key explicity for that job",
+                job.cache_key
+            );
+        }
+    }
+}
+
 pub fn output_matrix() {
     let matrix = MatrixOutput { include: ci_jobs() };
+    validate(&matrix.include);
     println!("{}", serde_json::to_string(&matrix).unwrap());
 }

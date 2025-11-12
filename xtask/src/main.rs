@@ -27,6 +27,7 @@ fn main() {
         "codegen-check" => codegen_check(),
 
         "deny" => deny(),
+        "shear" => shear(),
 
         "ci" => ci(),
         "ci-jobs" => output_matrix(),
@@ -56,12 +57,12 @@ fn clippy() {
 }
 
 fn fmt() {
-    cargo("+nightly fmt -- --unstable-features --config imports_granularity=Crate,group_imports=StdExternalCrate")
+    cargo("+nightly fmt --all -- --unstable-features --config imports_granularity=Crate,group_imports=StdExternalCrate")
         .run();
 }
 
 fn fmt_check() {
-    cargo("+nightly fmt --all -- --check").run();
+    cargo("+nightly fmt --all -- --unstable-features --config imports_granularity=Crate,group_imports=StdExternalCrate --check").run();
 }
 
 fn codegen() {
@@ -78,13 +79,17 @@ fn deny() {
     cargo("deny check").run();
 }
 
+fn shear() {
+    cargo("shear").run();
+}
+
 fn ci() {
     let jobs = ci_jobs();
     for (i, job) in jobs.iter().enumerate() {
         if i > 0 {
             eprintln!();
         }
-        eprintln!("Running {}...", job.name);
+        eprintln!("> {:?}", job.command);
         cargo(&format!("x {}", job.command)).run();
     }
     eprintln!("\n✓ All CI checks passed!");
@@ -104,6 +109,7 @@ commands:
     fmt-check     check formatting with nightly rustfmt
     codegen-check check if codegen is up to date
     deny          run cargo deny checks
+    shear         check for unused dependencies
     ci            run all CI checks locally
     ci-jobs       output CI job matrix as JSON (for GitHub Actions)
 ";

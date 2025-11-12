@@ -35,7 +35,7 @@ jobs:
           retention-days: 1
 
   ci:
-    name: ${{ matrix.name }}
+    name: "${{ matrix.command }}"
     runs-on: ubuntu-latest
     needs: [build-xtask]
     strategy:
