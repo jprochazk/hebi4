@@ -491,7 +491,7 @@ const fn op_A(op: Opcode, A: u24) -> Insn {
 const fn op_S(op: Opcode, A: i24) -> Insn {
     let mut v = 0u32;
     v |= op as u32;
-    v |= (A.0 .0) << 8;
+    v |= (A.0.0) << 8;
     Insn(v)
 }
 

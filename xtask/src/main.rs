@@ -68,6 +68,7 @@ fn fmt_check() {
 fn codegen() {
     cargo("run --release -p astgen -- src/ast/nodes.ast src/ast/nodes.rs").run();
     cargo("run --release -p asmgen -- src/codegen/opcodes.s src/codegen/opcodes.rs").run();
+    fmt();
 }
 
 fn codegen_check() {
