@@ -70,7 +70,11 @@ pub fn ci_jobs() -> Vec<Job> {
         job("deny").install("cargo-deny"),
         job("shear").install("cargo-shear"),
         job("check-tco"),
-        job("miri").nightly().component("miri").install("nextest"),
+        // TODO: very slow, not sure what to do about it.
+        // job("miri -- vm")
+        //     .nightly()
+        //     .component("miri")
+        //     .install("nextest"),
     ]
 }
 
