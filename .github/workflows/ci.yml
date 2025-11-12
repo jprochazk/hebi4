@@ -44,11 +44,6 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        command: []
-        toolchain: []
-        components: []
-        install: []
-        cache_key: []
         include: ${{ fromJson(needs.build-xtask.outputs.matrix) }}
     steps:
       - uses: actions/checkout@v4
