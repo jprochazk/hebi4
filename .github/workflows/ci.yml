@@ -22,11 +22,14 @@ jobs:
         with:
           shared-key: "xtask"
           workspaces: "xtask"
+
       - name: Build xtask
         run: cargo build --release -p xtask
+
       - name: Generate CI matrix
         id: matrix
         run: echo "matrix=$(./target/release/xtask ci-jobs)" >> $GITHUB_OUTPUT
+
       - name: Upload xtask binary
         uses: actions/upload-artifact@v4
         with:
@@ -56,14 +59,10 @@ jobs:
         with:
           name: xtask
 
-      - name: Make xtask executable
-        run: chmod +x xtask
-
       - name: Install tools
         if: matrix.install[0] != null
         uses: taiki-e/install-action@v2
         with:
           tool: ${{ join(matrix.install, ',') }}
 
-      - name: Run ${{ matrix.command }}
-        run: ./xtask ${{ matrix.command }}
+      - run: chmod +x xtask && xtask ${{ matrix.command }}
