@@ -53,8 +53,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: dtolnay/rust-toolchain@${{ matrix.toolchain }}
+      - uses: dtolnay/rust-toolchain@master
         with:
+          toolchain: ${{ matrix.toolchain }}
           components: ${{ join(matrix.components, ',') }}
 
       - uses: Swatinem/rust-cache@v2
@@ -65,10 +66,14 @@ jobs:
         with:
           name: xtask
 
+      - name: Get tool names
+        id: tools
+        run: echo "list=${{ join(matrix.install, ',') }}" >> $GITHUB_OUTPUT
+
       - name: Install tools
-        if: matrix.install[0] != null
+        if: steps.tools.outputs.list != ''
         uses: taiki-e/install-action@v2
         with:
-          tool: ${{ join(matrix.install, ',') }}
+          tool: ${{ steps.tools.outputs.list }}
 
       - run: chmod +x xtask && xtask ${{ matrix.command }}
