@@ -33,6 +33,9 @@ jobs:
         if: steps.cache-xtask.outputs.cache-hit != 'true'
         run: cargo build --release -p xtask && cp target/release/xtask xtask
 
+      - name: Make xtask executable
+        run: chmod +x xtask
+
       - name: Generate CI matrix
         id: matrix
         run: echo "matrix=$(./xtask ci-jobs)" >> $GITHUB_OUTPUT
