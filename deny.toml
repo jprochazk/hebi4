@@ -5,12 +5,6 @@
 version = 2
 db-path = "~/.cargo/advisory-db"
 db-urls = ["https://github.com/rustsec/advisory-db"]
-# Warn about unmaintained crates
-unmaintained = "warn"
-# Warn about yanked crates
-yanked = "warn"
-# Deny crates with security vulnerabilities
-vulnerability = "deny"
 
 [licenses]
 version = 2
@@ -22,6 +16,7 @@ allow = [
     "BSD-2-Clause",
     "BSD-3-Clause",
     "ISC",
+    "Unicode-3.0",
     "Unicode-DFS-2016",
     "Zlib",
 ]
