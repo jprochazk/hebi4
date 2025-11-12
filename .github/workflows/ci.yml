@@ -11,7 +11,7 @@ defaults:
 
 jobs:
   build-xtask:
-    name: Build xtask
+    name: Job matrix
     runs-on: ubuntu-latest
     outputs:
       matrix: ${{ steps.matrix.outputs.matrix }}
