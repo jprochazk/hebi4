@@ -1,0 +1,12 @@
+---
+source: src/vm/tests.rs
+expression: snapshot
+---
+SOURCE
+let a = "a"
+let b = "b"
+
+a == b
+
+OK
+Bool(false)

@@ -1325,17 +1325,34 @@ unsafe fn isnef(vm: Vm, jt: Jt, ip: Ip, args: Isnef, sp: Sp, lp: Lp) -> Control 
     }
 }
 
-macro_rules! try_cmp_eval {
-    ($lhs:ident, $rhs:ident, $vm:ident, $ip:ident, $op:tt) => {{
+macro_rules! try_compare {
+    ($lhs:ident, $rhs:ident, $vm:ident, $ip:ident, $op:tt, fail:$fail:expr) => {{
         use ValueRaw::*;
         match ($lhs, $rhs) {
-            // TODO: other types support comparisons too:
-            //       nil, bool, str
+            (Nil, Nil) => () $op (),
+            (Bool(lhs), Bool(rhs)) => lhs $op rhs,
             (Int(lhs), Int(rhs)) => lhs $op rhs,
             (Float(lhs), Float(rhs)) => lhs $op rhs,
             (Float(lhs), Int(rhs)) => lhs $op (rhs as f64),
             (Int(lhs), Float(rhs)) => (lhs as f64) $op rhs,
-            _ => vm_exit!($vm, $ip, CmpTypeError),
+            (Object(lhs), Object(rhs)) => {
+                // TODO: string interning
+                if let Some(lhs) = lhs.cast::<Str>()
+                && let Some(rhs) = rhs.cast::<Str>() {
+                    lhs.as_ref().as_str() $op rhs.as_ref().as_str()
+                } else {
+                    if $fail {
+                        vm_exit!($vm, $ip, CmpTypeError)
+                    } else {
+                        false
+                    }
+                }
+            }
+            _ => if $fail {
+                vm_exit!($vm, $ip, CmpTypeError)
+            } else {
+                false
+            },
         }
     }};
 }
@@ -1345,7 +1362,7 @@ unsafe fn islt(vm: Vm, jt: Jt, ip: Ip, args: Islt, sp: Sp, lp: Lp) -> Control {
     let lhs = *sp.at(args.lhs());
     let rhs = *sp.at(args.rhs());
 
-    if try_cmp_eval!(lhs, rhs, vm, ip, <) {
+    if try_compare!(lhs, rhs, vm, ip, <, fail:true) {
         let ip = ip.offset(2);
         dispatch_current(vm, jt, ip, sp, lp)
     } else {
@@ -1359,7 +1376,7 @@ unsafe fn isle(vm: Vm, jt: Jt, ip: Ip, args: Isle, sp: Sp, lp: Lp) -> Control {
     let lhs = *sp.at(args.lhs());
     let rhs = *sp.at(args.rhs());
 
-    if try_cmp_eval!(lhs, rhs, vm, ip, <=) {
+    if try_compare!(lhs, rhs, vm, ip, <=, fail:true) {
         let ip = ip.offset(2);
         dispatch_current(vm, jt, ip, sp, lp)
     } else {
@@ -1373,7 +1390,7 @@ unsafe fn isgt(vm: Vm, jt: Jt, ip: Ip, args: Isgt, sp: Sp, lp: Lp) -> Control {
     let lhs = *sp.at(args.lhs());
     let rhs = *sp.at(args.rhs());
 
-    if try_cmp_eval!(lhs, rhs, vm, ip, >) {
+    if try_compare!(lhs, rhs, vm, ip, >, fail:true) {
         let ip = ip.offset(2);
         dispatch_current(vm, jt, ip, sp, lp)
     } else {
@@ -1387,7 +1404,7 @@ unsafe fn isge(vm: Vm, jt: Jt, ip: Ip, args: Isge, sp: Sp, lp: Lp) -> Control {
     let lhs = *sp.at(args.lhs());
     let rhs = *sp.at(args.rhs());
 
-    if try_cmp_eval!(lhs, rhs, vm, ip, >=) {
+    if try_compare!(lhs, rhs, vm, ip, >=, fail:true) {
         let ip = ip.offset(2);
         dispatch_current(vm, jt, ip, sp, lp)
     } else {
@@ -1401,7 +1418,7 @@ unsafe fn iseq(vm: Vm, jt: Jt, ip: Ip, args: Iseq, sp: Sp, lp: Lp) -> Control {
     let lhs = *sp.at(args.lhs());
     let rhs = *sp.at(args.rhs());
 
-    if try_cmp_eval!(lhs, rhs, vm, ip, ==) {
+    if try_compare!(lhs, rhs, vm, ip, ==, fail:false) {
         let ip = ip.offset(2);
         dispatch_current(vm, jt, ip, sp, lp)
     } else {
@@ -1415,7 +1432,7 @@ unsafe fn isne(vm: Vm, jt: Jt, ip: Ip, args: Isne, sp: Sp, lp: Lp) -> Control {
     let lhs = *sp.at(args.lhs());
     let rhs = *sp.at(args.rhs());
 
-    if try_cmp_eval!(lhs, rhs, vm, ip, !=) {
+    if try_compare!(lhs, rhs, vm, ip, !=, fail:false) {
         let ip = ip.offset(2);
         dispatch_current(vm, jt, ip, sp, lp)
     } else {
@@ -1430,7 +1447,7 @@ unsafe fn isltv(vm: Vm, jt: Jt, ip: Ip, args: Isltv, sp: Sp, lp: Lp) -> Control 
     let lhs = *sp.at(args.lhs());
     let rhs = *sp.at(args.rhs());
 
-    let result = try_cmp_eval!(lhs, rhs, vm, ip, <);
+    let result = try_compare!(lhs, rhs, vm, ip, <, fail:true);
 
     *dst = ValueRaw::Bool(result);
 
@@ -1443,7 +1460,7 @@ unsafe fn islev(vm: Vm, jt: Jt, ip: Ip, args: Islev, sp: Sp, lp: Lp) -> Control 
     let lhs = *sp.at(args.lhs());
     let rhs = *sp.at(args.rhs());
 
-    let result = try_cmp_eval!(lhs, rhs, vm, ip, <=);
+    let result = try_compare!(lhs, rhs, vm, ip, <=, fail:true);
 
     *dst = ValueRaw::Bool(result);
 
@@ -1456,7 +1473,7 @@ unsafe fn isgtv(vm: Vm, jt: Jt, ip: Ip, args: Isgtv, sp: Sp, lp: Lp) -> Control 
     let lhs = *sp.at(args.lhs());
     let rhs = *sp.at(args.rhs());
 
-    let result = try_cmp_eval!(lhs, rhs, vm, ip, >);
+    let result = try_compare!(lhs, rhs, vm, ip, >, fail:true);
 
     *dst = ValueRaw::Bool(result);
 
@@ -1469,7 +1486,7 @@ unsafe fn isgev(vm: Vm, jt: Jt, ip: Ip, args: Isgev, sp: Sp, lp: Lp) -> Control 
     let lhs = *sp.at(args.lhs());
     let rhs = *sp.at(args.rhs());
 
-    let result = try_cmp_eval!(lhs, rhs, vm, ip, >=);
+    let result = try_compare!(lhs, rhs, vm, ip, >=, fail:true);
 
     *dst = ValueRaw::Bool(result);
 
@@ -1482,7 +1499,7 @@ unsafe fn iseqv(vm: Vm, jt: Jt, ip: Ip, args: Iseqv, sp: Sp, lp: Lp) -> Control 
     let lhs = *sp.at(args.lhs());
     let rhs = *sp.at(args.rhs());
 
-    let result = try_cmp_eval!(lhs, rhs, vm, ip, ==);
+    let result = try_compare!(lhs, rhs, vm, ip, ==, fail:false);
 
     *dst = ValueRaw::Bool(result);
 
@@ -1495,7 +1512,7 @@ unsafe fn isnev(vm: Vm, jt: Jt, ip: Ip, args: Isnev, sp: Sp, lp: Lp) -> Control 
     let lhs = *sp.at(args.lhs());
     let rhs = *sp.at(args.rhs());
 
-    let result = try_cmp_eval!(lhs, rhs, vm, ip, !=);
+    let result = try_compare!(lhs, rhs, vm, ip, !=, fail:false);
 
     *dst = ValueRaw::Bool(result);
 
