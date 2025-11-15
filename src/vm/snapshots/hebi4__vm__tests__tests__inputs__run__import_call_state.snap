@@ -3,12 +3,13 @@ source: src/vm/tests.rs
 expression: snapshot
 ---
 SOURCE
-import inc, dec, get from "test2"
+import reset, inc, dec, get from "test2"
 
+reset()
 print(get())
-inc()
+inc(1)
 print(get())
-dec()
+dec(1)
 print(get())
 
 OK

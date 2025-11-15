@@ -1,4 +1,4 @@
-use std::sync::LazyLock;
+use std::{rc::Rc, sync::LazyLock};
 
 use hashbrown::HashMap;
 use rustc_hash::FxBuildHasher;
@@ -6,12 +6,10 @@ use rustc_hash::FxBuildHasher;
 use crate::{
     codegen::opcodes::HostId,
     gc::Tracer,
+    value::host_function::HostFunctionCallbackRaw,
     vm::{
         gc::{GcPtr, Heap},
-        value::{
-            host_function::{HostFunction, HostFunctionCallback},
-            string::Str,
-        },
+        value::{host_function::HostFunction, string::Str},
     },
 };
 
@@ -39,7 +37,7 @@ macro_rules! functions {
                             }
                         }
 
-                        ::std::sync::Arc::new(_shim)
+                        _shim
                     },
                 },
             )*].into_iter().collect()
@@ -89,15 +87,15 @@ impl CoreLib {
     }
 
     #[inline]
-    pub fn callback_for(&self, id: HostId) -> &HostFunctionCallback {
-        unsafe { &self.functions.get_unchecked(id.zx()).f }
+    pub fn callback_for(&self, id: HostId) -> HostFunctionCallbackRaw {
+        unsafe { self.functions.get_unchecked(id.zx()).f }
     }
 }
 
 pub struct CoreFunction {
     pub name: &'static str,
     pub arity: u8,
-    f: HostFunctionCallback,
+    f: HostFunctionCallbackRaw,
 }
 
 pub(crate) struct RuntimeCoreLib {
@@ -113,7 +111,7 @@ impl RuntimeCoreLib {
                 // TODO: string interning
                 let name = Str::alloc(heap, function.name);
 
-                HostFunction::alloc(heap, name, function.arity, function.f.clone())
+                HostFunction::alloc(heap, name, function.arity, Rc::new(function.f))
             })
             .collect();
 

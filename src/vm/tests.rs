@@ -2,7 +2,7 @@ use std::{fmt::Write as _, fs::read_to_string, path::Path};
 
 use super::Hebi;
 use crate::{
-    module::{NativeFunction, NativeModule, f},
+    module::{NativeModule, f},
     vm::{self, Context, Runtime, Stdio},
 };
 
@@ -107,21 +107,28 @@ fn native_modules() -> impl IntoIterator<Item = NativeModule> {
             let state = Arc::new(Mutex::new(State { value: 0 }));
 
             NativeModule::builder("test2")
-                .function(NativeFunction::new("inc", {
+                .function(self::f!("reset", {
                     let state = state.clone();
                     move |cx: Context| {
                         let mut state = state.lock().expect("poisoned");
-                        state.value += 1;
+                        state.value = 0;
                     }
                 }))
-                .function(NativeFunction::new("dec", {
+                .function(self::f!("inc", {
                     let state = state.clone();
-                    move |cx: Context| {
+                    move |cx: Context, n: i64| {
                         let mut state = state.lock().expect("poisoned");
-                        state.value -= 1;
+                        state.value += n;
                     }
                 }))
-                .function(NativeFunction::new("get", {
+                .function(self::f!("dec", {
+                    let state = state.clone();
+                    move |cx: Context, n: i64| {
+                        let mut state = state.lock().expect("poisoned");
+                        state.value -= n;
+                    }
+                }))
+                .function(self::f!("get", {
                     let state = state.clone();
                     move |cx: Context| {
                         let state = state.lock().expect("poisoned");
@@ -131,32 +138,6 @@ fn native_modules() -> impl IntoIterator<Item = NativeModule> {
                 .finish()
         },
     ]
-    // use std::sync::Arc;
-
-    // use hebi4::prelude::*;
-
-    // #[test]
-    // fn native_closure() {
-    //     fn foo(cx: Context) {
-    //         println!("foo");
-    //     }
-
-    //     fn bar(cx: Context, state: &State) {
-    //         println!("bar: {}", state.value)
-    //     }
-
-    //     struct State {
-    //         value: i32,
-    //     }
-
-    //     let m = NativeModule::builder("asdf")
-    //         .function(f!(foo))
-    //         .function(NativeFunction::new("bar", {
-    //             let state = Arc::new(State { value: 10 });
-    //             move |cx: Context| bar(cx, &state)
-    //         }))
-    //         .finish();
-    // }
 }
 
 fn vm() -> Hebi {

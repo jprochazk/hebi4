@@ -75,12 +75,34 @@ impl NativeModuleBuilder {
 #[doc(hidden)]
 #[macro_export]
 macro_rules! __f {
-    ($name:path) => {{
-        $crate::module::native::NativeFunction::new(
-            $crate::module::native::__function_name($name),
-            $name,
-        )
-    }};
+    ($name:path) => {
+        unsafe {
+            $crate::module::native::NativeFunction::new(
+                $crate::module::native::__function_name($name),
+                $crate::module::native::arity_of(&$name),
+                ::std::rc::Rc::new({
+                    move |cx: $crate::value::host_function::Context| -> $crate::error::Result<$crate::value::ValueRaw> {
+                        $crate::module::native::NativeFunctionCallback::call(&$name, cx)
+                    }
+                }),
+            )
+        }
+    };
+
+    ($name:expr, $callback:expr) => {
+        unsafe {
+            let callback = $callback;
+            $crate::module::native::NativeFunction::new(
+                $name,
+                $crate::module::native::arity_of(&callback),
+                ::std::rc::Rc::new({
+                    move |cx: $crate::value::host_function::Context| -> $crate::error::Result<$crate::value::ValueRaw> {
+                        $crate::module::native::NativeFunctionCallback::call(&callback, cx)
+                    }
+                })
+            )
+        }
+    };
 }
 
 #[doc(hidden)]
@@ -100,20 +122,11 @@ pub struct NativeFunction {
 }
 
 impl NativeFunction {
-    pub fn new<F: for<'a> NativeFunctionCallback<'a, T> + Send + Sync + 'static, T>(
+    pub unsafe fn new(
         name: impl Into<Cow<'static, str>>,
-        f: F,
+        arity: u8,
+        callback: HostFunctionCallback,
     ) -> Self {
-        let arity = arity_of(&f);
-        let callback = Arc::new({
-            let f = f;
-            move |cx: crate::vm::value::host_function::Context<'_>|
-                -> crate::error::Result<crate::vm::value::ValueRaw>
-            {
-                unsafe { crate::module::native::NativeFunctionCallback::call(&f, cx) }
-            }
-        });
-
         Self {
             name: name.into(),
             arity,

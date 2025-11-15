@@ -1,5 +1,4 @@
-use std::marker::PhantomData;
-use std::sync::Arc;
+use std::{marker::PhantomData, rc::Rc};
 
 use crate::{
     codegen::opcodes::{Reg, Sp, Vm},
@@ -87,8 +86,9 @@ impl<'a> Context<'a> {
     }
 }
 
-pub type HostFunctionCallback =
-    Arc<dyn for<'a> Fn(Context<'a>) -> Result<ValueRaw> + Send + Sync + 'static>;
+pub type HostFunctionCallback = Rc<dyn for<'a> Fn(Context<'a>) -> Result<ValueRaw> + 'static>;
+
+pub type HostFunctionCallbackRaw = for<'a> fn(Context<'a>) -> Result<ValueRaw>;
 
 pub struct HostFunction {
     pub(crate) name: GcPtr<Str>,
