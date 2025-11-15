@@ -2059,6 +2059,27 @@ impl Hebi {
     where
         F: for<'gc> FnOnce(Runtime<'gc>),
     {
+        thread_local! {
+            static ENTERED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+        }
+
+        struct VmGuard {}
+
+        impl VmGuard {
+            fn new() -> Self {
+                assert!(!ENTERED.get(), "Only one VM may be active per thread");
+                ENTERED.set(true);
+                Self {}
+            }
+        }
+
+        impl Drop for VmGuard {
+            fn drop(&mut self) {
+                ENTERED.set(false)
+            }
+        }
+
+        let _guard = VmGuard::new();
         f(Runtime {
             vm: NonNull::from_mut(&mut *self.inner),
             _lifetime: PhantomData,

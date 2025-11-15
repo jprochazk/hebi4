@@ -224,3 +224,12 @@ fn stack_unwinding() {
         }
     })
 }
+
+#[test]
+fn nested_enter() {
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        vm().with(|_| vm().with(|_| {}));
+    }));
+
+    assert!(result.is_err());
+}
