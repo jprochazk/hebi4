@@ -1,0 +1,20 @@
+---
+source: src/vm/tests.rs
+expression: snapshot
+---
+SOURCE
+import inc, dec, get from "test2"
+
+print(get())
+inc()
+print(get())
+dec()
+print(get())
+
+OK
+Nil
+
+STDOUT
+0
+1
+0

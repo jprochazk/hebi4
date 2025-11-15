@@ -1,0 +1,7 @@
+import inc, dec, get from "test2"
+
+print(get())
+inc()
+print(get())
+dec()
+print(get())
