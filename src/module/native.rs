@@ -74,37 +74,24 @@ impl NativeModuleBuilder {
 
 #[doc(hidden)]
 #[macro_export]
-macro_rules! __function_shim {
+macro_rules! __f {
     ($name:path) => {{
-        unsafe fn _shim(
-            cx: $crate::vm::value::host_function::Context<'_>,
-        ) -> $crate::error::Result<$crate::vm::value::ValueRaw> {
-            let f = $name;
-            $crate::module::native::NativeFunctionCallback::call(&f, cx)
-        }
-
-        _shim
+        $crate::module::native::NativeFunction::new(
+            $crate::module::native::__function_name($name),
+            $name,
+        )
     }};
 }
 
 #[doc(hidden)]
-#[macro_export]
-macro_rules! __function {
-    ($name:tt) => {{
-        unsafe {
-            $crate::module::native::NativeFunction::from_callback(
-                $crate::module::native::function!(@stem $name),
-                $crate::module::native::arity_of(&$name),
-                $crate::__function_shim!($name),
-            )
-        }
-    }};
-
-    (@stem $tail:ident) => (stringify!($tail));
-    (@stem $($asdf:ident ::)* $tail:ident) => (stringify!($tail));
+pub fn __function_name<T>(_: T) -> &'static str {
+    std::any::type_name::<T>()
+        .rsplit("::")
+        .find(|&part| part != "f" && part != "{{closure}}")
+        .expect("Short function name")
 }
 
-pub use crate::__function as function;
+pub use crate::__f as f;
 
 pub struct NativeFunction {
     name: Cow<'static, str>,
@@ -113,11 +100,20 @@ pub struct NativeFunction {
 }
 
 impl NativeFunction {
-    pub unsafe fn from_callback(
+    pub fn new<F: for<'a> NativeFunctionCallback<'a, T> + Send + Sync + 'static, T>(
         name: impl Into<Cow<'static, str>>,
-        arity: u8,
-        callback: HostFunctionCallback,
+        f: F,
     ) -> Self {
+        let arity = arity_of(&f);
+        let callback = Arc::new({
+            let f = f;
+            move |cx: crate::vm::value::host_function::Context<'_>|
+                -> crate::error::Result<crate::vm::value::ValueRaw>
+            {
+                unsafe { crate::module::native::NativeFunctionCallback::call(&f, cx) }
+            }
+        });
+
         Self {
             name: name.into(),
             arity,
@@ -133,12 +129,12 @@ impl NativeFunction {
         self.arity
     }
 
-    pub fn callback(&self) -> HostFunctionCallback {
-        self.callback
+    pub fn callback(&self) -> &HostFunctionCallback {
+        &self.callback
     }
 }
 
-pub(crate) fn arity_of<'a, F: NativeFunctionCallback<'a, T>, T>(f: &F) -> u8 {
+pub fn arity_of<'a, F: NativeFunctionCallback<'a, T>, T>(f: &F) -> u8 {
     F::ARITY
 }
 

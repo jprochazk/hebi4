@@ -29,7 +29,18 @@ macro_rules! functions {
                 CoreFunction {
                     name: stringify!($name),
                     arity: $crate::module::native::arity_of(&$crate::core::$module::$name),
-                    f: $crate::__function_shim!($crate::core::$module::$name),
+                    f: {
+                        fn _shim(
+                            cx: $crate::vm::value::host_function::Context<'_>,
+                        ) -> $crate::error::Result<$crate::vm::value::ValueRaw> {
+                            let f = $module::$name;
+                            unsafe {
+                                $crate::module::native::NativeFunctionCallback::call(&f, cx)
+                            }
+                        }
+
+                        ::std::sync::Arc::new(_shim)
+                    },
                 },
             )*].into_iter().collect()
         });
@@ -78,8 +89,8 @@ impl CoreLib {
     }
 
     #[inline]
-    pub fn callback_for(&self, id: HostId) -> HostFunctionCallback {
-        unsafe { self.functions.get_unchecked(id.zx()).f }
+    pub fn callback_for(&self, id: HostId) -> &HostFunctionCallback {
+        unsafe { &self.functions.get_unchecked(id.zx()).f }
     }
 }
 
@@ -102,7 +113,7 @@ impl RuntimeCoreLib {
                 // TODO: string interning
                 let name = Str::alloc(heap, function.name);
 
-                HostFunction::alloc(heap, name, function.arity, function.f)
+                HostFunction::alloc(heap, name, function.arity, function.f.clone())
             })
             .collect();
 

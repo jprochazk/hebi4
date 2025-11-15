@@ -3,7 +3,9 @@ pub mod native;
 use std::sync::Arc;
 
 use beef::lean::Cow;
-pub use native::{NativeModule, Param, TryFromHebiValueRaw, TryIntoHebiValueRaw, Value, function};
+pub use native::{
+    NativeFunction, NativeModule, Param, TryFromHebiValueRaw, TryIntoHebiValueRaw, Value, f,
+};
 
 use crate::{
     codegen::{

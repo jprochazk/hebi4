@@ -2,7 +2,7 @@ use std::{fmt::Write as _, fs::read_to_string, path::Path};
 
 use super::Hebi;
 use crate::{
-    module::{NativeModule, function},
+    module::{NativeModule, f},
     vm::{self, Context, Runtime, Stdio},
 };
 
@@ -92,7 +92,7 @@ fn native_module() -> NativeModule {
     }
 
     NativeModule::builder("test")
-        .function(function!(foo))
+        .function(self::f!(foo))
         .finish()
 }
 

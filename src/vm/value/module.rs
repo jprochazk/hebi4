@@ -152,7 +152,7 @@ impl ModuleRegistry {
                         func_root,
                         &func_name,
                         orig_func.arity(),
-                        orig_func.callback(),
+                        orig_func.callback().clone(),
                     );
 
                     func_slot.write(func.as_ptr());

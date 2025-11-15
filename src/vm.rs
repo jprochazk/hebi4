@@ -65,7 +65,7 @@ use crate::{
     vm::value::{
         Closure, Function, ValueRaw,
         closure::{CaptureInfo, ClosureProto},
-        host_function::{Context, HostFunction, HostFunctionCallback},
+        host_function::{Context, HostFunction},
         module::{ImportProto, ModuleRegistry},
     },
 };
@@ -1743,7 +1743,6 @@ unsafe fn call(vm: Vm, jt: Jt, ip: Ip, args: Call, sp: Sp, lp: Lp) -> Control {
             return arity_mismatch_error(ip, vm);
         }
 
-        let callee = callee.as_ref().f;
         do_host_call(callee, vm, jt, ip, sp, lp, ret, nargs)
     } else {
         not_callable_error(ip, vm)
@@ -1776,7 +1775,6 @@ unsafe fn hostcall(vm: Vm, jt: Jt, ip: Ip, args: Hostcall, sp: Sp, lp: Lp) -> Co
     let callee = vm.get_host_function(args.id());
 
     let nargs = callee.as_ref().arity;
-    let callee = callee.as_ref().f;
 
     do_host_call(callee, vm, jt, ip, sp, lp, ret, nargs)
 }
@@ -1888,7 +1886,7 @@ unsafe fn do_closure_call(callee: GcPtr<Closure>, ret: Reg, ip: Ip, vm: Vm) -> (
 
 #[inline(always)]
 unsafe fn do_host_call(
-    callee: HostFunctionCallback,
+    callee: GcPtr<HostFunction>,
     vm: Vm,
     jt: Jt,
     ip: Ip,
@@ -1902,7 +1900,7 @@ unsafe fn do_host_call(
         let sp: Sp = vm.stack_at(stack_base);
         Context::new(vm, sp, nargs)
     };
-    match callee(context) {
+    match (callee.as_ref().f)(context) {
         Ok(value) => {
             *sp.at(ret) = value;
 
