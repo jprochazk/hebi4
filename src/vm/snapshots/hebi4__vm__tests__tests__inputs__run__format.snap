@@ -1,0 +1,9 @@
+---
+source: src/vm/tests.rs
+expression: snapshot
+---
+SOURCE
+format("{a} {b} {c}", {a:0, b:"b", c:true})
+
+OK
+"0 b true"

@@ -202,7 +202,7 @@ impl<'a> std::fmt::Display for DisasmFuncWithSrc<'a> {
                 )?,
                 I::Hostcall { dst, id } => writeln!(
                     f,
-                    "call {dst}, {id}   ; {id}={name}",
+                    "call {dst}, {name}",
                     name = module.host_function_at(id).name,
                 )?,
                 I::Import { _unused, id } => {

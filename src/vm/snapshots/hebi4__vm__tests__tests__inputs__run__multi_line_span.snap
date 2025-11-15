@@ -19,5 +19,5 @@ DISASM:
   params 0
   stack 1
   .code
-  0  call r0, h1   ; h1=panic
+  0  call r0, panic
   1  ret

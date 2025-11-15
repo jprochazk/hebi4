@@ -1,15 +1,31 @@
 use crate::prelude::*;
 
-pub fn to_str(cx: Context, v: Value) -> String {
-    match v.as_ref(cx.heap()) {
-        ValueRef::Nil => "nil".to_owned(),
-        ValueRef::Bool(v) => v.to_string(),
-        ValueRef::Int(v) => v.to_string(),
-        ValueRef::Float(v) => format!("{v:?}"),
+pub(crate) fn stringify(v: ValueRef) -> HebiResult<String> {
+    let mut out = Vec::new();
+    stringify_into(v, &mut out)?;
+    Ok(unsafe { String::from_utf8_unchecked(out) })
+}
+
+pub(crate) fn stringify_into(v: ValueRef, out: &mut impl std::io::Write) -> HebiResult<()> {
+    match v {
+        ValueRef::Nil => write!(out, "nil"),
+        ValueRef::Bool(v) => write!(out, "{v}"),
+        ValueRef::Int(v) => write!(out, "{v}"),
+        ValueRef::Float(v) => write!(out, "{v:?}"),
         ValueRef::Object(v) => {
-            format!("{v:?}")
+            // specialize strings
+            if let Some(v) = v.cast::<Str>() {
+                write!(out, "{v}")
+            } else {
+                write!(out, "{v:?}")
+            }
         }
     }
+    .map_err(|err| error(err.to_string()))
+}
+
+pub fn to_str(cx: Context, v: Value) -> HebiResult<String> {
+    stringify(v.as_ref(cx.heap()))
 }
 
 pub fn parse_int(cx: Context, v: Param<Str>) -> HebiResult<i64> {

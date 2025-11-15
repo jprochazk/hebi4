@@ -131,6 +131,8 @@ mod panic;
 
 static CORE_LIB: CoreLibData = functions! {
     fmt::print,
+    fmt::printf,
+    fmt::format,
     panic::panic,
     convert::to_str,
     convert::to_int,

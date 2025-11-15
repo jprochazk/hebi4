@@ -1,0 +1,23 @@
+---
+source: src/vm/tests.rs
+expression: snapshot
+---
+SOURCE
+format("{a}", {})
+
+ERROR
+missing argument a
+1 |  format("{a}", {})
+  |  ^^^^^^^^^^^^^^^^^
+
+
+DISASM:
+
+.fn @main
+  params 0
+  stack 3
+  .code
+  0  lstr r1, "{a}"
+  1  ltable r2, 0
+  2  call r0, format
+  3  ret
