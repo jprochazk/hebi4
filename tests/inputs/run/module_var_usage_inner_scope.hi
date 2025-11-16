@@ -1,0 +1,11 @@
+//module
+
+let i = 0
+
+fn inc() {
+  i += 1
+}
+
+print(i)
+inc()
+print(i)

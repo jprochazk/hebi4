@@ -3,7 +3,7 @@
 use crate::{
     codegen::opcodes::{FnId, HostId},
     core::CoreLib,
-    module::{Capture, Local},
+    module::{Local, Upvalue},
 };
 
 struct DisasmModuleWithSrc<'a>(&'a crate::module::Module, &'a str);
@@ -45,7 +45,7 @@ impl<'a> std::fmt::Display for DisasmFuncWithSrc<'a> {
             if func.num_captures() > 0 {
                 writeln!(f, "  .captures")?;
                 for i in 0..func.num_captures() {
-                    let Capture { span, info } = func.capture_at(i);
+                    let Upvalue { span, info } = func.capture_at(i);
                     let name = &src[span];
                     writeln!(f, "    {name} = {info}")?;
                 }
@@ -72,8 +72,8 @@ impl<'a> std::fmt::Display for DisasmFuncWithSrc<'a> {
 
                 I::Lmvar { dst, src } => writeln!(f, "lmvar {dst}, {src}")?,
                 I::Smvar { src, dst } => writeln!(f, "smvar {dst}, {src}")?,
-                I::Lcap { dst, src } => writeln!(f, "lcap {dst}, {src}")?,
-                I::Scap { dst, src } => writeln!(f, "scap {dst}, {src}")?,
+                I::Luv { dst, src } => writeln!(f, "luv {dst}, {src}")?,
+                I::Suv { dst, src } => writeln!(f, "suv {dst}, {src}")?,
                 I::Lidx { dst, target, idx } => writeln!(f, "lidx {dst}, {target}, {idx}")?,
                 I::Lidxn { dst, target, idx } => writeln!(
                     f,
@@ -112,7 +112,7 @@ impl<'a> std::fmt::Display for DisasmFuncWithSrc<'a> {
                         f,
                         "lclosure {dst}, {id}   ; {name}, captures={n}",
                         name = module.function_at(closure.func).name(),
-                        n = closure.capture_info.len(),
+                        n = closure.upvalues.len(),
                     )?
                 }
                 I::Lfunc { dst, id } => writeln!(
@@ -255,11 +255,11 @@ impl crate::module::FuncInfo {
     }
 
     fn num_captures(&self) -> usize {
-        self.dbg().map(|dbg| dbg.captures.len()).unwrap_or_default()
+        self.dbg().map(|dbg| dbg.upvalues.len()).unwrap_or_default()
     }
 
-    fn capture_at(&self, i: usize) -> Capture {
-        self.dbg().map(|dbg| dbg.captures[i]).unwrap()
+    fn capture_at(&self, i: usize) -> Upvalue {
+        self.dbg().map(|dbg| dbg.upvalues[i]).unwrap()
     }
 
     fn closure_fn_id_at(&self, i: usize) -> FnId {

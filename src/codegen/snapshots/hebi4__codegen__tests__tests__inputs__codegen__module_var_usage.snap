@@ -1,0 +1,23 @@
+---
+source: src/codegen/tests.rs
+expression: snapshot
+---
+SOURCE
+//module
+let i = 0
+i += 1
+print(i)
+
+OK
+.fn @main
+  params 0
+  stack 2
+  .code
+  0  lsmi r1, 0
+  1  smvar m0, r1
+  2  lmvar r1, m0
+  3  add r1, r1, 1
+  4  smvar m0, r1
+  5  lmvar r1, m0
+  6  call r0, print
+  7  ret

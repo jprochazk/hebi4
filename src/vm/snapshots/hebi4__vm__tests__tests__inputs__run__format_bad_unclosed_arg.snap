@@ -3,11 +3,13 @@ source: src/vm/tests.rs
 expression: snapshot
 ---
 SOURCE
+do {
 format("{a", {})
+}
 
 ERROR
 unclosed argument name
-1 |  format("{a", {})
+2 |  format("{a", {})
   |  ^^^^^^^^^^^^^^^^
 
 

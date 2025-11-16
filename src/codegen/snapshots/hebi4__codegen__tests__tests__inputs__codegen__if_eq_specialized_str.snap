@@ -3,9 +3,11 @@ source: src/codegen/tests.rs
 expression: snapshot
 ---
 SOURCE
+do {
 let v = "a"
 
 if v == "a" { "ok" } else { "err" }
+}
 
 OK
 .fn @main

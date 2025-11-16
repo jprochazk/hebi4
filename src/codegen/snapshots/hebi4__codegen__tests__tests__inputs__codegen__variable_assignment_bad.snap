@@ -3,9 +3,11 @@ source: src/codegen/tests.rs
 expression: snapshot
 ---
 SOURCE
+do {
 a = 2
+}
 
 ERROR
 could not resolve name
-1 |  a = 2
+2 |  a = 2
   |  ^

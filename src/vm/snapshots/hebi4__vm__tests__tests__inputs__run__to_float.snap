@@ -3,7 +3,9 @@ source: src/vm/tests.rs
 expression: snapshot
 ---
 SOURCE
+do {
 print(to_float(100))
+}
 
 OK
 Nil

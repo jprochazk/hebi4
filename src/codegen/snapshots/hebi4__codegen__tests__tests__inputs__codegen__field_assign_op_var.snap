@@ -3,10 +3,12 @@ source: src/codegen/tests.rs
 expression: snapshot
 ---
 SOURCE
+do {
 let o = {a:0}
 let v = 1
 o.a = o.a + v
 o.a += v
+}
 
 OK
 .fn @main

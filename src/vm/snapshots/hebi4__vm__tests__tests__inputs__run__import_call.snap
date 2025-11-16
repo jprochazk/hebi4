@@ -3,9 +3,11 @@ source: src/vm/tests.rs
 expression: snapshot
 ---
 SOURCE
+do {
 import foo from "test"
 
 print(foo())
+}
 
 OK
 Nil

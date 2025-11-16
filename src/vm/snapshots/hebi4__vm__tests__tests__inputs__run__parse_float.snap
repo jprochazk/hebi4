@@ -3,7 +3,9 @@ source: src/vm/tests.rs
 expression: snapshot
 ---
 SOURCE
+do {
 print(parse_float("3.14"))
+}
 
 OK
 Nil

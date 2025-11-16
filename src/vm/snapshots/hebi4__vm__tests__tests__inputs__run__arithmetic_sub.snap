@@ -3,6 +3,7 @@ source: src/vm/tests.rs
 expression: snapshot
 ---
 SOURCE
+do {
 let result = 1
 let a = 2
 let b = 2
@@ -12,6 +13,7 @@ result -= 1 - b  // 1 - (1 - 2) = 1 + 1 = 2
 result -= a - 1  // 2 - (2 - 1) = 2 - 1 = 1
 
 result  //=1
+}
 
 OK
 Int(1)

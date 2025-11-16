@@ -3,11 +3,13 @@ source: src/codegen/tests.rs
 expression: snapshot
 ---
 SOURCE
+do {
 let x = 1
 let y = 0
 
 if not x { return 1 }
 if not y { return 2 }
+}
 
 OK
 .fn @main

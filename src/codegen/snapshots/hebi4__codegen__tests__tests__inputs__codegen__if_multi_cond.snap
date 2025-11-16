@@ -3,6 +3,7 @@ source: src/codegen/tests.rs
 expression: snapshot
 ---
 SOURCE
+do {
 let a = 0
 let b = 1
 
@@ -12,6 +13,7 @@ else if a <= b {}  // islt
 else if a >= b {}  // isgt
 else if a == b {}  // iseq
 else if a != b {}  // isne
+}
 
 OK
 .fn @main

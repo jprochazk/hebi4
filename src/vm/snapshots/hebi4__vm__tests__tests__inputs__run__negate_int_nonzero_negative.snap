@@ -3,7 +3,9 @@ source: src/vm/tests.rs
 expression: snapshot
 ---
 SOURCE
+do {
 not -1
+}
 
 OK
 Bool(false)

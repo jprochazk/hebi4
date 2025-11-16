@@ -3,7 +3,9 @@ source: src/codegen/tests.rs
 expression: snapshot
 ---
 SOURCE
+do {
 true
+}
 
 OK
 .fn @main

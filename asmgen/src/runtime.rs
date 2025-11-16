@@ -443,8 +443,8 @@ macro_rules! declare_operand_types {
 declare_operand_types! {
     Reg(u8) = "r{}",
 
-    Mvar(u16) = "m{}",
-    Cap(u8) = "c{}",
+    Mvar(u8) = "m{}",
+    Uv(u8) = "u{}",
 
     Lit(u16) = "l{}",
     Lit8(u8) = "l{}",

@@ -3,8 +3,10 @@ source: src/codegen/tests.rs
 expression: snapshot
 ---
 SOURCE
+do {
 loop {
   let v = 1
+}
 }
 
 OK

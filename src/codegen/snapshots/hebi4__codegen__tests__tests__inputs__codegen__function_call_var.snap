@@ -3,6 +3,7 @@ source: src/codegen/tests.rs
 expression: snapshot
 ---
 SOURCE
+do {
 fn a(f) {
   f()
 }
@@ -12,6 +13,7 @@ fn b() {
 }
 
 a(b)
+}
 
 OK
 .fn @main

@@ -3,13 +3,15 @@ source: src/vm/tests.rs
 expression: snapshot
 ---
 SOURCE
+do {
 panic(
 
 )
+}
 
 ERROR
 explicit panic
-1 |  panic(
+2 |  panic(
   |  ^^^^^^
 
 

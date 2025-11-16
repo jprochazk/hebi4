@@ -1,0 +1,15 @@
+---
+source: src/vm/tests.rs
+expression: snapshot
+---
+SOURCE
+//module
+let i = 0
+i += 1
+print(i)
+
+OK
+Nil
+
+STDOUT
+1

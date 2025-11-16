@@ -3,11 +3,13 @@ source: src/codegen/tests.rs
 expression: snapshot
 ---
 SOURCE
+do {
 let o = {a:0}
 fn k() { "a" }
 let v = 1
 o[k()] = o[k()] + v
 o[k()] += v
+}
 
 OK
 .fn @main

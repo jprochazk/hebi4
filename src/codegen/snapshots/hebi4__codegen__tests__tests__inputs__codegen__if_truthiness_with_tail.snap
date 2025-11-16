@@ -3,6 +3,7 @@ source: src/codegen/tests.rs
 expression: snapshot
 ---
 SOURCE
+do {
 let x = 1
 let result = 0
 
@@ -13,6 +14,7 @@ if x {
 }
 
 result
+}
 
 OK
 .fn @main

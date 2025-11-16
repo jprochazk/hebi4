@@ -3,8 +3,10 @@ source: src/vm/tests.rs
 expression: snapshot
 ---
 SOURCE
+do {
 let v = 1
 do {-v}
+}
 
 OK
 Int(-1)

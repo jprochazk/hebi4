@@ -1,0 +1,26 @@
+---
+source: src/vm/tests.rs
+expression: snapshot
+---
+SOURCE
+//module
+
+let i = 0
+fn outer() {
+  fn inner() {
+    i += 1
+  }
+
+  inner
+}
+
+print(i)
+outer()()
+print(i)
+
+OK
+Nil
+
+STDOUT
+0
+1

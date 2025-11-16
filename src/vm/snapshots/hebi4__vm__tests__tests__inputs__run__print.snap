@@ -3,7 +3,9 @@ source: src/vm/tests.rs
 expression: snapshot
 ---
 SOURCE
+do {
 print("hello, world!")
+}
 
 OK
 Nil

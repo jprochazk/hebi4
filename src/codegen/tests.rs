@@ -3,12 +3,30 @@ use std::{fs::read_to_string, path::Path};
 use super::emit;
 use crate::{codegen::EmitOptions, parser::parse, token::tokenize};
 
-fn parse_options(options: &str) -> EmitOptions {
-    let mut o = EmitOptions::empty();
+struct Options {
+    emit: EmitOptions,
+    module_test: bool,
+}
+
+impl Default for Options {
+    fn default() -> Self {
+        Self {
+            emit: EmitOptions::default(),
+            module_test: false,
+        }
+    }
+}
+
+fn parse_options(options: &str) -> Options {
+    let mut o = Options {
+        emit: EmitOptions::empty(),
+        module_test: false,
+    };
 
     for opt in options.split(',') {
         match opt {
-            "dce" => o.dead_code_elimination = true,
+            "dce" => o.emit.dead_code_elimination = true,
+            "module" => o.module_test = true,
             _ => {}
         }
     }
@@ -26,6 +44,11 @@ fn emitter(path: &Path) {
     } else {
         Default::default()
     };
+    let input = if options.module_test {
+        input
+    } else {
+        &format!("do {{\n{input}\n}}")
+    };
 
     let tokens = tokenize(input);
     let ast = match parse(&tokens) {
@@ -34,7 +57,7 @@ fn emitter(path: &Path) {
             panic!("{}", err.render(input));
         }
     };
-    let (snapshot, failure) = match emit("test".into(), &ast, options) {
+    let (snapshot, failure) = match emit("test".into(), &ast, options.emit) {
         Ok(m) => (format!("SOURCE\n{input}\n\nOK\n{}", m.disasm(input)), false),
         Err(err) => (
             format!("SOURCE\n{input}\n\nERROR\n{}", err.render(input)),

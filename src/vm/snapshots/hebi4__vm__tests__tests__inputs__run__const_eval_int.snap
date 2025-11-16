@@ -3,7 +3,9 @@ source: src/vm/tests.rs
 expression: snapshot
 ---
 SOURCE
+do {
 1 + 1 + 1 + 1
+}
 
 OK
 Int(4)

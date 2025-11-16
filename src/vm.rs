@@ -59,12 +59,12 @@ use crate::{
     codegen::opcodes::*,
     core::RuntimeCoreLib,
     error::{Error, Result, error_span},
-    module,
+    module::{self, ImportBinding},
     span::Span,
     value::module::ImportBindings,
     vm::value::{
         Closure, Function, ValueRaw,
-        closure::{CaptureInfo, ClosureProto},
+        closure::{ClosureProto, UpvalueDescriptor},
         host_function::{Context, HostFunction},
         module::{ImportProto, ModuleRegistry},
     },
@@ -206,11 +206,11 @@ impl Ip {
 
 #[derive(Clone, Copy)]
 #[repr(transparent)]
-struct Captures(NonNull<ValueRaw>);
+struct Upvalues(NonNull<ValueRaw>);
 
-impl Captures {
+impl Upvalues {
     #[inline(always)]
-    pub(crate) unsafe fn at(self, idx: Cap) -> *mut ValueRaw {
+    pub(crate) unsafe fn at(self, idx: Uv) -> *mut ValueRaw {
         self.0.offset(idx.sz()).as_ptr()
     }
 }
@@ -338,7 +338,7 @@ impl Vm {
     }
 
     #[inline]
-    unsafe fn current_captures(self) -> Captures {
+    unsafe fn current_captures(self) -> Upvalues {
         let captures = (*self.0.as_ptr()).current_captures;
         debug_assert!(captures.is_some());
         captures.unwrap_unchecked()
@@ -347,7 +347,7 @@ impl Vm {
     #[inline]
     unsafe fn set_current_captures_for(self, f: GcPtr<Closure>) {
         let captures = NonNull::new_unchecked(f.as_mut().captures.as_mut_ptr());
-        (*self.0.as_ptr()).current_captures = Some(Captures(captures));
+        (*self.0.as_ptr()).current_captures = Some(Upvalues(captures));
     }
 
     #[inline]
@@ -523,8 +523,8 @@ static JT: JumpTable = jump_table! {
 
     lmvar,
     smvar,
-    lcap,
-    scap,
+    luv,
+    suv,
     lidx,
     lidxn,
     sidx,
@@ -697,14 +697,14 @@ unsafe fn smvar(vm: Vm, jt: Jt, ip: Ip, args: Smvar, sp: Sp, lp: Lp) -> Control 
 }
 
 #[inline(always)]
-unsafe fn lcap(vm: Vm, jt: Jt, ip: Ip, args: Lcap, sp: Sp, lp: Lp) -> Control {
+unsafe fn luv(vm: Vm, jt: Jt, ip: Ip, args: Luv, sp: Sp, lp: Lp) -> Control {
     *sp.at(args.dst()) = *vm.current_captures().at(args.src());
 
     dispatch_next(vm, jt, ip, sp, lp)
 }
 
 #[inline(always)]
-unsafe fn scap(vm: Vm, jt: Jt, ip: Ip, args: Scap, sp: Sp, lp: Lp) -> Control {
+unsafe fn suv(vm: Vm, jt: Jt, ip: Ip, args: Suv, sp: Sp, lp: Lp) -> Control {
     *vm.current_captures().at(args.dst()) = *sp.at(args.src());
 
     dispatch_next(vm, jt, ip, sp, lp)
@@ -1010,8 +1010,8 @@ unsafe fn init_captures(closure: GcPtr<ClosureProto>, vm: Vm, sp: Sp) -> Box<[Va
     let mut captures = Box::new_uninit_slice(ncaptures);
     for i in 0..ncaptures {
         let value = match *closure.capture_info.get_unchecked(i) {
-            CaptureInfo::Reg(reg) => *sp.at(reg),
-            CaptureInfo::Cap(cap) => *vm.current_captures().at(cap),
+            UpvalueDescriptor::Reg(reg) => *sp.at(reg),
+            UpvalueDescriptor::Uv(uv) => *vm.current_captures().at(uv),
         };
         captures.get_unchecked_mut(i).write(value);
     }
@@ -1805,9 +1805,12 @@ unsafe fn import(vm: Vm, jt: Jt, ip: Ip, args: Import, sp: Sp, lp: Lp) -> Contro
     };
 
     match info.as_ref().bindings() {
-        ImportBindings::Bare(dst) => {
+        ImportBindings::Bare(ImportBinding::Reg(dst)) => {
             // load the whole module object
             *sp.at(*dst) = ValueRaw::Object(module.as_any());
+        }
+        ImportBindings::Bare(ImportBinding::Mvar(dst)) => {
+            *vm.var_in_current_module(*dst) = ValueRaw::Object(module.as_any());
         }
         ImportBindings::Named(items) => {
             // load parts of the module
@@ -1815,7 +1818,12 @@ unsafe fn import(vm: Vm, jt: Jt, ip: Ip, args: Import, sp: Sp, lp: Lp) -> Contro
                 let Some(item) = module.as_ref().get(*key) else {
                     return module_item_not_found_error(ip, vm);
                 };
-                *sp.at(*dst) = ValueRaw::Object(item);
+                match dst {
+                    ImportBinding::Reg(dst) => *sp.at(*dst) = ValueRaw::Object(item),
+                    ImportBinding::Mvar(dst) => {
+                        *vm.var_in_current_module(*dst) = ValueRaw::Object(item)
+                    }
+                }
             }
         }
     }
@@ -2025,7 +2033,7 @@ pub(crate) struct VmState {
     /// NOTE: This is always `Some` while the VM is executing
     current_module: Option<GcPtr<ModuleProto>>,
 
-    current_captures: Option<Captures>,
+    current_captures: Option<Upvalues>,
 
     /// Saved error.
     ///

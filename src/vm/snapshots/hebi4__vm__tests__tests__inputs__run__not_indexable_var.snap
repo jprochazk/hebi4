@@ -3,13 +3,15 @@ source: src/vm/tests.rs
 expression: snapshot
 ---
 SOURCE
+do {
 let v = 0
 let i = 0
 v[i]
+}
 
 ERROR
 this value cannot be indexed
-3 |  v[i]
+4 |  v[i]
   |   ^^^
 
 

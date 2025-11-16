@@ -4,12 +4,14 @@ expression: snapshot
 ---
 SOURCE
 do {
+do {
   let a = 1
 }
 
 a
+}
 
 ERROR
 could not resolve name
-5 |  a
+6 |  a
   |  ^

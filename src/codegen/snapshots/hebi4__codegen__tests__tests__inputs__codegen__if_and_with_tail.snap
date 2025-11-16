@@ -3,6 +3,7 @@ source: src/codegen/tests.rs
 expression: snapshot
 ---
 SOURCE
+do {
 let a = 0
 let b = 1
 
@@ -10,6 +11,7 @@ if a < b and b >= a {
   return 0
 } else {
   return 1
+}
 }
 
 OK

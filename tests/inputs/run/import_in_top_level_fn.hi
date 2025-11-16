@@ -1,0 +1,8 @@
+//module
+import foo from "test"
+
+fn test() {
+  foo()
+}
+
+test()

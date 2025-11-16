@@ -3,6 +3,7 @@ source: src/codegen/tests.rs
 expression: snapshot
 ---
 SOURCE
+do {
 // the compiler can do some basic arity checking
 // in case the callee is a function declaration,
 // and it's clear syntactically:
@@ -15,8 +16,9 @@ fn f(a, b, c) { }
 // but it's useful so this will error at compile time:
 
 f(0)
+}
 
 ERROR
 invalid number of arguments, expected 3 but got 1
-12 |  f(0)
+13 |  f(0)
    |  ^^^^

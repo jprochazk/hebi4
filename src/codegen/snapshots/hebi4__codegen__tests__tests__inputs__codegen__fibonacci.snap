@@ -3,12 +3,14 @@ source: src/codegen/tests.rs
 expression: snapshot
 ---
 SOURCE
+do {
 fn fib(n) {
   if n<2 { n }
   else { fib(n-1)+fib(n-2) }
 }
 
 fib(10)
+}
 
 OK
 .fn @main

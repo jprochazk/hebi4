@@ -3,9 +3,11 @@ source: src/vm/tests.rs
 expression: snapshot
 ---
 SOURCE
+do {
 let v = true
 
 if v != true { "err" } else { "ok" }
+}
 
 OK
 "ok"

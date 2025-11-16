@@ -3,6 +3,7 @@ source: src/vm/tests.rs
 expression: snapshot
 ---
 SOURCE
+do {
 let result = 10
 let a = 10
 let b = 10
@@ -13,6 +14,7 @@ result /= 10 / b  // 10 / (10 / 10) = 10
 result /= a  / 10 // 10 / (10 / 10) = 10
 
 result //=10
+}
 
 OK
 Int(10)

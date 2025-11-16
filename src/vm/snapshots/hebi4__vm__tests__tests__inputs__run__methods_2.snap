@@ -3,6 +3,7 @@ source: src/vm/tests.rs
 expression: snapshot
 ---
 SOURCE
+do {
 fn Counter() {
   let state = {value: 0}
 
@@ -26,6 +27,7 @@ let c = Counter()
 print(c.value)
 print(c.inc())
 print(c.dec())
+}
 
 OK
 Nil

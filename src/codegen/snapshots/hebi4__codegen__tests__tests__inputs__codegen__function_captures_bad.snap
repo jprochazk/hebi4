@@ -3,6 +3,7 @@ source: src/codegen/tests.rs
 expression: snapshot
 ---
 SOURCE
+do {
 fn a() {
   let v = 0
 
@@ -15,10 +16,11 @@ fn a() {
     }
   }
 }
+}
 
 ERROR
 functions can't capture variables from outer scope
-2 |    let v = 0
+3 |    let v = 0
   |        ^
   |
   > help: use a closure instead: `let f = fn() {}`

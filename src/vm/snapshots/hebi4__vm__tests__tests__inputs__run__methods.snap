@@ -3,6 +3,7 @@ source: src/vm/tests.rs
 expression: snapshot
 ---
 SOURCE
+do {
 fn Counter() {
   let state = {v: 0}
 
@@ -36,6 +37,7 @@ if (
   "ok"
 } else {
   "err"
+}
 }
 
 OK

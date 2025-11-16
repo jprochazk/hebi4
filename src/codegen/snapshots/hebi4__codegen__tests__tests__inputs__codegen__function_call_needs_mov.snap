@@ -3,6 +3,7 @@ source: src/codegen/tests.rs
 expression: snapshot
 ---
 SOURCE
+do {
 fn f(v) {}
 
 let a = 0
@@ -12,6 +13,7 @@ let b = 1
 // but `r2` is already taken, so we have
 // to allocate including `dst` and then `mov`.
 a = f(1)
+}
 
 OK
 .fn @main

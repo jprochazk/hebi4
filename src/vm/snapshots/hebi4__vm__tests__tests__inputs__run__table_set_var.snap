@@ -3,10 +3,12 @@ source: src/vm/tests.rs
 expression: snapshot
 ---
 SOURCE
+do {
 let v = {}
 let k = "a"
 v[k] = 100
 v[k]
+}
 
 OK
 Int(100)

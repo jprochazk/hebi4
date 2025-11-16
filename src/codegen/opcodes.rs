@@ -430,8 +430,8 @@ macro_rules! declare_operand_types {
 declare_operand_types! {
     Reg(u8) = "r{}",
 
-    Mvar(u16) = "m{}",
-    Cap(u8) = "c{}",
+    Mvar(u8) = "m{}",
+    Uv(u8) = "u{}",
 
     Lit(u16) = "l{}",
     Lit8(u8) = "l{}",
@@ -543,9 +543,9 @@ pub enum DecodedInsn {
     Nop {} = 0,
     Mov { dst: Reg, src: Reg } = 1,
     Lmvar { dst: Reg, src: Mvar } = 2,
-    Smvar { src: Reg, dst: Mvar } = 3,
-    Lcap { dst: Reg, src: Cap } = 4,
-    Scap { dst: Cap, src: Reg } = 5,
+    Smvar { dst: Mvar, src: Reg } = 3,
+    Luv { dst: Reg, src: Uv } = 4,
+    Suv { dst: Uv, src: Reg } = 5,
     Lidx { dst: Reg, target: Reg, idx: Reg } = 6,
     Lidxn { dst: Reg, target: Reg, idx: Lit8 } = 7,
     Sidx { target: Reg, idx: Reg, src: Reg } = 8,
@@ -626,16 +626,16 @@ impl Insn {
                 src: Lmvar(self).src(),
             },
             Opcode::Smvar => DecodedInsn::Smvar {
-                src: Smvar(self).src(),
                 dst: Smvar(self).dst(),
+                src: Smvar(self).src(),
             },
-            Opcode::Lcap => DecodedInsn::Lcap {
-                dst: Lcap(self).dst(),
-                src: Lcap(self).src(),
+            Opcode::Luv => DecodedInsn::Luv {
+                dst: Luv(self).dst(),
+                src: Luv(self).src(),
             },
-            Opcode::Scap => DecodedInsn::Scap {
-                dst: Scap(self).dst(),
-                src: Scap(self).src(),
+            Opcode::Suv => DecodedInsn::Suv {
+                dst: Suv(self).dst(),
+                src: Suv(self).src(),
             },
             Opcode::Lidx => DecodedInsn::Lidx {
                 dst: Lidx(self).dst(),
@@ -913,8 +913,8 @@ pub enum Opcode {
     Mov = 1,
     Lmvar = 2,
     Smvar = 3,
-    Lcap = 4,
-    Scap = 5,
+    Luv = 4,
+    Suv = 5,
     Lidx = 6,
     Lidxn = 7,
     Sidx = 8,
@@ -1017,7 +1017,7 @@ impl Lmvar {
 
     #[allow(unnecessary_transmutes)]
     pub fn src(self) -> Mvar {
-        Mvar(unsafe { ::core::mem::transmute(self.0.B()) })
+        Mvar(unsafe { ::core::mem::transmute(self.0.b()) })
     }
 }
 
@@ -1028,42 +1028,42 @@ pub struct Smvar(Insn);
 
 impl Smvar {
     #[allow(unnecessary_transmutes)]
-    pub fn src(self) -> Reg {
-        Reg(unsafe { ::core::mem::transmute(self.0.a()) })
+    pub fn dst(self) -> Mvar {
+        Mvar(unsafe { ::core::mem::transmute(self.0.a()) })
     }
 
     #[allow(unnecessary_transmutes)]
-    pub fn dst(self) -> Mvar {
-        Mvar(unsafe { ::core::mem::transmute(self.0.B()) })
+    pub fn src(self) -> Reg {
+        Reg(unsafe { ::core::mem::transmute(self.0.b()) })
     }
 }
 
-#[doc = "Load current closure's capture `src` to register `dst`."]
+#[doc = "Load current closure's upvalue `src` to register `dst`."]
 #[derive(Clone, Copy)]
 #[repr(transparent)]
-pub struct Lcap(Insn);
+pub struct Luv(Insn);
 
-impl Lcap {
+impl Luv {
     #[allow(unnecessary_transmutes)]
     pub fn dst(self) -> Reg {
         Reg(unsafe { ::core::mem::transmute(self.0.a()) })
     }
 
     #[allow(unnecessary_transmutes)]
-    pub fn src(self) -> Cap {
-        Cap(unsafe { ::core::mem::transmute(self.0.b()) })
+    pub fn src(self) -> Uv {
+        Uv(unsafe { ::core::mem::transmute(self.0.b()) })
     }
 }
 
 #[doc = "Store register `src` to current closure's capture `dst`."]
 #[derive(Clone, Copy)]
 #[repr(transparent)]
-pub struct Scap(Insn);
+pub struct Suv(Insn);
 
-impl Scap {
+impl Suv {
     #[allow(unnecessary_transmutes)]
-    pub fn dst(self) -> Cap {
-        Cap(unsafe { ::core::mem::transmute(self.0.a()) })
+    pub fn dst(self) -> Uv {
+        Uv(unsafe { ::core::mem::transmute(self.0.a()) })
     }
 
     #[allow(unnecessary_transmutes)]
@@ -2250,8 +2250,8 @@ pub mod __operands {
     pub type mov = super::Mov;
     pub type lmvar = super::Lmvar;
     pub type smvar = super::Smvar;
-    pub type lcap = super::Lcap;
-    pub type scap = super::Scap;
+    pub type luv = super::Luv;
+    pub type suv = super::Suv;
     pub type lidx = super::Lidx;
     pub type lidxn = super::Lidxn;
     pub type sidx = super::Sidx;
@@ -2330,19 +2330,19 @@ pub mod asm {
     }
     #[doc = "Load module variable `src` to register `dst`."]
     pub const fn lmvar(dst: Reg, src: Mvar) -> Insn {
-        op_aB(Opcode::Lmvar, dst.0, src.0)
+        op_abc(Opcode::Lmvar, dst.0, src.0, 0)
     }
     #[doc = "Store register `dst` into module variable `mvar`."]
-    pub const fn smvar(src: Reg, dst: Mvar) -> Insn {
-        op_aB(Opcode::Smvar, src.0, dst.0)
+    pub const fn smvar(dst: Mvar, src: Reg) -> Insn {
+        op_abc(Opcode::Smvar, dst.0, src.0, 0)
     }
-    #[doc = "Load current closure's capture `src` to register `dst`."]
-    pub const fn lcap(dst: Reg, src: Cap) -> Insn {
-        op_abc(Opcode::Lcap, dst.0, src.0, 0)
+    #[doc = "Load current closure's upvalue `src` to register `dst`."]
+    pub const fn luv(dst: Reg, src: Uv) -> Insn {
+        op_abc(Opcode::Luv, dst.0, src.0, 0)
     }
     #[doc = "Store register `src` to current closure's capture `dst`."]
-    pub const fn scap(dst: Cap, src: Reg) -> Insn {
-        op_abc(Opcode::Scap, dst.0, src.0, 0)
+    pub const fn suv(dst: Uv, src: Reg) -> Insn {
+        op_abc(Opcode::Suv, dst.0, src.0, 0)
     }
     #[doc = "Load index `idx` (register) from `target` (array or table) to register `dst`."]
     pub const fn lidx(dst: Reg, target: Reg, idx: Reg) -> Insn {
@@ -2607,8 +2607,8 @@ pub struct JumpTable {
     pub mov: OpaqueHandler,
     pub lmvar: OpaqueHandler,
     pub smvar: OpaqueHandler,
-    pub lcap: OpaqueHandler,
-    pub scap: OpaqueHandler,
+    pub luv: OpaqueHandler,
+    pub suv: OpaqueHandler,
     pub lidx: OpaqueHandler,
     pub lidxn: OpaqueHandler,
     pub sidx: OpaqueHandler,

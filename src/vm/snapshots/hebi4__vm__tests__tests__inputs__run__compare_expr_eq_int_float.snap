@@ -3,10 +3,12 @@ source: src/vm/tests.rs
 expression: snapshot
 ---
 SOURCE
+do {
 let a = 1
 let b = 1.0
 
 a == b
+}
 
 OK
 Bool(true)

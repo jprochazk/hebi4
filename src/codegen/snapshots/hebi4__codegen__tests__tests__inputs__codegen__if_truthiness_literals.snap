@@ -3,6 +3,7 @@ source: src/codegen/tests.rs
 expression: snapshot
 ---
 SOURCE
+do {
 if 1 { return 1 }
 if 0 { return 2 }
 if "hello" { return 3 }
@@ -10,6 +11,7 @@ if "" { return 4 }
 if true { return 5 }
 if false { return 6 }
 if nil { return 7 }
+}
 
 OK
 .fn @main

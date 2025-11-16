@@ -3,6 +3,7 @@ source: src/codegen/tests.rs
 expression: snapshot
 ---
 SOURCE
+do {
 fn f() {}
 
 let a = 0
@@ -10,6 +11,7 @@ let b = 1
 
 // no args means `dst` can be used without a `mov`
 a = f()
+}
 
 OK
 .fn @main

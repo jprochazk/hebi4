@@ -3,11 +3,13 @@ source: src/codegen/tests.rs
 expression: snapshot
 ---
 SOURCE
+do {
 //
 loop {
   let v = 0
   continue
   let v = 1
+}
 }
 
 OK
@@ -15,6 +17,7 @@ OK
   params 0
   stack 2
   .locals
+    v = r1
     v = r1
   .code
   0  lsmi r1, 0

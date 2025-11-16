@@ -3,6 +3,7 @@ source: src/vm/tests.rs
 expression: snapshot
 ---
 SOURCE
+do {
 fn f() {}
 
 print(type_name(nil))
@@ -14,6 +15,7 @@ print(type_name({}))
 print(type_name([]))
 print(type_name(f))
 print(type_name(print))
+}
 
 OK
 Nil

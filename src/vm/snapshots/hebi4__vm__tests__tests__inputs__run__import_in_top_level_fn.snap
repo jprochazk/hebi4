@@ -1,0 +1,16 @@
+---
+source: src/vm/tests.rs
+expression: snapshot
+---
+SOURCE
+//module
+import foo from "test"
+
+fn test() {
+  foo()
+}
+
+test()
+
+OK
+"hello"

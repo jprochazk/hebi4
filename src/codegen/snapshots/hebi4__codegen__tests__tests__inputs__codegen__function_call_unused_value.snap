@@ -3,6 +3,7 @@ source: src/codegen/tests.rs
 expression: snapshot
 ---
 SOURCE
+do {
 fn f(a, b, c) {}
 
 // unused value with args, that means the call expr
@@ -10,6 +11,7 @@ fn f(a, b, c) {}
 f(0, 1, 2)
 
 nil
+}
 
 OK
 .fn @main

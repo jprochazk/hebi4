@@ -3,7 +3,9 @@ source: src/vm/tests.rs
 expression: snapshot
 ---
 SOURCE
+do {
 print(to_str(10000))
+}
 
 OK
 Nil

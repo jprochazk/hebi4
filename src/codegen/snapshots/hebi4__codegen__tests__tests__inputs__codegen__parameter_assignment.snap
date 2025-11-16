@@ -3,6 +3,7 @@ source: src/codegen/tests.rs
 expression: snapshot
 ---
 SOURCE
+do {
 fn f(v) {
   v = 1
   v
@@ -11,6 +12,7 @@ fn f(v) {
 let v = 0
 v = f(v)
 v
+}
 
 OK
 .fn @main

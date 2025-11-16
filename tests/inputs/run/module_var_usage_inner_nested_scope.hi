@@ -1,0 +1,14 @@
+//module
+
+let i = 0
+fn outer() {
+  fn inner() {
+    i += 1
+  }
+
+  inner
+}
+
+print(i)
+outer()()
+print(i)

@@ -3,7 +3,9 @@ source: src/codegen/tests.rs
 expression: snapshot
 ---
 SOURCE
+do {
 import read_file from "fs"
+}
 
 OK
 .fn @main

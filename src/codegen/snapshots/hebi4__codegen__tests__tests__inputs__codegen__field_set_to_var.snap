@@ -3,9 +3,11 @@ source: src/codegen/tests.rs
 expression: snapshot
 ---
 SOURCE
+do {
 let a = {foo:0}
 let v = 1
 a.foo = v
+}
 
 OK
 .fn @main

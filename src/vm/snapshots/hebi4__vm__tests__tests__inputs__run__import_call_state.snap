@@ -3,6 +3,7 @@ source: src/vm/tests.rs
 expression: snapshot
 ---
 SOURCE
+do {
 import reset, inc, dec, get from "test2"
 
 reset()
@@ -11,6 +12,7 @@ inc(1)
 print(get())
 dec(1)
 print(get())
+}
 
 OK
 Nil

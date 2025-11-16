@@ -3,6 +3,7 @@ source: src/codegen/tests.rs
 expression: snapshot
 ---
 SOURCE
+do {
 //
 loop {
   let v = 0
@@ -14,6 +15,7 @@ loop {
   break
   let v = 3
 }
+}
 
 OK
 .fn @main
@@ -22,6 +24,8 @@ OK
   .locals
     v = r1
     v = r2
+    v = r2
+    v = r1
   .code
    0  lsmi r1, 0
    1  lsmi r2, 1

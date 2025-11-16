@@ -147,10 +147,39 @@ fn vm() -> Hebi {
     })
 }
 
+struct Options {
+    module_test: bool,
+}
+
+impl Default for Options {
+    fn default() -> Self {
+        Self { module_test: false }
+    }
+}
+
+fn parse_options(s: &str) -> Options {
+    let mut o = Options::default();
+    if s.contains("module") {
+        o.module_test = true;
+    }
+    o
+}
+
 #[glob_test::glob("../../tests/inputs/run/*.hi")]
 fn run(path: &Path) {
     let input = read_to_string(path).unwrap();
     let input = input.trim();
+    let options = if input.starts_with("//") {
+        let first_line = input.lines().next().unwrap().trim_start_matches("//");
+        parse_options(first_line)
+    } else {
+        Default::default()
+    };
+    let input = if options.module_test {
+        input
+    } else {
+        &format!("do {{\n{input}\n}}")
+    };
     let module = module(input);
     let native_modules = native_modules();
 

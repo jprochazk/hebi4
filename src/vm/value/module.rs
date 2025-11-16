@@ -7,7 +7,7 @@ use super::{Function, ValueRaw};
 use crate::{
     codegen::opcodes::{FnId, Insn, Reg, asm},
     gc::Tracer,
-    module::{FuncInfo, Literal, Module, NativeModule},
+    module::{FuncInfo, ImportBinding, Literal, Module, NativeModule},
     value::host_function::HostFunction,
     vm::{
         gc::{GcPtr, GcRef, GcRefMut, GcRoot, GcUninitRoot, Heap, Trace, let_root},
@@ -210,8 +210,8 @@ impl ImportProto {
 }
 
 pub enum ImportBindings {
-    Bare(Reg),
-    Named(Box<[(GcPtr<Str>, Reg)]>),
+    Bare(ImportBinding),
+    Named(Box<[(GcPtr<Str>, ImportBinding)]>),
 }
 
 impl<'a> GcRef<'a, ImportProto> {
@@ -272,6 +272,7 @@ fn canonicalize<'a>(
     let_root!(in heap; name);
     let name = Str::new(heap, name, info.name());
 
+    let module_vars = vec![ValueRaw::Nil; info.module_vars()].into_boxed_slice();
     let module = unsafe {
         root.init_raw(
             heap,
@@ -280,8 +281,7 @@ fn canonicalize<'a>(
                     name: name.as_ptr(),
                     entrypoint: None,
                     functions: Box::new([]),
-                    // TODO: module vars
-                    module_vars: Box::new([ValueRaw::Nil; 0]),
+                    module_vars,
                 });
             }),
         )
@@ -359,7 +359,7 @@ fn canonicalize_literals(
             Literal::Float(v) => ValueRaw::Float(*v),
             Literal::String(v) => ValueRaw::Object(Str::alloc(heap, v.as_str()).as_any()),
             Literal::ClosureInfo(v) => ValueRaw::Object(
-                ClosureProto::alloc(heap, functions[v.func.zx()], &v.capture_info).as_any(),
+                ClosureProto::alloc(heap, functions[v.func.zx()], &v.upvalues).as_any(),
             ),
             Literal::ImportInfo(v) => match v {
                 crate::module::ImportInfo::Bare { spec, dst } => {

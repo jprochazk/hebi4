@@ -3,9 +3,11 @@ source: src/codegen/tests.rs
 expression: snapshot
 ---
 SOURCE
+do {
 1 + "test"
+}
 
 ERROR
 evaluation would fail with a type mismatch: cannot add Int and Str
-1 |  1 + "test"
+2 |  1 + "test"
   |  ^^^^^^^^^^

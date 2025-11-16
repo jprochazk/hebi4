@@ -307,11 +307,11 @@ enum OperandType {
     /// 8-bit register
     Reg,
 
-    /// 16-bit module variable ID
+    /// 8-bit module variable ID
     Mvar,
 
-    /// 8-bit capture ID
-    Cap,
+    /// 8-bit upvalue ID
+    Uv,
 
     /// 16-bit literal ID
     Lit,
@@ -345,8 +345,8 @@ impl OperandType {
     fn bits(&self) -> u8 {
         match self {
             OperandType::Reg => 8,
-            OperandType::Mvar => 16,
-            OperandType::Cap => 8,
+            OperandType::Mvar => 8,
+            OperandType::Uv => 8,
             OperandType::Lit => 16,
             OperandType::Lit8 => 8,
             OperandType::FnId => 16,
@@ -363,7 +363,7 @@ impl OperandType {
         match self {
             OperandType::Reg => "Reg",
             OperandType::Mvar => "Mvar",
-            OperandType::Cap => "Cap",
+            OperandType::Uv => "Uv",
             OperandType::Lit => "Lit",
             OperandType::Lit8 => "Lit8",
             OperandType::FnId => "FnId",
@@ -379,8 +379,8 @@ impl OperandType {
     fn base(&self) -> &'static str {
         match self {
             OperandType::Reg => "u8",
-            OperandType::Mvar => "u16",
-            OperandType::Cap => "u8",
+            OperandType::Mvar => "u8",
+            OperandType::Uv => "u8",
             OperandType::Lit => "u16",
             OperandType::Lit8 => "u8",
             OperandType::FnId => "u16",
@@ -397,7 +397,7 @@ impl OperandType {
         match self {
             OperandType::Reg
             | OperandType::Mvar
-            | OperandType::Cap
+            | OperandType::Uv
             | OperandType::Lit
             | OperandType::Lit8
             | OperandType::FnId
@@ -489,7 +489,7 @@ fn parse_instruction(s: &'_ str, opcode: u8, docs: String) -> Instruction<'_> {
         let ty = match ty {
             "reg" => OperandType::Reg,
             "mvar" => OperandType::Mvar,
-            "cap" => OperandType::Cap,
+            "uv" => OperandType::Uv,
             "lit" => OperandType::Lit,
             "lit8" => OperandType::Lit8,
             "fnid" => OperandType::FnId,

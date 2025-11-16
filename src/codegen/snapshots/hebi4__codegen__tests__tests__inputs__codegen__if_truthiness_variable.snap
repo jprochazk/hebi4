@@ -3,6 +3,7 @@ source: src/codegen/tests.rs
 expression: snapshot
 ---
 SOURCE
+do {
 let x = 1
 let y = 0
 let z = nil
@@ -10,6 +11,7 @@ let z = nil
 if x { return 1 }
 if y { return 2 }
 if z { return 3 }
+}
 
 OK
 .fn @main

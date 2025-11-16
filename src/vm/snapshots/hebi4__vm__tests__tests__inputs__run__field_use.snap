@@ -3,8 +3,10 @@ source: src/vm/tests.rs
 expression: snapshot
 ---
 SOURCE
+do {
 let v = {a:0, b:1, c:2}
 v.a + v.b + v.c
+}
 
 OK
 Int(3)

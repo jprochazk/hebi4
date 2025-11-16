@@ -3,8 +3,10 @@ source: src/codegen/tests.rs
 expression: snapshot
 ---
 SOURCE
+do {
 let k = do { 0 }
 {}[k]
+}
 
 OK
 .fn @main

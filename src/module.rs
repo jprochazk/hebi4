@@ -10,7 +10,7 @@ pub use native::{
 use crate::{
     codegen::{
         EmitOptions, emit,
-        opcodes::{Cap, FnId, Insn, Reg},
+        opcodes::{FnId, Insn, Mvar, Reg, Uv},
     },
     error::Result,
     parser::parse,
@@ -34,6 +34,7 @@ struct ModuleRepr {
     name: Cow<'static, str>,
     main: FnId,
     functions: Box<[FuncInfo]>,
+    module_vars: usize,
 }
 
 impl Module {
@@ -42,12 +43,14 @@ impl Module {
         name: Cow<'static, str>,
         main: FnId,
         functions: impl IntoIterator<Item = FuncInfo>,
+        module_vars: usize,
     ) -> Self {
         Self {
             repr: Arc::new(ModuleRepr {
                 name,
                 main,
                 functions: std::vec::Vec::from_iter(functions).into_boxed_slice(),
+                module_vars,
             }),
         }
     }
@@ -70,6 +73,11 @@ impl Module {
     #[inline]
     pub(crate) fn functions(&self) -> &[FuncInfo] {
         &*self.repr.functions
+    }
+
+    #[inline]
+    pub(crate) fn module_vars(&self) -> usize {
+        self.repr.module_vars
     }
 
     /// Compile Hebi source code into a [`Module`].
@@ -168,7 +176,7 @@ impl FuncInfo {
 pub struct FuncDebugInfo {
     pub(crate) spans: Box<[Span]>,
     pub(crate) locals: Box<[Local]>,
-    pub(crate) captures: Box<[Capture]>,
+    pub(crate) upvalues: Box<[Upvalue]>,
 }
 
 #[derive(Clone, Copy)]
@@ -178,30 +186,30 @@ pub struct Local {
 }
 
 #[derive(Clone, Copy)]
-pub struct Capture {
+pub struct Upvalue {
     pub(crate) span: Span,
-    pub(crate) info: CaptureInfo,
+    pub(crate) info: UpvalueDescriptor,
 }
 
 #[derive(Debug)]
 pub struct ClosureInfo {
     pub(crate) func: FnId,
-    pub(crate) capture_info: Box<[CaptureInfo]>,
+    pub(crate) upvalues: Box<[UpvalueDescriptor]>,
 }
 
 impl ClosureInfo {
-    pub(crate) fn new(func: FnId, capture_info: std::vec::Vec<CaptureInfo>) -> Self {
+    pub(crate) fn new(func: FnId, upvalues: std::vec::Vec<UpvalueDescriptor>) -> Self {
         Self {
             func,
-            capture_info: capture_info.into_boxed_slice(),
+            upvalues: upvalues.into_boxed_slice(),
         }
     }
 }
 
 #[derive(Debug, Clone, Copy)]
-pub enum CaptureInfo {
+pub enum UpvalueDescriptor {
     Reg(Reg),
-    Cap(Cap),
+    Uv(Uv),
 }
 
 /// Information about an import statement.
@@ -209,21 +217,27 @@ pub enum CaptureInfo {
 pub enum ImportInfo {
     /// Bare import: `import "spec" as name`
     /// Imports the entire module into a single register.
-    Bare { spec: String, dst: Reg },
+    Bare { spec: String, dst: ImportBinding },
     /// Named imports: `import a as x, b as y from "spec"`
     /// Imports specific names from the module into separate registers.
     Named {
         spec: String,
-        bindings: Box<[(String, Reg)]>,
+        bindings: Box<[(String, ImportBinding)]>,
     },
 }
 
+#[derive(Debug, Clone, Copy)]
+pub enum ImportBinding {
+    Reg(Reg),
+    Mvar(Mvar),
+}
+
 impl ImportInfo {
-    pub(crate) fn bare(spec: String, dst: Reg) -> Self {
+    pub(crate) fn bare(spec: String, dst: ImportBinding) -> Self {
         Self::Bare { spec, dst }
     }
 
-    pub(crate) fn named(spec: String, bindings: std::vec::Vec<(String, Reg)>) -> Self {
+    pub(crate) fn named(spec: String, bindings: std::vec::Vec<(String, ImportBinding)>) -> Self {
         Self::Named {
             spec,
             bindings: bindings.into_boxed_slice(),
@@ -311,12 +325,13 @@ impl std::fmt::Display for Literal {
                 }
             }
             Literal::ClosureInfo(v) => {
-                write!(f, "{{{f}, n={n}}}", f = v.func, n = v.capture_info.len())
+                write!(f, "{{{f}, n={n}}}", f = v.func, n = v.upvalues.len())
             }
             Literal::ImportInfo(v) => match v {
-                ImportInfo::Bare { spec, dst } => {
-                    write!(f, "{{import {:?} -> {}}}", spec, dst)
-                }
+                ImportInfo::Bare { spec, dst } => match dst {
+                    ImportBinding::Reg(reg) => write!(f, "{{import {spec:?} -> {reg}}}"),
+                    ImportBinding::Mvar(mvar) => write!(f, "{{import {spec:?} -> {mvar}}}"),
+                },
                 ImportInfo::Named { spec, bindings } => {
                     write!(f, "{{import {:?}, n={}}}", spec, bindings.len())
                 }
@@ -325,11 +340,11 @@ impl std::fmt::Display for Literal {
     }
 }
 
-impl std::fmt::Display for CaptureInfo {
+impl std::fmt::Display for UpvalueDescriptor {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            CaptureInfo::Reg(reg) => write!(f, "{reg}"),
-            CaptureInfo::Cap(cap) => write!(f, "{cap}"),
+            UpvalueDescriptor::Reg(reg) => write!(f, "{reg}"),
+            UpvalueDescriptor::Uv(cap) => write!(f, "{cap}"),
         }
     }
 }

@@ -3,7 +3,9 @@ source: src/vm/tests.rs
 expression: snapshot
 ---
 SOURCE
+do {
 printf("{a} {b} {c}", {a:0, b:"b", c:true})
+}
 
 OK
 Nil

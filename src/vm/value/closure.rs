@@ -1,5 +1,5 @@
+pub use crate::module::UpvalueDescriptor;
 use crate::{
-    codegen::opcodes::{Cap, Reg},
     module,
     vm::{
         gc::{GcPtr, GcRef, Heap, Trace, Tracer},
@@ -9,7 +9,7 @@ use crate::{
 
 pub struct ClosureProto {
     pub(crate) func: GcPtr<Function>,
-    pub(crate) capture_info: Box<[CaptureInfo]>,
+    pub(crate) capture_info: Box<[UpvalueDescriptor]>,
 }
 
 impl ClosureProto {
@@ -17,15 +17,9 @@ impl ClosureProto {
     pub fn alloc(
         heap: &Heap,
         func: GcPtr<Function>,
-        capture_info: &[module::CaptureInfo],
+        capture_info: &[module::UpvalueDescriptor],
     ) -> GcPtr<Self> {
-        let capture_info = capture_info
-            .iter()
-            .map(|i| match i {
-                module::CaptureInfo::Reg(reg) => CaptureInfo::Reg(*reg),
-                module::CaptureInfo::Cap(cap) => CaptureInfo::Cap(*cap),
-            })
-            .collect();
+        let capture_info = capture_info.into();
 
         heap.alloc_no_gc(|ptr| unsafe {
             (*ptr).write(Self { func, capture_info });
@@ -39,12 +33,6 @@ unsafe impl Trace for ClosureProto {
     unsafe fn trace(&self, tracer: &Tracer) {
         tracer.visit(self.func);
     }
-}
-
-#[derive(Clone, Copy)]
-pub enum CaptureInfo {
-    Reg(Reg),
-    Cap(Cap),
 }
 
 impl std::fmt::Debug for GcRef<'_, ClosureProto> {

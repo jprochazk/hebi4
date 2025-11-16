@@ -3,6 +3,7 @@ source: src/vm/tests.rs
 expression: snapshot
 ---
 SOURCE
+do {
 let o = {a:0}
 fn k() { "a" }
 let v = 1
@@ -10,6 +11,7 @@ o[k()] = o[k()] + v
 o[k()] += v
 
 o["a"]
+}
 
 OK
 Int(2)

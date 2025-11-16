@@ -4,8 +4,10 @@ expression: snapshot
 ---
 SOURCE
 do {
+do {
     let v = 0
     0
+}
 }
 
 OK

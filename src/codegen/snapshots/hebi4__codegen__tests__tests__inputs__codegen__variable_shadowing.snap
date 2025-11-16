@@ -3,14 +3,17 @@ source: src/codegen/tests.rs
 expression: snapshot
 ---
 SOURCE
+do {
 let a = 0
 let a = 1
+}
 
 OK
 .fn @main
   params 0
   stack 2
   .locals
+    a = r1
     a = r1
   .code
   0  lsmi r1, 0

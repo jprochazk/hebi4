@@ -3,9 +3,11 @@ source: src/codegen/tests.rs
 expression: snapshot
 ---
 SOURCE
+do {
 fn f(a, b, c) {}
 
 f(1, 2, 3)
+}
 
 OK
 .fn @main

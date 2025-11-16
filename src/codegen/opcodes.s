@@ -4,7 +4,7 @@ nop;
 /* Move value from register `src` to register `dst`. */
 mov dst:reg src:reg;
 
-# Module variables, captures, array indices and table keys.
+# Module variables, upvalues, array indices and table keys.
 
 /* Load module variable `src` to register `dst`. */
 lmvar dst:reg src:mvar;
@@ -13,13 +13,13 @@ lmvar dst:reg src:mvar;
 #       it's still disassembled as 1st operand for consistency
 
 /* Store register `dst` into module variable `mvar`. */
-smvar src:reg dst:mvar;
+smvar dst:mvar src:reg;
 
-/* Load current closure's capture `src` to register `dst`. */
-lcap dst:reg src:cap;
+/* Load current closure's upvalue `src` to register `dst`. */
+luv dst:reg src:uv;
 
 /* Store register `src` to current closure's capture `dst`. */
-scap dst:cap src:reg;
+suv dst:uv src:reg;
 
 /* Load index `idx` (register) from `target` (array or table) to register `dst`. */
 lidx dst:reg target:reg idx:reg;

@@ -3,11 +3,13 @@ source: src/vm/tests.rs
 expression: snapshot
 ---
 SOURCE
+do {
 format("{a-b}", {})
+}
 
 ERROR
 argument names must be valid identifier
-1 |  format("{a-b}", {})
+2 |  format("{a-b}", {})
   |  ^^^^^^^^^^^^^^^^^^^
 
 
