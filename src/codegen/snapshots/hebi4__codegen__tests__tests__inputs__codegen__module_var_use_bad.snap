@@ -1,0 +1,15 @@
+---
+source: src/codegen/tests.rs
+expression: snapshot
+---
+SOURCE
+//module
+
+fn f() { i }
+let i = 0
+f()
+
+ERROR
+could not resolve name
+3 |  fn f() { i }
+  |           ^

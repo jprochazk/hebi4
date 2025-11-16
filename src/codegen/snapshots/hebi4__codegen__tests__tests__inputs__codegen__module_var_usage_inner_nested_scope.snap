@@ -1,0 +1,51 @@
+---
+source: src/codegen/tests.rs
+expression: snapshot
+---
+SOURCE
+//module
+
+let i = 0
+fn outer() {
+  fn inner() {
+    i += 1
+  }
+
+  inner
+}
+
+print(i)
+outer()()
+print(i)
+
+OK
+.fn @main
+  params 0
+  stack 3
+  .code
+  0  lsmi r1, 0
+  1  smvar m0, r1
+  2  lmvar r2, m0
+  3  call r1, print
+  4  call r1, fn1   ; fn1=outer
+  5  call r1, r1, 0   ; dyn
+  6  lmvar r1, m0
+  7  call r0, print
+  8  ret
+
+.fn outer
+  params 0
+  stack 1
+  .code
+  0  lfunc r0, fn2   ; fn2=inner
+  1  ret
+
+.fn inner
+  params 0
+  stack 2
+  .code
+  0  lmvar r1, m0
+  1  add r1, r1, 1
+  2  smvar m0, r1
+  3  lnil r0
+  4  ret
