@@ -1,4 +1,4 @@
 [alias]
 review = "insta test --test-runner nextest --review --unreferenced delete"
 x = "run --release --quiet -p xtask"
-cli = "run --release --quiet -p hebi4-cli --"
+cli = "run --quiet -p hebi4-cli"

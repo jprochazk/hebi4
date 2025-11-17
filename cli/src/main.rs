@@ -11,18 +11,20 @@ fn main() {
     let args: Args = argh::from_env();
 
     let opts = args.optimize.unwrap_or_default().0;
-    if args.print_ast {
-        let code = &args.code_or_path;
-        print_ast(code);
-    } else if args.disassemble {
-        let code = &args.code_or_path;
-        disassemble(code, opts);
-    } else if args.eval {
-        let code = &args.code_or_path;
-        eval_string(code, opts);
+
+    let code = if args.eval {
+        &args.code_or_path
     } else {
         let path = Path::new(&args.code_or_path);
-        eval_file(path, opts)
+        &read_to_string(path).expect("failed to read file")
+    };
+
+    if args.print_ast {
+        print_ast_string(code);
+    } else if args.disassemble {
+        disassemble_string(code, opts);
+    } else {
+        eval_string(code, opts);
     }
 }
 
@@ -97,14 +99,14 @@ impl Drop for BufferedStdout<'_> {
     }
 }
 
-fn disassemble(code: &str, opts: EmitOptions) {
+fn disassemble_string(code: &str, opts: EmitOptions) {
     let module = compile_string(code, opts);
     BufferedStdout::with(|o| {
         writeln!(o, "{}", module.disasm(code)).unwrap();
     });
 }
 
-fn print_ast(code: &str) {
+fn print_ast_string(code: &str) {
     match hebi4::parse(code) {
         Ok(ast) => BufferedStdout::with(|o| {
             for node in ast.root().body() {
@@ -141,9 +143,4 @@ fn eval_string(code: &str, opts: EmitOptions) {
             }
         }
     });
-}
-
-fn eval_file(path: &Path, opts: EmitOptions) {
-    let code = read_to_string(path).expect("failed to read file");
-    eval_string(&code, opts)
 }
