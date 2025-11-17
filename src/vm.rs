@@ -1740,31 +1740,7 @@ unsafe fn call(vm: Vm, jt: Jt, ip: Ip, args: Call, sp: Sp, lp: Lp) -> Control {
     let callee = *sp.at(args.callee());
     let nargs = args.args().get();
 
-    if let Some(callee) = callee.into_object::<Function>() {
-        if callee.as_ref().nparams != nargs {
-            return arity_mismatch_error(ip, vm);
-        }
-
-        let (sp, lp, ip) = do_call(callee, ret, ip, vm);
-
-        dispatch_current(vm, jt, ip, sp, lp)
-    } else if let Some(callee) = callee.into_object::<Closure>() {
-        if callee.as_ref().func.as_ref().nparams != nargs {
-            return arity_mismatch_error(ip, vm);
-        }
-
-        let (sp, lp, ip) = do_closure_call(callee, ret, ip, vm);
-
-        dispatch_current(vm, jt, ip, sp, lp)
-    } else if let Some(callee) = callee.into_object::<HostFunction>() {
-        if callee.as_ref().arity != nargs {
-            return arity_mismatch_error(ip, vm);
-        }
-
-        do_host_call(callee, vm, jt, ip, sp, lp, ret, nargs)
-    } else {
-        not_callable_error(ip, vm)
-    }
+    do_generic_call(callee, ret, nargs, vm, jt, ip, sp, lp)
 }
 
 #[cold]
@@ -1861,6 +1837,45 @@ unsafe fn retv(vm: Vm, jt: Jt, ip: Ip, args: Retv, sp: Sp, lp: Lp) -> Control {
 #[inline(always)]
 unsafe fn stop(vm: Vm, jt: Jt, ip: Ip, args: Stop, sp: Sp, lp: Lp) -> Control {
     Control::stop()
+}
+
+#[inline(always)]
+unsafe fn do_generic_call(
+    callee: ValueRaw,
+    ret: Reg,
+    nargs: u8,
+
+    vm: Vm,
+    jt: Jt,
+    ip: Ip,
+    sp: Sp,
+    lp: Lp,
+) -> Control {
+    if let Some(callee) = callee.into_object::<Function>() {
+        if callee.as_ref().nparams != nargs {
+            return arity_mismatch_error(ip, vm);
+        }
+
+        let (sp, lp, ip) = do_call(callee, ret, ip, vm);
+
+        dispatch_current(vm, jt, ip, sp, lp)
+    } else if let Some(callee) = callee.into_object::<Closure>() {
+        if callee.as_ref().func.as_ref().nparams != nargs {
+            return arity_mismatch_error(ip, vm);
+        }
+
+        let (sp, lp, ip) = do_closure_call(callee, ret, ip, vm);
+
+        dispatch_current(vm, jt, ip, sp, lp)
+    } else if let Some(callee) = callee.into_object::<HostFunction>() {
+        if callee.as_ref().arity != nargs {
+            return arity_mismatch_error(ip, vm);
+        }
+
+        do_host_call(callee, vm, jt, ip, sp, lp, ret, nargs)
+    } else {
+        not_callable_error(ip, vm)
+    }
 }
 
 /// Call procedure:

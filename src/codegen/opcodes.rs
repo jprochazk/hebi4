@@ -1055,7 +1055,7 @@ impl Luv {
     }
 }
 
-#[doc = "Store register `src` to current closure's capture `dst`."]
+#[doc = "Store register `src` to current closure's upvalue `dst`."]
 #[derive(Clone, Copy)]
 #[repr(transparent)]
 pub struct Suv(Insn);
@@ -2340,7 +2340,7 @@ pub mod asm {
     pub const fn luv(dst: Reg, src: Uv) -> Insn {
         op_abc(Opcode::Luv, dst.0, src.0, 0)
     }
-    #[doc = "Store register `src` to current closure's capture `dst`."]
+    #[doc = "Store register `src` to current closure's upvalue `dst`."]
     pub const fn suv(dst: Uv, src: Reg) -> Insn {
         op_abc(Opcode::Suv, dst.0, src.0, 0)
     }
