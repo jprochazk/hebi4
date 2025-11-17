@@ -9,16 +9,13 @@ mov dst:reg src:reg;
 /* Load module variable `src` to register `dst`. */
 lmvar dst:reg src:mvar;
 
-# NOTE: `dst` comes 2nd here due to being 16-bit
-#       it's still disassembled as 1st operand for consistency
-
 /* Store register `dst` into module variable `mvar`. */
 smvar dst:mvar src:reg;
 
 /* Load current closure's upvalue `src` to register `dst`. */
 luv dst:reg src:uv;
 
-/* Store register `src` to current closure's capture `dst`. */
+/* Store register `src` to current closure's upvalue `dst`. */
 suv dst:uv src:reg;
 
 /* Load index `idx` (register) from `target` (array or table) to register `dst`. */

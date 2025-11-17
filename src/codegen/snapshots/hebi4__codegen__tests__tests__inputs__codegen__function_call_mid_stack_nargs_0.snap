@@ -24,18 +24,20 @@ b
 OK
 .fn @main
   params 0
-  stack 5
+  stack 6
   .locals
-    a = r1
-    v = r2
-    b = r3
+    f = r1
+    a = r2
+    v = r3
+    b = r4
   .code
-  0  lsmi r1, 0
+  0  lclosure r1, l0   ; f, uv=0
   1  lsmi r2, 0
   2  lsmi r3, 0
-  3  call r4, fn1   ; fn1=f
-  4  mov r2, r4
-  5  retv r3
+  3  lsmi r4, 0
+  4  call r5, r1, 0   ; dyn
+  5  mov r3, r5
+  6  retv r4
 
 .fn f
   params 0

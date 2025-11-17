@@ -14,26 +14,28 @@ o[k()] += v
 OK
 .fn @main
   params 0
-  stack 6
+  stack 7
   .locals
     o = r1
-    v = r2
+    k = r2
+    v = r3
   .code
    0  ltable r1, 1
    1  lsmi r2, 0
    2  skeyc r1, "a", r2
-   3  lsmi r2, 1
-   4  call r3, fn1   ; fn1=k
-   5  call r5, fn1   ; fn1=k
-   6  lidx r4, r1, r5
-   7  add r4, r4, r2
-   8  sidx r1, r3, r4
-   9  call r3, fn1   ; fn1=k
-  10  lidx r4, r1, r3
-  11  add r4, r4, r2
-  12  sidx r1, r3, r4
-  13  lnil r0
-  14  ret
+   3  lclosure r2, l1   ; k, uv=0
+   4  lsmi r3, 1
+   5  call r4, r2, 0   ; dyn
+   6  call r6, r2, 0   ; dyn
+   7  lidx r5, r1, r6
+   8  add r5, r5, r3
+   9  sidx r1, r4, r5
+  10  call r4, r2, 0   ; dyn
+  11  lidx r5, r1, r4
+  12  add r5, r5, r3
+  13  sidx r1, r4, r5
+  14  lnil r0
+  15  ret
 
 .fn k
   params 0

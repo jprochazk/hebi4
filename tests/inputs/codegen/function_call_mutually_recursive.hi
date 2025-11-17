@@ -1,3 +1,4 @@
+//module
 // mutually recursive calls are fine because of lexical scoping:
 // functions are visible for the entire scope, even if they haven't
 // been emitted yet, which is why `a` can call `b` here.

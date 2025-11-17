@@ -1,0 +1,3 @@
+// local functions can call themselves
+fn f() { f() }
+

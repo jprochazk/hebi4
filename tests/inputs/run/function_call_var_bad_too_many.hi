@@ -1,3 +1,2 @@
 fn a() { "err" }
-let a = a
 a(0)

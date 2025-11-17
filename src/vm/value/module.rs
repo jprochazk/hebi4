@@ -321,6 +321,8 @@ fn canonicalize_function<'a>(
     let name = Str::new(heap, name, function.name());
 
     let name = name.as_ptr();
+    let nparams = function.arity();
+    let nstack = function.stack_size();
     let code = function.code().into();
     let literals = Box::new([]);
     let module = module.as_ptr();
@@ -332,8 +334,8 @@ fn canonicalize_function<'a>(
             heap.alloc_no_gc(|ptr| {
                 (*ptr).write(Function {
                     name,
-                    nparams: 0,
-                    nstack: 1,
+                    nparams,
+                    nstack,
                     code,
                     literals,
                     module,

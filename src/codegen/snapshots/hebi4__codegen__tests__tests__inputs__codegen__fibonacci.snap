@@ -15,26 +15,33 @@ fib(10)
 OK
 .fn @main
   params 0
-  stack 2
+  stack 4
+  .locals
+    fib = r1
   .code
-  0  lsmi r1, 10
-  1  call r0, fn1   ; fn1=fib
-  2  ret
+  0  lclosure r1, l0   ; fib, uv=1
+  1  lsmi r3, 10
+  2  call r2, r1, 1   ; dyn
+  3  retv r2
 
 .fn fib
   params 1
   stack 5
   .locals
     n = r1
+  .upvalues
+    fib = rec
   .code
    0  lsmi r2, 2
    1  islt r1, r2
    2  jmp 3   ; to 5
    3  mov r0, r1
-   4  jmp 6   ; to 10
-   5  sub r3, r1, 1
-   6  call r2, fn1   ; fn1=fib
-   7  sub r4, r1, 2
-   8  call r3, fn1   ; fn1=fib
-   9  add r0, r2, r3
-  10  ret
+   4  jmp 8   ; to 12
+   5  luv r2, u0
+   6  sub r3, r1, 1
+   7  call r2, r2, 1   ; dyn
+   8  luv r3, u0
+   9  sub r4, r1, 2
+  10  call r3, r3, 1   ; dyn
+  11  add r0, r2, r3
+  12  ret

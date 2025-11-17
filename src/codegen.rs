@@ -291,8 +291,8 @@ struct FunctionState<'a> {
     literals: Literals<'a>,
     loop_: Option<Loop<'a>>,
 
+    top_level: bool,
     upvalues: Vec<'a, Upvalue<'a>>,
-    allow_captures: bool,
 
     /// Tracking basic block boundaries
     in_block: bool,
@@ -875,7 +875,7 @@ impl BackwardLabel {
 }
 
 impl<'a> FunctionState<'a> {
-    fn new(options: EmitOptions, name: Cow<'a, str>, buf: &'a Bump, allow_captures: bool) -> Self {
+    fn new(options: EmitOptions, name: Cow<'a, str>, top_level: bool, buf: &'a Bump) -> Self {
         Self {
             options,
 
@@ -887,8 +887,8 @@ impl<'a> FunctionState<'a> {
             loop_: None,
             in_block: true,
 
+            top_level,
             upvalues: vec![in buf],
-            allow_captures,
 
             dbg: FunctionDebug {
                 spans: vec![in buf],
@@ -945,16 +945,10 @@ impl<'a> FunctionState<'a> {
         info: UpvalueDescriptor,
         span: Span,
     ) -> Result<Uv> {
-        if !self.allow_captures {
-            return error_span("functions can't capture variables from outer scope", span)
-                .with_help("use a closure instead: `let f = fn() {}`")
-                .into();
-        }
-
         debug_assert!(!self.upvalues.iter().any(|c| c.name == name));
 
         if self.upvalues.len() >= u8::MAX as usize {
-            return error_span(format!("too many captures, maximum is {}", u8::MAX), span).into();
+            return error_span(format!("too many upvalues, maximum is {}", u8::MAX), span).into();
         }
 
         let uv = unsafe { Uv::new_unchecked(self.upvalues.len() as u8) };
@@ -980,25 +974,34 @@ impl<'a> FunctionState<'a> {
         });
     }
 
-    fn resolve(&self, name: &str) -> Option<Symbol> {
+    fn resolve(&mut self, name: &'a str, span: Span) -> Result<Option<Symbol>> {
         for scope in self.scopes.iter().rev() {
             for var in scope.variables.iter().rev() {
                 if var.name() == name {
-                    return Some(var.symbol());
+                    return Ok(Some(var.symbol()));
                 }
             }
         }
 
-        for (idx, capture) in self.upvalues.iter().enumerate() {
-            if capture.name == name {
-                return Some(Symbol::Upvalue {
-                    span: capture.span,
+        for (idx, upvalue) in self.upvalues.iter().enumerate() {
+            if upvalue.name == name {
+                return Ok(Some(Symbol::Upvalue {
+                    span: upvalue.span,
                     idx: unsafe { Uv::new_unchecked(idx as u8) },
-                });
+                }));
             }
         }
 
-        None
+        // to support function recursion in inner scopes, we treat the function
+        // or closure itself as an upvalue:
+        if !self.top_level && name == self.name {
+            // next time around this will be picked up by `resolve` above,
+            // yielding the same upvalue
+            let id = self.declare_upvalue(name, UpvalueDescriptor::Rec, span)?;
+            return Ok(Some(Symbol::Upvalue { span, idx: id }));
+        }
+
+        Ok(None)
     }
 
     fn resolve_in_scope(&self, name: &str) -> Option<Symbol> {
@@ -1106,50 +1109,50 @@ impl<'a> State<'a> {
         }
     }
 
-    fn resolve(&mut self, name: &'a str) -> Result<Option<Symbol>> {
-        if let Some(symbol) = f!(self).resolve(name) {
+    fn resolve(&mut self, name: &'a str, span: Span) -> Result<Option<Symbol>> {
+        if let Some(symbol) = f!(self).resolve(name, span)? {
             return Ok(Some(symbol));
         }
 
         // Current function doesn't yet contain any local,
-        // capture, or function with that name.
+        // upvalue, or function with that name.
 
         // iterate in reverse over remaining functions,
         // skipping the current one
         for i in (0..self.func_stack.len()).rev().skip(1) {
-            let Some(symbol) = self.func_stack[i].resolve(name) else {
+            let Some(symbol) = self.func_stack[i].resolve(name, span)? else {
                 continue;
             };
 
             match symbol {
                 Symbol::Local { reg, span, .. } => {
                     // Found a variable in the enclosing scope.
-                    // Declare it as a capture in all functions up the stack,
+                    // Declare it as a upvalue in all functions up the stack,
                     // including current function:
                     let mut info = UpvalueDescriptor::Reg(reg);
                     let mut idx = None;
                     for i in i + 1..self.func_stack.len() {
-                        // This will fail if a function does not allow captures.
-                        let new_capture = self.func_stack[i].declare_upvalue(name, info, span)?;
-                        info = UpvalueDescriptor::Uv(new_capture);
-                        idx = Some(new_capture);
+                        // This will fail if a function does not allow upvalues.
+                        let new_upvalue = self.func_stack[i].declare_upvalue(name, info, span)?;
+                        info = UpvalueDescriptor::Uv(new_upvalue);
+                        idx = Some(new_upvalue);
                     }
 
-                    // Then return the capture index for the top-level function:
+                    // Then return the upvalue index for the top-level function:
                     let Some(idx) = idx else {
-                        unreachable!("ICE: failed to get top-level capture index");
+                        unreachable!("ICE: failed to get top-level upvalue index");
                     };
 
                     return Ok(Some(Symbol::Upvalue { span, idx }));
                 }
                 Symbol::Upvalue { idx, span, .. } => {
-                    // Found a capture in the enclosing scope.
-                    // Declare it as a capture in all functions up the stack,
+                    // Found a upvalue in the enclosing scope.
+                    // Declare it as a upvalue in all functions up the stack,
                     // including current function:
                     let mut info = UpvalueDescriptor::Uv(idx);
                     let mut idx = idx;
                     for i in i + 1..self.func_stack.len() {
-                        // This will fail if a function does not allow captures.
+                        // This will fail if a function does not allow upvalues.
                         idx = self.func_stack[i].declare_upvalue(name, info, span)?;
                         info = UpvalueDescriptor::Uv(idx);
                     }
@@ -1161,10 +1164,10 @@ impl<'a> State<'a> {
                     return Ok(Some(symbol));
                 }
                 Symbol::ModuleVar { span, idx } => {
-                    unreachable!("ICE: symbols should never resolve to module vars");
+                    unreachable!("ICE: locals should never resolve to module vars");
                 }
                 Symbol::HostFunction { arity, id } => {
-                    unreachable!("ICE: symbols should never resolve to host functions")
+                    unreachable!("ICE: locals should never resolve to host functions")
                 }
             }
         }
@@ -1184,6 +1187,27 @@ impl<'a> State<'a> {
         }
 
         Ok(None)
+    }
+
+    fn check_top_level_shadowing(&self, name: &str, span: Span) -> Result<()> {
+        if !self.is_top_level() {
+            return Ok(());
+        }
+
+        let Some(s) = self.resolve_in_scope(name) else {
+            return Ok(());
+        };
+
+        match s {
+            Symbol::Upvalue { .. } => unreachable!("ICE: upvalues in top-level code"),
+            Symbol::Local { .. } | Symbol::ModuleVar { .. } | Symbol::Function { .. } => {
+                return error_span("cannot shadow module variables", span).into();
+            }
+            Symbol::HostFunction { .. } => {
+                // shadowing host functions is OK
+                Ok(())
+            }
+        }
     }
 
     fn resolve_in_scope(&self, name: &str) -> Option<Symbol> {
@@ -1261,7 +1285,7 @@ fn emit_closure<'a>(
     param_spans: &'a [Span],
     body: NodeList<'a, Stmt>,
 ) -> Result<(FuncInfo, ClosureInfo)> {
-    let f = emit_func_inner(m, name, span, params, param_spans, body, true)?;
+    let f = emit_func_inner(m, name, span, params, param_spans, body)?;
 
     let func = FuncInfo::new(
         f.name.into_owned(),
@@ -1289,7 +1313,7 @@ fn emit_func<'a>(
     param_spans: &'a [Span],
     body: NodeList<'a, Stmt>,
 ) -> Result<FuncInfo> {
-    let f = emit_func_inner(m, name, span, params, param_spans, body, false)?;
+    let f = emit_func_inner(m, name, span, params, param_spans, body)?;
 
     Ok(FuncInfo::new(
         f.name.into_owned(),
@@ -1312,7 +1336,6 @@ fn emit_func_inner<'a>(
     params: NodeList<'a, Ident>,
     param_spans: &'a [Span],
     body: NodeList<'a, Stmt>,
-    allow_captures: bool,
 ) -> Result<FunctionState<'a>> {
     if params.len() > 100 {
         return error_span(
@@ -1322,7 +1345,8 @@ fn emit_func_inner<'a>(
         .into();
     }
 
-    let f = FunctionState::new(m.options.clone(), name, m.buf, allow_captures);
+    let top_level = m.is_top_level();
+    let f = FunctionState::new(m.options.clone(), name, top_level, m.buf);
     m.func_stack.push(f);
 
     {
@@ -1508,33 +1532,36 @@ fn eval_block<'a>(
 }
 
 fn emit_stmt_list<'a>(m: &mut State<'a>, list: NodeList<'a, Stmt>) -> Result<()> {
-    // 1. declare all functions in the stmt list
-    let mut undefined_functions = vec![in m.buf];
-    for stmt in list {
-        if let ast::StmtKind::FuncDecl(node) = stmt.kind() {
-            let id = m.declare_function(
-                node.name().get(),
-                node.params().len() as u8,
-                node.name_span(),
-            )?;
-            undefined_functions.push(id);
+    if m.is_top_level() {
+        // 1. declare all functions in the stmt list
+        let mut undefined_functions = vec![in m.buf];
+        for stmt in list.iter().rev() {
+            if let ast::StmtKind::FuncDecl(node) = stmt.kind() {
+                let id = m.declare_function(
+                    node.name().get(),
+                    node.params().len() as u8,
+                    node.name_span(),
+                )?;
+                undefined_functions.push(id);
+            }
         }
+
+        // undefined functions needs to be in reverse order of declaration
+        // undefined_functions.reverse();
+
+        f!(m)
+            .scopes
+            .last_mut()
+            .expect("some scope")
+            .undefined_functions = undefined_functions;
+
+        // 2. then process the stmt list
+        // as the stmt list is traversed, we come across `FuncDecl` again,
+        // at which point we _define_ the given function.
+        // to get its id, we `pop` from the `undefined_functions` list,
+        // because we are guaranteed to process them in the same order.
     }
 
-    // undefined functions needs to be in reverse order of declaration
-    undefined_functions.reverse();
-
-    f!(m)
-        .scopes
-        .last_mut()
-        .expect("some scope")
-        .undefined_functions = undefined_functions;
-
-    // 2. then process the stmt list
-    // as the stmt list is traversed, we come across `FuncDecl` again,
-    // at which point we _define_ the given function.
-    // to get its id, we `pop` from the `undefined_functions` list,
-    // because we are guaranteed to process them in the same order.
     for (i, stmt) in list.iter().enumerate() {
         let span = list.get_span(i).unwrap();
         emit_stmt(m, stmt, span)?;
@@ -1560,18 +1587,10 @@ fn emit_stmt<'a>(m: &mut State<'a>, stmt: Node<'a, Stmt>, span: Span) -> Result<
 }
 
 fn emit_stmt_var<'a>(m: &mut State<'a>, var: Node<'a, ast::Var>) -> Result<()> {
+    m.check_top_level_shadowing(var.name().get(), var.name_span())?;
+
     let dst = match m.resolve_in_scope(var.name().get()) {
         Some(Symbol::Local { reg, .. }) => Some(reg),
-        Some(Symbol::ModuleVar { .. }) => {
-            return error_span("cannot shadow module variables", var.name_span()).into();
-        }
-        Some(Symbol::Function { .. }) => {
-            if m.is_top_level() {
-                return error_span("cannot shadow module variables", var.name_span()).into();
-            } else {
-                None
-            }
-        }
         _ => None,
     };
 
@@ -1624,27 +1643,57 @@ fn emit_stmt_loop<'a>(m: &mut State<'a>, loop_: Node<'a, ast::Loop>) -> Result<(
 }
 
 fn emit_stmt_func<'a>(m: &mut State<'a>, func: Node<'a, ast::FuncDecl>) -> Result<()> {
-    let id = f!(m)
-        .scopes
-        .last_mut()
-        .expect("some scope")
-        .undefined_functions
-        .pop()
-        .expect("some function");
+    if m.is_top_level() {
+        // top-level: emit a function table entry
+        let id = f!(m)
+            .scopes
+            .last_mut()
+            .expect("some scope")
+            .undefined_functions
+            .pop()
+            .expect("some function");
 
-    let f = emit_func(
-        m,
-        id,
-        func.name().get().into(),
-        func.name_span(),
-        func.params(),
-        func.params_spans(),
-        func.body().body(),
-    )?;
+        let f = emit_func(
+            m,
+            id,
+            func.name().get().into(),
+            func.name_span(),
+            func.params(),
+            func.params_spans(),
+            func.body().body(),
+        )?;
 
-    m.define_function(id, f);
+        m.define_function(id, f);
 
-    Ok(())
+        Ok(())
+    } else {
+        // local: emit a closure in a local variable
+        let span = func.name_span();
+        let name = func.name().get();
+        let id = m.func_table.reserve(name, span)?;
+
+        let (func, closure) = emit_closure(
+            m,
+            id,
+            name.into(),
+            span,
+            func.params(),
+            func.params_spans(),
+            func.body().body(),
+        )?;
+
+        m.func_table.define(id, func);
+        let id = f!(m).literals.closure(closure, span)?;
+
+        match m.declare_local(name, span)? {
+            FreshVar::Reg(reg) => {
+                m.emit(asm::lclosure(reg, id), span);
+            }
+            FreshVar::Mvar(mvar) => unreachable!("ICE: stmt_func closure in mvar"),
+        }
+
+        Ok(())
+    }
 }
 
 enum Import<'a> {
@@ -2118,7 +2167,7 @@ fn eval_expr_func<'a>(
         format!("closure{{@{span}}}").into()
     };
 
-    // note: anonymous functions can't be referenced before
+    // note: function expressions can't be referenced before
     // they're fully defined, so we don't need to reserve
     // them ahead of time
     let id = m.func_table.reserve(name.clone(), span)?;
@@ -2150,7 +2199,7 @@ fn eval_expr_get_var<'a>(
 
     // variable must exist at this point
     match m
-        .resolve(get.name().get())?
+        .resolve(get.name().get(), get.name_span())?
         .ok_or_else(|| error_span("could not resolve name", span))?
     {
         Symbol::Local { reg, .. } => Ok(Value::dynamic(reg, span)),
@@ -2238,7 +2287,7 @@ fn eval_expr_set_var<'a>(
 
     // variable must exist at this point
     let id = match m
-        .resolve(set.base().name().get())?
+        .resolve(set.base().name().get(), set.base().name_span())?
         .ok_or_else(|| error_span("could not resolve name", set.base().name_span()))?
     {
         // when adding other symbols, remember to error out here,
@@ -2255,7 +2304,7 @@ fn eval_expr_set_var<'a>(
     // lhs is always a register, so we only evaluate rhs, and emit either `vv` or `vn`.
     let (vv, vn): (fn(Reg, Reg, Reg) -> Insn, fn(Reg, Reg, Lit8) -> Insn) = match *set.op() {
         ast::AssignOp::None => {
-            // emit the value, then optionally store it in capture/module var
+            // emit the value, then optionally store it in upvalue/module var
             let value = eval_expr_reuse(m, set.value(), set.value_span(), id.dst())?;
             match id {
                 Id::Reg(reg) => {
@@ -2276,7 +2325,7 @@ fn eval_expr_set_var<'a>(
         ast::AssignOp::Div => (asm::divvv, asm::divvn),
     };
 
-    // For arithmetic assign, first need to load the value from capture/module var.
+    // For arithmetic assign, first need to load the value from upvalue/module var.
     // If `id` is a register, this will do nothing.
     id.load(m, set.base().name_span())?;
 
@@ -2289,7 +2338,7 @@ fn eval_expr_set_var<'a>(
     };
     m.emit(insn, span);
 
-    // And optionally assign it back to its capture/module var:
+    // And optionally assign it back to its upvalue/module var:
     id.store(m, span);
 
     free_operand(m, value);
@@ -2556,7 +2605,8 @@ fn eval_expr_call<'a>(
     // maximum number of args is 100, so they always fit within `u8`
 
     let out = if let ast::ExprKind::GetVar(node) = call.callee().kind()
-        && let Some(Symbol::Function { arity, id, .. }) = m.resolve(node.name().get())?
+        && let Some(Symbol::Function { arity, id, .. }) =
+            m.resolve(node.name().get(), node.name_span())?
     {
         let (dst, args) = prepare_fast_call(m, call, dst, span, arity)?;
 
@@ -2566,7 +2616,8 @@ fn eval_expr_call<'a>(
 
         dst
     } else if let ast::ExprKind::GetVar(node) = call.callee().kind()
-        && let Some(Symbol::HostFunction { arity, id, .. }) = m.resolve(node.name().get())?
+        && let Some(Symbol::HostFunction { arity, id, .. }) =
+            m.resolve(node.name().get(), node.name_span())?
     {
         let (dst, args) = prepare_fast_call(m, call, dst, span, arity)?;
 

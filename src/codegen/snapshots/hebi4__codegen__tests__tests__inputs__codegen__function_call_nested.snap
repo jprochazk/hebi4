@@ -15,13 +15,16 @@ f(f(f(0)))
 OK
 .fn @main
   params 0
-  stack 4
+  stack 6
+  .locals
+    f = r1
   .code
-  0  lsmi r3, 0
-  1  call r2, fn1   ; fn1=f
-  2  call r1, fn1   ; fn1=f
-  3  call r0, fn1   ; fn1=f
-  4  ret
+  0  lclosure r1, l0   ; f, uv=0
+  1  lsmi r5, 0
+  2  call r4, r1, 1   ; dyn
+  3  call r3, r1, 1   ; dyn
+  4  call r2, r1, 1   ; dyn
+  5  retv r2
 
 .fn f
   params 1

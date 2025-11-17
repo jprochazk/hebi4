@@ -3,12 +3,11 @@ source: src/vm/tests.rs
 expression: snapshot
 ---
 SOURCE
-do {
+//module
 fn a() { b() }
 fn b() { 100 }
 
 a()
-}
 
 OK
 Int(100)

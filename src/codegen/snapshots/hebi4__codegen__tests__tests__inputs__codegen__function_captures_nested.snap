@@ -3,7 +3,8 @@ source: src/codegen/tests.rs
 expression: snapshot
 ---
 SOURCE
-do {
+//module
+
 fn a() {
   let v = 0
 
@@ -12,7 +13,6 @@ fn a() {
       v
     }
   }
-}
 }
 
 OK
@@ -31,26 +31,26 @@ OK
     b = r2
   .code
   0  lsmi r1, 0
-  1  lclosure r2, l0   ; closure{@42..80}, captures=1
+  1  lclosure r2, l0   ; closure{@47..85}, uv=1
   2  lnil r0
   3  ret
 
-.fn closure{@42..80}
+.fn closure{@47..85}
   params 0
   stack 2
   .locals
     c = r1
-  .captures
+  .upvalues
     v = r1
   .code
-  0  lclosure r1, l0   ; closure{@61..76}, captures=1
+  0  lclosure r1, l0   ; closure{@66..81}, uv=1
   1  lnil r0
   2  ret
 
-.fn closure{@61..76}
+.fn closure{@66..81}
   params 0
   stack 1
-  .captures
+  .upvalues
     v = u0
   .code
   0  luv r0, u0

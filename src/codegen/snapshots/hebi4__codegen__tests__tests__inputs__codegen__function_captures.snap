@@ -3,14 +3,14 @@ source: src/codegen/tests.rs
 expression: snapshot
 ---
 SOURCE
-do {
+//module
+
 fn a() {
   let v = 0
 
   let b = fn() {
     v
   }
-}
 }
 
 OK
@@ -29,14 +29,14 @@ OK
     b = r2
   .code
   0  lsmi r1, 0
-  1  lclosure r2, l0   ; closure{@42..53}, captures=1
+  1  lclosure r2, l0   ; closure{@47..58}, uv=1
   2  lnil r0
   3  ret
 
-.fn closure{@42..53}
+.fn closure{@47..58}
   params 0
   stack 1
-  .captures
+  .upvalues
     v = r1
   .code
   0  luv r0, u0

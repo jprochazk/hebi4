@@ -5,13 +5,12 @@ expression: snapshot
 SOURCE
 do {
 fn a() { "err" }
-let a = a
 a(0)
 }
 
 ERROR
 invalid number of arguments
-4 |  a(0)
+3 |  a(0)
   |  ^^^^
 
 
@@ -23,7 +22,7 @@ DISASM:
   .locals
     a = r1
   .code
-  0  lfunc r1, fn1   ; fn1=a
+  0  lclosure r1, l0   ; a, uv=0
   1  lsmi r3, 0
   2  call r2, r1, 1   ; dyn
   3  retv r2

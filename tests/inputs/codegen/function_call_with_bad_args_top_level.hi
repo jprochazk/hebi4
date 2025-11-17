@@ -1,3 +1,4 @@
+//module
 // the compiler can do some basic arity checking
 // in case the callee is a function declaration,
 // and it's clear syntactically:
@@ -10,3 +11,4 @@ fn f(a, b, c) { }
 // but it's useful so this will error at compile time:
 
 f(0)
+

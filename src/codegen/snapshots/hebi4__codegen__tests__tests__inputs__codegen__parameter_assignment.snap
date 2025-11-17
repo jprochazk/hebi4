@@ -17,14 +17,16 @@ v
 OK
 .fn @main
   params 0
-  stack 3
+  stack 4
   .locals
-    v = r1
+    f = r1
+    v = r2
   .code
-  0  lsmi r1, 0
-  1  mov r2, r1
-  2  call r1, fn1   ; fn1=f
-  3  retv r1
+  0  lclosure r1, l0   ; f, uv=0
+  1  lsmi r2, 0
+  2  mov r3, r2
+  3  call r2, r1, 1   ; dyn
+  4  retv r2
 
 .fn f
   params 1

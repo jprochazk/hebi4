@@ -42,10 +42,10 @@ impl<'a> std::fmt::Display for DisasmFuncWithSrc<'a> {
                 }
             }
 
-            if func.num_captures() > 0 {
-                writeln!(f, "  .captures")?;
-                for i in 0..func.num_captures() {
-                    let Upvalue { span, info } = func.capture_at(i);
+            if func.num_upvalues() > 0 {
+                writeln!(f, "  .upvalues")?;
+                for i in 0..func.num_upvalues() {
+                    let Upvalue { span, info } = func.upvalue_at(i);
                     let name = &src[span];
                     writeln!(f, "    {name} = {info}")?;
                 }
@@ -110,7 +110,7 @@ impl<'a> std::fmt::Display for DisasmFuncWithSrc<'a> {
                     let closure = func.literal(id.zx()).closure().unwrap();
                     writeln!(
                         f,
-                        "lclosure {dst}, {id}   ; {name}, captures={n}",
+                        "lclosure {dst}, {id}   ; {name}, uv={n}",
                         name = module.function_at(closure.func).name(),
                         n = closure.upvalues.len(),
                     )?
@@ -254,11 +254,11 @@ impl crate::module::FuncInfo {
         self.dbg().map(|dbg| dbg.locals[i]).unwrap()
     }
 
-    fn num_captures(&self) -> usize {
+    fn num_upvalues(&self) -> usize {
         self.dbg().map(|dbg| dbg.upvalues.len()).unwrap_or_default()
     }
 
-    fn capture_at(&self, i: usize) -> Upvalue {
+    fn upvalue_at(&self, i: usize) -> Upvalue {
         self.dbg().map(|dbg| dbg.upvalues[i]).unwrap()
     }
 

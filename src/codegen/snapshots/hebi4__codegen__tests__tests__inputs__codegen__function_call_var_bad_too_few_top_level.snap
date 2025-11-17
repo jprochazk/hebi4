@@ -1,0 +1,13 @@
+---
+source: src/codegen/tests.rs
+expression: snapshot
+---
+SOURCE
+//module
+fn a(a, b, c) { "err" }
+a(0, 1)
+
+ERROR
+invalid number of arguments, expected 3 but got 2
+3 |  a(0, 1)
+  |  ^^^^^^^

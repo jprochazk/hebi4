@@ -35,10 +35,12 @@ OK
 
 .fn outer
   params 0
-  stack 1
+  stack 2
+  .locals
+    inner = r1
   .code
-  0  lfunc r0, fn2   ; fn2=inner
-  1  ret
+  0  lclosure r1, l0   ; inner, uv=0
+  1  retv r1
 
 .fn inner
   params 0

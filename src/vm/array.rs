@@ -78,6 +78,15 @@ impl<T: Sized + Copy> DynStack<T> {
     }
 
     #[inline]
+    pub fn top(&mut self) -> Option<*mut T> {
+        if self.length == 0 {
+            return None;
+        }
+
+        Some(unsafe { self.top_unchecked() })
+    }
+
+    #[inline]
     pub fn len(&self) -> usize {
         self.length
     }

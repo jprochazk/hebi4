@@ -1,0 +1,10 @@
+//module
+fn main() {
+  fn outer() {
+    fn inner() {
+      // `outer` has a `rec` upvalue, which `inner` references:
+      outer
+    }
+  }
+}
+

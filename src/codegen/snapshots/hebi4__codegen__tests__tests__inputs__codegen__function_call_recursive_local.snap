@@ -1,0 +1,30 @@
+---
+source: src/codegen/tests.rs
+expression: snapshot
+---
+SOURCE
+do {
+// local functions can call themselves
+fn f() { f() }
+}
+
+OK
+.fn @main
+  params 0
+  stack 2
+  .locals
+    f = r1
+  .code
+  0  lclosure r1, l0   ; f, uv=1
+  1  lnil r0
+  2  ret
+
+.fn f
+  params 0
+  stack 1
+  .upvalues
+    f = rec
+  .code
+  0  luv r0, u0
+  1  call r0, r0, 0   ; dyn
+  2  ret

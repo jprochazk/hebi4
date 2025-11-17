@@ -1,0 +1,11 @@
+fn f() {}
+
+print(type_name(nil))
+print(type_name(true))
+print(type_name(1))
+print(type_name(1.0))
+print(type_name("test"))
+print(type_name({}))
+print(type_name([]))
+print(type_name(f))
+print(type_name(print))

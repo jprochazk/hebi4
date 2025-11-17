@@ -208,6 +208,8 @@ impl ClosureInfo {
 
 #[derive(Debug, Clone, Copy)]
 pub enum UpvalueDescriptor {
+    /// Recursive upvalue, refers to the closure itself
+    Rec,
     Reg(Reg),
     Uv(Uv),
 }
@@ -343,6 +345,7 @@ impl std::fmt::Display for Literal {
 impl std::fmt::Display for UpvalueDescriptor {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            UpvalueDescriptor::Rec => write!(f, "rec"),
             UpvalueDescriptor::Reg(reg) => write!(f, "{reg}"),
             UpvalueDescriptor::Uv(cap) => write!(f, "{cap}"),
         }

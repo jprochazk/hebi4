@@ -1,0 +1,18 @@
+---
+source: src/vm/tests.rs
+expression: snapshot
+---
+SOURCE
+do {
+fn f() {}
+
+print(type_name([]))
+print(type_name(f))
+}
+
+OK
+Nil
+
+STDOUT
+"List"
+"Closure"

@@ -3,5 +3,5 @@ fn f() {}
 let a = 0
 let b = 1
 
-// no args means `dst` can be used without a `mov`
+// even without args, `mov` must still be emitted
 a = f()

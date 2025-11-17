@@ -12,10 +12,15 @@ fn b() {}
 OK
 .fn @main
   params 0
-  stack 1
+  stack 3
+  .locals
+    a = r1
+    b = r2
   .code
-  0  lnil r0
-  1  ret
+  0  lclosure r1, l0   ; a, uv=0
+  1  lclosure r2, l1   ; b, uv=0
+  2  lnil r0
+  3  ret
 
 .fn a
   params 0

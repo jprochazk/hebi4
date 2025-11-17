@@ -338,16 +338,16 @@ impl Vm {
     }
 
     #[inline]
-    unsafe fn current_captures(self) -> Upvalues {
-        let captures = (*self.0.as_ptr()).current_captures;
-        debug_assert!(captures.is_some());
-        captures.unwrap_unchecked()
+    unsafe fn current_upvalues(self) -> Upvalues {
+        let upvalues = (*self.0.as_ptr()).current_upvalues;
+        debug_assert!(upvalues.is_some());
+        upvalues.unwrap_unchecked()
     }
 
     #[inline]
-    unsafe fn set_current_captures_for(self, f: GcPtr<Closure>) {
-        let captures = NonNull::new_unchecked(f.as_mut().captures.as_mut_ptr());
-        (*self.0.as_ptr()).current_captures = Some(Upvalues(captures));
+    unsafe fn set_current_upvalues_for(self, f: GcPtr<Closure>) {
+        let upvalues = NonNull::new_unchecked(f.as_mut().upvalues.as_mut_ptr());
+        (*self.0.as_ptr()).current_upvalues = Some(Upvalues(upvalues));
     }
 
     #[inline]
@@ -408,6 +408,7 @@ impl Vm {
     }
 
     #[inline]
+    #[cfg_attr(debug_assertions, track_caller)]
     unsafe fn maybe_gc(self) {
         // TODO: GC thresholds
         // for now, we always GC
@@ -416,6 +417,7 @@ impl Vm {
     }
 
     #[cold]
+    #[cfg_attr(debug_assertions, track_caller)]
     unsafe fn full_gc(self) {
         let heap = &raw mut (*self.0.as_ptr()).heap;
         let roots = VmRoots { state: self.0 };
@@ -698,14 +700,14 @@ unsafe fn smvar(vm: Vm, jt: Jt, ip: Ip, args: Smvar, sp: Sp, lp: Lp) -> Control 
 
 #[inline(always)]
 unsafe fn luv(vm: Vm, jt: Jt, ip: Ip, args: Luv, sp: Sp, lp: Lp) -> Control {
-    *sp.at(args.dst()) = *vm.current_captures().at(args.src());
+    *sp.at(args.dst()) = *vm.current_upvalues().at(args.src());
 
     dispatch_next(vm, jt, ip, sp, lp)
 }
 
 #[inline(always)]
 unsafe fn suv(vm: Vm, jt: Jt, ip: Ip, args: Suv, sp: Sp, lp: Lp) -> Control {
-    *vm.current_captures().at(args.dst()) = *sp.at(args.src());
+    *vm.current_upvalues().at(args.dst()) = *sp.at(args.src());
 
     dispatch_next(vm, jt, ip, sp, lp)
 }
@@ -992,30 +994,29 @@ unsafe fn lfalse(vm: Vm, jt: Jt, ip: Ip, args: Lfalse, sp: Sp, lp: Lp) -> Contro
 
 #[inline(always)]
 unsafe fn lclosure(vm: Vm, jt: Jt, ip: Ip, args: Lclosure, sp: Sp, lp: Lp) -> Control {
-    let dst = sp.at(args.dst());
-    let closure = lp.closure_unchecked(args.id());
+    vm.maybe_gc();
 
-    let captures = init_captures(closure, vm, sp);
+    let dst = sp.at(args.dst());
+    let proto = lp.closure_unchecked(args.id());
+
     let heap = vm.heap();
-    let closure = Closure::alloc(&*heap, closure, captures);
+    let closure = Closure::alloc(&*heap, proto);
+
+    {
+        let nuv = proto.as_ref().upvalues.len();
+        for i in 0..nuv {
+            let value = match *proto.as_ref().upvalues.get_unchecked(i) {
+                UpvalueDescriptor::Rec => ValueRaw::Object(closure.as_any()),
+                UpvalueDescriptor::Reg(reg) => *sp.at(reg),
+                UpvalueDescriptor::Uv(uv) => *vm.current_upvalues().at(uv),
+            };
+            *closure.as_mut().upvalues.get_unchecked_mut(i) = value;
+        }
+    }
 
     *dst = ValueRaw::Object(closure.as_any());
 
     dispatch_next(vm, jt, ip, sp, lp)
-}
-
-unsafe fn init_captures(closure: GcPtr<ClosureProto>, vm: Vm, sp: Sp) -> Box<[ValueRaw]> {
-    let closure = closure.as_ref();
-    let ncaptures = closure.capture_info.len();
-    let mut captures = Box::new_uninit_slice(ncaptures);
-    for i in 0..ncaptures {
-        let value = match *closure.capture_info.get_unchecked(i) {
-            UpvalueDescriptor::Reg(reg) => *sp.at(reg),
-            UpvalueDescriptor::Uv(uv) => *vm.current_captures().at(uv),
-        };
-        captures.get_unchecked_mut(i).write(value);
-    }
-    captures.assume_init()
 }
 
 #[inline(always)]
@@ -1904,7 +1905,7 @@ unsafe fn do_call(callee: GcPtr<Function>, ret: Reg, ip: Ip, vm: Vm) -> (Sp, Lp,
 
 #[inline(always)]
 unsafe fn do_closure_call(callee: GcPtr<Closure>, ret: Reg, ip: Ip, vm: Vm) -> (Sp, Lp, Ip) {
-    vm.set_current_captures_for(callee);
+    vm.set_current_upvalues_for(callee);
 
     do_call(callee.as_ref().func, ret, ip, vm)
 }
@@ -2033,7 +2034,7 @@ pub(crate) struct VmState {
     /// NOTE: This is always `Some` while the VM is executing
     current_module: Option<GcPtr<ModuleProto>>,
 
-    current_captures: Option<Upvalues>,
+    current_upvalues: Option<Upvalues>,
 
     /// Saved error.
     ///
@@ -2064,7 +2065,7 @@ impl Hebi {
                 frames: DynStack::new(STACK_DEPTH),
 
                 current_module: None,
-                current_captures: None,
+                current_upvalues: None,
 
                 error: None,
                 saved_ip: None,
@@ -2128,7 +2129,7 @@ impl gc::ExternalRoots for VmRoots {
                 stack,
                 frames,
                 current_module,
-                current_captures,
+                current_upvalues,
                 error,
                 saved_ip,
             } = todo!();
@@ -2140,22 +2141,42 @@ impl gc::ExternalRoots for VmRoots {
             };
         }
 
-        // note: call frame stack itself is not traced despite storing `Gc<FunctionProto>`,
-        // because every function is also traced through the module registry.
+        debug_print!(
+            "trace vm roots (nframes={}, nstack={})",
+            this!().frames.len(),
+            this!()
+                .frames
+                .top()
+                .map(|f| 1 + ((*f).stack_base as usize) + (*f).callee.as_ref().stack_size())
+                .unwrap_or_default()
+        );
 
-        // iterate over VM stack
-        let frames = &this!().frames;
-        let sp = this!().stack.offset(0);
+        // call stack (holds functions)
         for frame in this!().frames.iter() {
-            let base = frame.stack_base as usize;
-            let nstack = frame.callee.as_ref().stack_size();
-            for i in base..base + nstack {
+            tracer.visit(frame.callee);
+        }
+
+        // value stack (registers)
+        let frames = &mut this!().frames;
+        let sp = this!().stack.offset(0);
+        if let Some(frame) = frames.top() {
+            let base = (*frame).stack_base as usize;
+            let nstack = (*frame).callee.as_ref().stack_size();
+            let stack_len = base + nstack;
+
+            debug_print!("stack len: {stack_len}");
+            for i in 0..stack_len {
+                debug_print!("stack[{i}]");
                 tracer.visit_value(sp.add(i).read());
             }
+            debug_print!("stack end");
         }
 
         // modules
         this!().registry.trace(tracer);
+        if let Some(m) = this!().current_module {
+            tracer.visit(m);
+        }
 
         // core lib
         this!().core.trace(tracer);

@@ -1,5 +1,15 @@
 //! Garbage collector
 
+macro_rules! debug_print {
+    ($($tt:tt)*) => {{
+        #[cfg(debug_assertions)]
+        if std::env::var("PRINT_GC").is_ok() {
+            eprint!("GC: ");
+            eprintln!($($tt)*);
+        }
+    }};
+}
+
 use std::{
     cell::{Cell, UnsafeCell},
     marker::{PhantomData, PhantomPinned},
@@ -86,6 +96,13 @@ impl Heap {
         // CAST: `GcBox` is a `repr(C)` struct with `GcHeader` as its first field
         self.head.set(Some(ptr.cast::<GcHeader>()));
 
+        debug_print!(
+            "alloc {} bytes at {:016x} ({})",
+            core::mem::size_of::<T>(),
+            ptr.addr(),
+            T::vtable().type_name
+        );
+
         self.stats.on_alloc(core::mem::size_of::<T>());
 
         GcPtr { ptr }
@@ -109,10 +126,15 @@ impl Heap {
     /// Together with the heap's own stack roots, the given `external_roots`
     /// are also traced to find live objects.
     #[inline]
+    #[cfg_attr(debug_assertions, track_caller)]
     pub(crate) unsafe fn collect_with_external_roots(
         this: *mut Heap,
         external_roots: impl ExternalRoots,
     ) {
+        debug_print!(
+            "collect with external roots at {}",
+            std::panic::Location::caller()
+        );
         mark_and_sweep::collect(this, external_roots);
     }
 
@@ -738,8 +760,15 @@ impl Tracer {
     /// Visit an interior pointer.
     #[inline]
     pub(crate) fn visit<T: Trace>(&self, ptr: GcPtr<T>) {
+        debug_print!(
+            "visit {:016x} ({})",
+            unsafe { ptr.into_raw().as_ptr().addr() },
+            T::vtable().type_name
+        );
+
         unsafe {
             if ptr.is_marked() {
+                debug_print!("cycle");
                 return; // cycle
             }
             ptr.set_mark(true);
@@ -749,8 +778,15 @@ impl Tracer {
 
     #[inline]
     pub(crate) fn visit_any(&self, ptr: GcAnyPtr) {
+        debug_print!(
+            "visit {:016x} ({} as any)",
+            unsafe { ptr.into_raw().as_ptr().addr() },
+            unsafe { ptr.type_name() }
+        );
+
         unsafe {
             if ptr.is_marked() {
+                debug_print!("cycle");
                 return; // cycle
             }
             ptr.set_mark(true);
@@ -763,7 +799,9 @@ impl Tracer {
     pub(crate) fn visit_value(&self, value: ValueRaw) {
         match value {
             ValueRaw::Object(ptr) => self.visit_any(ptr),
-            ValueRaw::Nil | ValueRaw::Bool(_) | ValueRaw::Int(_) | ValueRaw::Float(_) => {}
+            ValueRaw::Nil | ValueRaw::Bool(_) | ValueRaw::Int(_) | ValueRaw::Float(_) => {
+                debug_print!("visit value ({})", unsafe { value.type_name() });
+            }
         }
     }
 }

@@ -1,0 +1,23 @@
+---
+source: src/vm/tests.rs
+expression: snapshot
+---
+SOURCE
+//module
+fn main() {
+  fn outer() {
+    fn inner() {
+      // `outer` has a `rec` upvalue, which `inner` references:
+      outer
+    }
+
+    inner()
+  }
+
+  outer()
+}
+
+main()
+
+OK
+Closure { name: "outer", .. }

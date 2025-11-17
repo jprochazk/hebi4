@@ -1,3 +1,5 @@
+//module
+
 fn a() {
   let v = 0
 

@@ -1,0 +1,5 @@
+//module
+// being able to declare multiple functions is kinda important
+fn a() {}
+fn b() {}
+

@@ -3,11 +3,10 @@ source: src/codegen/tests.rs
 expression: snapshot
 ---
 SOURCE
-do {
+//module
 // functions can statically call themselves,
 // as they are declared _before_ they are emitted.
 fn f() { f() }
-}
 
 OK
 .fn @main

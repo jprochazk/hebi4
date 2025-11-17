@@ -1,0 +1,20 @@
+//module
+fn main() {
+  fn outer() {
+    fn nested() {
+      fn inner() {
+        // `outer` has a `rec` upvalue, which `inner` references,
+        // which should work at arbitrary depth:
+        outer
+      }
+
+      inner()
+    }
+
+    nested()
+  }
+
+  outer()
+}
+
+main()

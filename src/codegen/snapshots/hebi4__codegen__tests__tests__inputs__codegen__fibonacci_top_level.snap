@@ -1,0 +1,39 @@
+---
+source: src/codegen/tests.rs
+expression: snapshot
+---
+SOURCE
+//module
+fn fib(n) {
+  if n<2 { n }
+  else { fib(n-1)+fib(n-2) }
+}
+
+fib(10)
+
+OK
+.fn @main
+  params 0
+  stack 2
+  .code
+  0  lsmi r1, 10
+  1  call r0, fn1   ; fn1=fib
+  2  ret
+
+.fn fib
+  params 1
+  stack 5
+  .locals
+    n = r1
+  .code
+   0  lsmi r2, 2
+   1  islt r1, r2
+   2  jmp 3   ; to 5
+   3  mov r0, r1
+   4  jmp 6   ; to 10
+   5  sub r3, r1, 1
+   6  call r2, fn1   ; fn1=fib
+   7  sub r4, r1, 2
+   8  call r3, fn1   ; fn1=fib
+   9  add r0, r2, r3
+  10  ret

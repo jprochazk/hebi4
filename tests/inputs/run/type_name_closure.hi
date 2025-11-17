@@ -1,0 +1,4 @@
+fn f() {}
+
+print(type_name([]))
+print(type_name(f))

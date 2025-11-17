@@ -9,7 +9,7 @@ use crate::{
 
 pub struct ClosureProto {
     pub(crate) func: GcPtr<Function>,
-    pub(crate) capture_info: Box<[UpvalueDescriptor]>,
+    pub(crate) upvalues: Box<[UpvalueDescriptor]>,
 }
 
 impl ClosureProto {
@@ -17,12 +17,12 @@ impl ClosureProto {
     pub fn alloc(
         heap: &Heap,
         func: GcPtr<Function>,
-        capture_info: &[module::UpvalueDescriptor],
+        upvalues: &[module::UpvalueDescriptor],
     ) -> GcPtr<Self> {
-        let capture_info = capture_info.into();
+        let upvalues = upvalues.into();
 
         heap.alloc_no_gc(|ptr| unsafe {
-            (*ptr).write(Self { func, capture_info });
+            (*ptr).write(Self { func, upvalues });
         })
     }
 }
@@ -43,22 +43,25 @@ impl std::fmt::Debug for GcRef<'_, ClosureProto> {
 
 pub struct Closure {
     pub(crate) func: GcPtr<Function>,
-    pub(crate) captures: Box<[ValueRaw]>,
+    pub(crate) upvalues: Box<[ValueRaw]>,
 }
 
 impl Closure {
     #[inline(never)]
-    pub fn alloc(
-        heap: &Heap,
-        proto: GcPtr<ClosureProto>,
-        captures: Box<[ValueRaw]>,
-    ) -> GcPtr<Self> {
-        debug_assert!(unsafe { proto.as_ref().capture_info.len() == captures.len() });
+    pub fn alloc(heap: &Heap, proto: GcPtr<ClosureProto>) -> GcPtr<Self> {
+        let upvalues =
+            vec![ValueRaw::Nil; unsafe { proto.as_ref().upvalues.len() }].into_boxed_slice();
 
         heap.alloc_no_gc(|ptr| unsafe {
             let func = proto.as_ref().func;
-            (*ptr).write(Self { func, captures });
+            (*ptr).write(Self { func, upvalues });
         })
+    }
+}
+
+impl<'a> GcRef<'a, Closure> {
+    pub fn func(&self) -> GcRef<'a, Function> {
+        GcRef::map(self, |this| &this.func)
     }
 }
 
@@ -68,14 +71,16 @@ unsafe impl Trace for Closure {
     #[inline]
     unsafe fn trace(&self, tracer: &Tracer) {
         tracer.visit(self.func);
-        for capture in &self.captures {
-            tracer.visit_value(*capture);
+        for uv in &self.upvalues {
+            tracer.visit_value(*uv);
         }
     }
 }
 
 impl std::fmt::Debug for GcRef<'_, Closure> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Closure").finish_non_exhaustive()
+        f.debug_struct("Closure")
+            .field("name", &self.func().name())
+            .finish_non_exhaustive()
     }
 }

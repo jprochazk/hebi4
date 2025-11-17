@@ -24,23 +24,25 @@ if a == 0 and b == 1 { "ok" } else { "err" }
 OK
 .fn @main
   params 0
-  stack 4
+  stack 5
   .locals
-    c = r1
-    a = r2
-    b = r3
+    counter = r1
+    c = r2
+    a = r3
+    b = r4
   .code
-   0  call r1, fn1   ; fn1=counter
+   0  lclosure r1, l0   ; counter, uv=0
    1  call r2, r1, 0   ; dyn
-   2  call r3, r1, 0   ; dyn
-   3  iseqi r2, 0
-   4  jmp 5   ; to 9
-   5  iseqi r3, 1
-   6  jmp 3   ; to 9
-   7  lstr r0, "ok"
-   8  jmp 2   ; to 10
-   9  lstr r0, "err"
-  10  ret
+   2  call r3, r2, 0   ; dyn
+   3  call r4, r2, 0   ; dyn
+   4  iseqi r3, 0
+   5  jmp 5   ; to 10
+   6  iseqi r4, 1
+   7  jmp 3   ; to 10
+   8  lstr r0, "ok"
+   9  jmp 2   ; to 11
+  10  lstr r0, "err"
+  11  ret
 
 .fn counter
   params 0
@@ -49,7 +51,7 @@ OK
     n = r1
   .code
   0  lsmi r1, 0
-  1  lclosure r0, l0   ; closure{@48..84}, captures=1
+  1  lclosure r0, l0   ; closure{@48..84}, uv=1
   2  ret
 
 .fn closure{@48..84}
@@ -57,7 +59,7 @@ OK
   stack 3
   .locals
     v = r1
-  .captures
+  .upvalues
     n = r1
   .code
   0  luv r1, u0

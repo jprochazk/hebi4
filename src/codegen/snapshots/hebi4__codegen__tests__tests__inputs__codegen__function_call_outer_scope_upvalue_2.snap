@@ -1,0 +1,68 @@
+---
+source: src/codegen/tests.rs
+expression: snapshot
+---
+SOURCE
+//module
+fn main() {
+  fn outer() {
+    fn nested() {
+      fn inner() {
+        // `outer` has a `rec` upvalue, which `inner` references,
+        // which should work at arbitrary depth:
+        outer
+      }
+    }
+  }
+}
+
+OK
+.fn @main
+  params 0
+  stack 1
+  .code
+  0  lnil r0
+  1  ret
+
+.fn main
+  params 0
+  stack 2
+  .locals
+    outer = r1
+  .code
+  0  lclosure r1, l0   ; outer, uv=1
+  1  lnil r0
+  2  ret
+
+.fn outer
+  params 0
+  stack 2
+  .locals
+    nested = r1
+  .upvalues
+    outer = rec
+  .code
+  0  lclosure r1, l0   ; nested, uv=1
+  1  lnil r0
+  2  ret
+
+.fn nested
+  params 0
+  stack 2
+  .locals
+    inner = r1
+  .upvalues
+    outer = u0
+  .code
+  0  lclosure r1, l0   ; inner, uv=1
+  1  lnil r0
+  2  ret
+
+.fn inner
+  params 0
+  stack 1
+  .upvalues
+    outer = u0
+  .code
+  0  luv r0, u0
+  1  ret

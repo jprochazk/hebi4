@@ -3,7 +3,8 @@ source: src/vm/tests.rs
 expression: snapshot
 ---
 SOURCE
-do {
+//module
+
 fn a(f) {
   f()
 }
@@ -13,7 +14,6 @@ fn b() {
 }
 
 a(b)
-}
 
 OK
 "ok"

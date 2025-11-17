@@ -3,13 +3,12 @@ source: src/codegen/tests.rs
 expression: snapshot
 ---
 SOURCE
-do {
+//module
 // mutually recursive calls are fine because of lexical scoping:
 // functions are visible for the entire scope, even if they haven't
 // been emitted yet, which is why `a` can call `b` here.
 fn a() { b() }
 fn b() { a() }
-}
 
 OK
 .fn @main
@@ -19,16 +18,16 @@ OK
   0  lnil r0
   1  ret
 
-.fn a
-  params 0
-  stack 1
-  .code
-  0  call r0, fn2   ; fn2=b
-  1  ret
-
 .fn b
   params 0
   stack 1
   .code
-  0  call r0, fn1   ; fn1=a
+  0  call r0, fn2   ; fn2=a
+  1  ret
+
+.fn a
+  params 0
+  stack 1
+  .code
+  0  call r0, fn1   ; fn1=b
   1  ret

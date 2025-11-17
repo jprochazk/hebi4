@@ -18,11 +18,16 @@ a(b)
 OK
 .fn @main
   params 0
-  stack 2
+  stack 5
+  .locals
+    a = r1
+    b = r2
   .code
-  0  lfunc r1, fn2   ; fn2=b
-  1  call r0, fn1   ; fn1=a
-  2  ret
+  0  lclosure r1, l0   ; a, uv=0
+  1  lclosure r2, l1   ; b, uv=0
+  2  mov r4, r2
+  3  call r3, r1, 1   ; dyn
+  4  retv r3
 
 .fn a
   params 1

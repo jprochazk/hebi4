@@ -1,0 +1,4 @@
+//module
+fn a() { "err" }
+a(0)
+

@@ -1,0 +1,43 @@
+---
+source: src/vm/tests.rs
+expression: snapshot
+---
+SOURCE
+do {
+// the compiler can do some basic arity checking
+// in case the callee is a function declaration,
+// but not for local functions:
+
+fn f(a, b, c) { }
+f(0) // will blow up at runtime
+}
+
+ERROR
+invalid number of arguments
+7 |  f(0) // will blow up at runtime
+  |  ^^^^
+
+
+DISASM:
+
+.fn @main
+  params 0
+  stack 4
+  .locals
+    f = r1
+  .code
+  0  lclosure r1, l0   ; f, uv=0
+  1  lsmi r3, 0
+  2  call r2, r1, 1   ; dyn
+  3  retv r2
+
+.fn f
+  params 3
+  stack 4
+  .locals
+    a = r1
+    b = r2
+    c = r3
+  .code
+  0  lnil r0
+  1  ret

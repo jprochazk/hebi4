@@ -12,10 +12,13 @@ f()
 OK
 .fn @main
   params 0
-  stack 1
+  stack 3
+  .locals
+    f = r1
   .code
-  0  call r0, fn1   ; fn1=f
-  1  ret
+  0  lclosure r1, l0   ; f, uv=0
+  1  call r2, r1, 0   ; dyn
+  2  retv r2
 
 .fn f
   params 0
