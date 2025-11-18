@@ -185,10 +185,12 @@ macro_rules! all_the_tuples {
     };
 }
 
+pub struct WithContext;
+
 macro_rules! impl_native_function_callback {
     ($count:literal, $($T:ident),*) => {
         #[allow(non_snake_case)]
-        unsafe impl<'cx, Func, R, $($T,)*> NativeFunctionCallback<'cx, (R, $($T,)*)> for Func
+        unsafe impl<'cx, Func, R, $($T,)*> NativeFunctionCallback<'cx, (WithContext, R, $($T,)*)> for Func
         where
             Func: Fn(Context<'cx>, $($T,)*) -> R,
             R: IntoHebiResultRaw + 'cx,
@@ -207,6 +209,28 @@ macro_rules! impl_native_function_callback {
                     let cx = cx.private_clone();
                     (self)(cx, $($T,)*)
                 };
+
+                <R as IntoHebiResultRaw>::into_hebi_result_raw(result, &mut cx)
+            }
+        }
+
+        #[allow(non_snake_case)]
+        unsafe impl<'cx, Func, R, $($T,)*> NativeFunctionCallback<'cx, (R, $($T,)*)> for Func
+        where
+            Func: Fn($($T,)*) -> R,
+            R: IntoHebiResultRaw + 'cx,
+            $($T: TryFromHebiValueRaw<'cx> + 'cx,)*
+        {
+            const ARITY: u8 = $count;
+
+            unsafe fn call(&self, mut cx: Context<'cx>) -> Result<ValueRaw> {
+                let [$($T,)*] = cx.args()?;
+                // SAFETY: rooted on the stack
+                let ($($T,)*) = (
+                    $(<$T as TryFromHebiValueRaw>::try_from_hebi_value_raw(&cx, $T)?,)*
+                );
+
+                let result = (self)($($T,)*);
 
                 <R as IntoHebiResultRaw>::into_hebi_result_raw(result, &mut cx)
             }

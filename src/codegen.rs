@@ -1805,7 +1805,6 @@ fn eval_expr_return<'a>(
 ) -> Result<Value<'a>> {
     let dst = R0;
 
-    // TODO(opt): `ret src` instruction
     if let Some(value) = node.value().as_option() {
         let value = eval_expr_reuse(m, value, node.value_span(), dst)?;
         let value = value_to_reg_reuse(m, value, dst)?;

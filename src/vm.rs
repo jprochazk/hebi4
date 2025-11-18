@@ -1918,6 +1918,7 @@ unsafe fn do_call(callee: GcPtr<Function>, ret: Reg, ip: Ip, vm: Vm) -> (Sp, Lp,
     (sp, lp, ip)
 }
 
+/// Exactly like `do_call`, but also sets upvalue ptr.
 #[inline(always)]
 unsafe fn do_closure_call(callee: GcPtr<Closure>, ret: Reg, ip: Ip, vm: Vm) -> (Sp, Lp, Ip) {
     vm.set_current_upvalues_for(callee);
@@ -1925,6 +1926,9 @@ unsafe fn do_closure_call(callee: GcPtr<Closure>, ret: Reg, ip: Ip, vm: Vm) -> (
     do_call(callee.as_ref().func, ret, ip, vm)
 }
 
+/// Call a host function.
+///
+/// This uses the native stack for the host function, which it invokes by function ptr.
 #[inline(always)]
 unsafe fn do_host_call(
     callee: GcPtr<HostFunction>,
@@ -1956,6 +1960,7 @@ unsafe fn do_host_call(
     }
 }
 
+/// If the stack does not have enough space, grow it.
 #[inline(always)]
 unsafe fn maybe_grow_stack(vm: Vm, stack_base: usize, frame_size: usize) -> Sp {
     if !vm.has_enough_stack_space(stack_base, frame_size) {
@@ -1971,6 +1976,7 @@ unsafe fn grow_stack(vm: Vm, frame_size: usize) {
     vm.grow_stack(frame_size);
 }
 
+/// Returning from a call requires
 #[inline(always)]
 unsafe fn return_from_call(vm: Vm) -> (Sp, Lp, Ip) {
     // Only called from `ret`, meaning we are guaranteed to have

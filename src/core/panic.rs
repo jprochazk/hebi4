@@ -1,5 +1,5 @@
 use crate::prelude::*;
 
-pub fn panic(_cx: Context<'_>) -> HebiResult<()> {
+pub fn panic() -> HebiResult<()> {
     Err(error("explicit panic"))
 }

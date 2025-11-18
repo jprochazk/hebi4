@@ -42,12 +42,20 @@ pub fn parse_float(cx: Context, v: Param<Str>) -> HebiResult<f64> {
         .map_err(|err| error(err.to_string()))
 }
 
-pub fn to_int(_cx: Context, v: f64) -> i64 {
-    v as i64
+pub fn to_int(v: Value) -> HebiResult<i64> {
+    match v {
+        Value::Int(v) => Ok(v),
+        Value::Float(v) => Ok(v as i64),
+        _ => error("cannot convert value to int").into(),
+    }
 }
 
-pub fn to_float(_cx: Context, v: i64) -> f64 {
-    v as f64
+pub fn to_float(v: Value) -> HebiResult<f64> {
+    match v {
+        Value::Int(v) => Ok(v as f64),
+        Value::Float(v) => Ok(v),
+        _ => error("cannot convert value to int").into(),
+    }
 }
 
 pub fn type_name<'a>(cx: Context<'a>, v: Value<'a>) -> &'static str {
