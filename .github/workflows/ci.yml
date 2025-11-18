@@ -19,13 +19,6 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
 
-      - name: Cache xtask binary
-        id: cache-xtask
-        uses: actions/cache@v4
-        with:
-          path: target/release/xtask
-          key: xtask-${{ hashFiles('xtask/**/*.rs', 'xtask/**/Cargo.toml', 'Cargo.lock') }}
-
       - uses: Swatinem/rust-cache@v2
         if: steps.cache-xtask.outputs.cache-hit != 'true'
         with:
@@ -34,6 +27,13 @@ jobs:
       - name: Build xtask
         if: steps.cache-xtask.outputs.cache-hit != 'true'
         run: cargo build --release -p xtask
+
+      - name: Save xtask binary
+        id: cache-xtask
+        uses: actions/cache/save@v4
+        with:
+          path: target/release/xtask
+          key: xtask-${{ hashFiles('xtask/**/*.rs', 'xtask/**/Cargo.toml', 'Cargo.lock') }}
 
       - name: Generate CI matrix
         id: matrix
