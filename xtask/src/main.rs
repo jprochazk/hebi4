@@ -50,6 +50,9 @@ fn playground() {
 
 fn test(args: &[String]) {
     cargo("nextest run --all-features").with_args(args).run();
+    cargo("nextest run --no-default-features")
+        .with_args(args)
+        .run();
 }
 
 fn clippy() {

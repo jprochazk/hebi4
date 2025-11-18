@@ -132,15 +132,16 @@ fn compile_string(code: &str, opts: EmitOptions) -> Module {
 fn eval_string(code: &str, opts: EmitOptions) {
     let module = compile_string(code, opts);
 
-    Hebi::new().with(|mut vm| {
-        let loaded_module = vm.load(&module);
-        match vm.run(&loaded_module) {
-            Ok(v) => BufferedStdout::with(|o| {
-                writeln!(o, "{:?}", unsafe { v.as_ref() }).unwrap();
-            }),
-            Err(err) => {
-                bail!("{}", err.render(&code).to_string());
-            }
+    let mut vm = Hebi::new();
+    let mut vm = vm.enter();
+
+    let loaded_module = vm.load(&module);
+    match vm.run(&loaded_module) {
+        Ok(v) => BufferedStdout::with(|o| {
+            writeln!(o, "{:?}", unsafe { v.as_ref() }).unwrap();
+        }),
+        Err(err) => {
+            bail!("{}", err.render(&code).to_string());
         }
-    });
+    }
 }

@@ -2102,35 +2102,34 @@ impl Hebi {
     }
 
     #[inline(always)]
-    pub fn with<F>(&mut self, f: F)
-    where
-        F: for<'gc> FnOnce(Runtime<'gc>),
-    {
-        thread_local! {
-            static ENTERED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
-        }
-
-        struct VmGuard {}
-
-        impl VmGuard {
-            fn new() -> Self {
-                assert!(!ENTERED.get(), "Only one VM may be active per thread");
-                ENTERED.set(true);
-                Self {}
-            }
-        }
-
-        impl Drop for VmGuard {
-            fn drop(&mut self) {
-                ENTERED.set(false)
-            }
-        }
-
-        let _guard = VmGuard::new();
-        f(Runtime {
+    pub fn enter<'gc>(&'gc mut self) -> Runtime<'gc> {
+        Runtime {
             vm: NonNull::from_mut(&mut *self.inner),
+            _guard: vm_guard::VmGuard::new(),
             _lifetime: PhantomData,
-        })
+        }
+    }
+}
+
+mod vm_guard {
+    thread_local! {
+        static ENTERED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    }
+
+    pub(super) struct VmGuard {}
+
+    impl VmGuard {
+        pub(super) fn new() -> Self {
+            assert!(!ENTERED.get(), "Only one VM may be active per thread");
+            ENTERED.set(true);
+            Self {}
+        }
+    }
+
+    impl Drop for VmGuard {
+        fn drop(&mut self) {
+            ENTERED.set(false)
+        }
     }
 }
 
@@ -2213,6 +2212,7 @@ pub struct Module<'vm> {
 pub struct Runtime<'vm> {
     vm: NonNull<VmState>,
 
+    _guard: vm_guard::VmGuard,
     _lifetime: Invariant<'vm>,
 }
 
@@ -2267,6 +2267,11 @@ impl<'vm> Runtime<'vm> {
         let vm = unsafe { self.vm.as_mut() };
         let value = unsafe { *vm.stack.offset(0) };
         Ok(value)
+    }
+
+    #[cfg(feature = "async")]
+    pub async fn run_async(&mut self, m: &Module<'vm>) -> Result<ValueRaw> {
+        stackful::stackful(|| self.run(m)).await
     }
 
     fn run_inner(&mut self, m: GcPtr<ModuleProto>) -> Result<()> {

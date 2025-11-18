@@ -2,7 +2,9 @@ use std::{fmt::Write as _, fs::read_to_string, path::Path};
 
 use super::Hebi;
 use crate::{
+    error::Result,
     module::{NativeModule, f},
+    value::ValueRaw,
     vm::{self, Context, Runtime, Stdio},
 };
 
@@ -45,11 +47,12 @@ fn take_stdio(r: &mut Runtime<'_>) -> (String, String) {
 
 fn snapshot<'vm>(
     input: &str,
+    result: Result<ValueRaw>,
     r: &mut Runtime<'vm>,
     module: &crate::module::Module,
     loaded_module: &vm::Module<'vm>,
 ) -> (String, bool) {
-    match r.run(&loaded_module) {
+    match result {
         Ok(value) => {
             let (stdout, stderr) = take_stdio(r);
             let mut snapshot = format!("SOURCE\n{input}\n\nOK\n{:?}", unsafe { value.as_ref() });
@@ -184,33 +187,44 @@ fn run(path: &Path) {
     let native_modules = native_modules();
 
     let mut vm = vm();
-    vm.with(|mut r| {
-        for module in native_modules {
-            r.register(&module);
-        }
+    let mut vm = vm.enter();
+    for module in native_modules {
+        vm.register(&module);
+    }
 
-        let loaded_module = r.load(&module);
+    let loaded_module = vm.load(&module);
 
-        // run each code snippet twice using the same VM,
-        // ensuring it has the same result.
-        let (snapshot1, failure1) = snapshot(input, &mut r, &module, &loaded_module);
-        let (snapshot2, failure2) = snapshot(input, &mut r, &module, &loaded_module);
+    // run each code snippet twice using the same VM,
+    // ensuring it has the same result.
+    let (snapshot1, failure1) = snapshot(
+        input,
+        vm.run(&loaded_module),
+        &mut vm,
+        &module,
+        &loaded_module,
+    );
+    let (snapshot2, failure2) = snapshot(
+        input,
+        vm.run(&loaded_module),
+        &mut vm,
+        &module,
+        &loaded_module,
+    );
 
-        assert_eq!(snapshot1, snapshot2);
-        assert_eq!(failure1, failure2);
+    assert_eq!(snapshot1, snapshot2);
+    assert_eq!(failure1, failure2);
 
-        #[cfg(not(miri))]
-        {
-            let snapshot = snapshot1;
-            insta::assert_snapshot!(snapshot);
-        }
+    #[cfg(not(miri))]
+    {
+        let snapshot = snapshot1;
+        insta::assert_snapshot!(snapshot);
+    }
 
-        #[cfg(miri)]
-        {
-            // on miri all we care about is if there's any undefined behavior.
-            eprintln!("{snapshot1}");
-        }
-    });
+    #[cfg(miri)]
+    {
+        // on miri all we care about is if there's any undefined behavior.
+        eprintln!("{snapshot1}");
+    }
 }
 
 // It should be possible to run two or more different modules
@@ -220,19 +234,19 @@ fn separate_modules() {
     let a = module(r#"fn f(a) { a } f(10)"#);
     let b = module(r#"100 + 200"#);
 
-    vm().with(|mut r| {
-        let a = r.load(&a);
-        let a = r.run(&a).unwrap();
-        let a = unsafe { a.as_ref() };
-        let a = format!("{a:?}");
-        let b = r.load(&b);
-        let b = r.run(&b).unwrap();
-        let b = unsafe { b.as_ref() };
-        let b = format!("{b:?}");
+    let mut vm = vm();
+    let mut vm = vm.enter();
+    let a = vm.load(&a);
+    let a = vm.run(&a).unwrap();
+    let a = unsafe { a.as_ref() };
+    let a = format!("{a:?}");
+    let b = vm.load(&b);
+    let b = vm.run(&b).unwrap();
+    let b = unsafe { b.as_ref() };
+    let b = format!("{b:?}");
 
-        assert_eq!(a, "Int(10)");
-        assert_eq!(b, "Int(300)");
-    })
+    assert_eq!(a, "Int(10)");
+    assert_eq!(b, "Int(300)");
 }
 
 #[test]
@@ -240,25 +254,62 @@ fn stack_unwinding() {
     let src = "panic()";
     let m = module(src);
 
-    vm().with(|mut r| {
-        let l = r.load(&m);
-        let (s0, f0) = snapshot(src, &mut r, &m, &l);
-        let (s1, f1) = snapshot(src, &mut r, &m, &l);
+    let mut vm = vm();
+    let mut vm = vm.enter();
+    let l = vm.load(&m);
+    let (s0, f0) = snapshot(src, vm.run(&l), &mut vm, &m, &l);
+    let (s1, f1) = snapshot(src, vm.run(&l), &mut vm, &m, &l);
 
-        assert_eq!(s0, s1);
-        assert_eq!(f0, f1);
+    assert_eq!(s0, s1);
+    assert_eq!(f0, f1);
 
-        unsafe {
-            assert!(r.vm.as_mut().frames.is_empty());
-        }
-    })
+    unsafe {
+        assert!(vm.vm.as_mut().frames.is_empty());
+    }
 }
 
 #[test]
 fn nested_enter() {
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        vm().with(|_| vm().with(|_| {}));
+        let mut a = vm();
+        let a = a.enter();
+        let mut b = vm();
+        let b = b.enter();
     }));
 
     assert!(result.is_err());
+}
+
+// NOTE: cannot run this under miri due to `mmap` call
+#[cfg(not(miri))]
+#[cfg(feature = "async")]
+#[test]
+fn async_run() {
+    let src = r#"
+import sleep from "eepy"
+print("before")
+sleep(1)
+print("after")
+"#;
+    let m = module(src);
+
+    let n = NativeModule::builder("eepy")
+        .function(self::f!(async "sleep", async |n: i64| {
+            smol::Timer::after(std::time::Duration::from_millis(n as u64)).await;
+        }))
+        .finish();
+
+    let mut vm = vm();
+    let mut vm = vm.enter();
+    vm.register(&n);
+    let l = vm.load(&m);
+
+    let result = smol::block_on(async { vm.run_async(&l).await });
+
+    let (s, _) = snapshot(src, result, &mut vm, &m, &l);
+
+    #[cfg(not(miri))]
+    {
+        insta::assert_snapshot!(s);
+    }
 }

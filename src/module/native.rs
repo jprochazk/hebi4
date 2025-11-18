@@ -75,6 +75,39 @@ impl NativeModuleBuilder {
 #[doc(hidden)]
 #[macro_export]
 macro_rules! __f {
+    (async $name:path) => {
+        unsafe {
+            $crate::module::native::NativeFunction::new(
+                $crate::module::native::__function_name($name),
+                $crate::module::native::arity_of_async(&$name),
+                ::std::rc::Rc::new({
+                    move |cx: $crate::value::host_function::Context| -> $crate::error::Result<$crate::value::ValueRaw> {
+                        ::stackful::wait(
+                            $crate::module::native::NativeAsyncFunctionCallback::call(&$name, cx)
+                        )
+                    }
+                }),
+            )
+        }
+    };
+
+    (async $name:expr, $callback: expr) => {
+        unsafe {
+            let callback = $callback;
+            $crate::module::native::NativeFunction::new(
+                $name,
+                $crate::module::native::arity_of_async(&callback),
+                ::std::rc::Rc::new({
+                    move |cx: $crate::value::host_function::Context| -> $crate::error::Result<$crate::value::ValueRaw> {
+                        ::stackful::wait(
+                            $crate::module::native::NativeAsyncFunctionCallback::call(&callback, cx)
+                        )
+                    }
+                }),
+            )
+        }
+    };
+
     ($name:path) => {
         unsafe {
             $crate::module::native::NativeFunction::new(
@@ -147,7 +180,13 @@ impl NativeFunction {
     }
 }
 
+#[doc(hidden)]
 pub fn arity_of<'a, F: NativeFunctionCallback<'a, T>, T>(f: &F) -> u8 {
+    F::ARITY
+}
+
+#[doc(hidden)]
+pub fn arity_of_async<'a, F: NativeAsyncFunctionCallback<'a, T>, T>(f: &F) -> u8 {
     F::ARITY
 }
 
@@ -155,6 +194,12 @@ pub unsafe trait NativeFunctionCallback<'cx, T> {
     const ARITY: u8;
 
     unsafe fn call(&self, cx: Context<'cx>) -> Result<ValueRaw>;
+}
+
+pub unsafe trait NativeAsyncFunctionCallback<'cx, T> {
+    const ARITY: u8;
+
+    unsafe fn call(&self, cx: Context<'cx>) -> impl std::future::Future<Output = Result<ValueRaw>>;
 }
 
 pub trait IntoHebiResultRaw: Sized {
@@ -238,7 +283,59 @@ macro_rules! impl_native_function_callback {
     };
 }
 
+macro_rules! impl_native_async_function_callback {
+    ($count:literal, $($T:ident),*) => {
+        #[allow(non_snake_case)]
+        unsafe impl<'cx, Func, R, $($T,)*> NativeAsyncFunctionCallback<'cx, (WithContext, R, $($T,)*)> for Func
+        where
+            Func: AsyncFn(Context<'cx>, $($T,)*) -> R,
+            R: IntoHebiResultRaw + 'cx,
+            $($T: TryFromHebiValueRaw<'cx> + 'cx,)*
+        {
+            const ARITY: u8 = $count;
+
+            async unsafe fn call(&self, mut cx: Context<'cx>) -> Result<ValueRaw> {
+                let [$($T,)*] = cx.args()?;
+                // SAFETY: rooted on the stack
+                let ($($T,)*) = (
+                    $(<$T as TryFromHebiValueRaw>::try_from_hebi_value_raw(&cx, $T)?,)*
+                );
+
+                let result = {
+                    let cx = cx.private_clone();
+                    (self)(cx, $($T,)*).await
+                };
+
+                <R as IntoHebiResultRaw>::into_hebi_result_raw(result, &mut cx)
+            }
+        }
+
+        #[allow(non_snake_case)]
+        unsafe impl<'cx, Func, R, $($T,)*> NativeAsyncFunctionCallback<'cx, (R, $($T,)*)> for Func
+        where
+            Func: AsyncFn($($T,)*) -> R,
+            R: IntoHebiResultRaw + 'cx,
+            $($T: TryFromHebiValueRaw<'cx> + 'cx,)*
+        {
+            const ARITY: u8 = $count;
+
+            async unsafe fn call(&self, mut cx: Context<'cx>) -> Result<ValueRaw> {
+                let [$($T,)*] = cx.args()?;
+                // SAFETY: rooted on the stack
+                let ($($T,)*) = (
+                    $(<$T as TryFromHebiValueRaw>::try_from_hebi_value_raw(&cx, $T)?,)*
+                );
+
+                let result = (self)($($T,)*).await;
+
+                <R as IntoHebiResultRaw>::into_hebi_result_raw(result, &mut cx)
+            }
+        }
+    };
+}
+
 all_the_tuples!(impl_native_function_callback);
+all_the_tuples!(impl_native_async_function_callback);
 
 ////////////////////////////////// impls //////////////////////////////////
 
