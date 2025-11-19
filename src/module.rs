@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use beef::lean::Cow;
 pub use native::{
-    NativeFunction, NativeModule, Param, TryFromHebiValueRaw, TryIntoHebiValueRaw, Value, f,
+    NativeFunction, NativeModule, Param, Ret, TryFromHebiValueRaw, TryIntoHebiValueRaw, Value, f,
 };
 
 use crate::{
@@ -61,7 +61,7 @@ impl Module {
     }
 
     #[inline]
-    fn main(&self) -> FnId {
+    pub(crate) fn main(&self) -> FnId {
         self.repr.main
     }
 

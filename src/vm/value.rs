@@ -1,4 +1,7 @@
-use crate::vm::gc::{GcAnyPtr, GcPtr, Trace};
+use crate::{
+    gc::{GcUninitRoot, Heap, ValueRoot},
+    vm::gc::{GcAnyPtr, GcPtr, Trace},
+};
 
 // TODO: string interning
 
@@ -73,6 +76,21 @@ impl ValueRaw {
         match self {
             ValueRaw::Object(gc) => gc.cast(),
             _ => None,
+        }
+    }
+
+    #[inline]
+    // NOTE: only `&Heap` here is OK, because the `root` is not initialized
+    // yet, therefore no `GcRef`s exist to it. if it came from a `deinit`,
+    // same story, the `self` on `fn deinit` ensures no live `GcRef` exist
+    // at the time it's called.
+    pub unsafe fn root<'a>(self, heap: &Heap, root: GcUninitRoot<'a>) -> ValueRoot<'a> {
+        match self {
+            ValueRaw::Nil => ValueRoot::Nil,
+            ValueRaw::Bool(v) => ValueRoot::Bool(v),
+            ValueRaw::Int(v) => ValueRoot::Int(v),
+            ValueRaw::Float(v) => ValueRoot::Float(v),
+            ValueRaw::Object(v) => ValueRoot::Object(root.init_raw_any(heap, v)),
         }
     }
 }

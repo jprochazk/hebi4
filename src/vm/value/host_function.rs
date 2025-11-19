@@ -2,12 +2,15 @@ use std::{marker::PhantomData, rc::Rc};
 
 use crate::{
     codegen::opcodes::{Reg, Sp, Vm},
-    error::{Result, error_span},
-    gc::{GcRoot, GcUninitRoot},
+    error::{Result, error, error_span},
+    gc::{GcRoot, GcUninitRoot, ValueRoot},
+    module::native::{Ret, TryIntoHebiArgs},
     span::Span,
+    value::{Closure, Function},
     vm::{
-        Invariant, Stdio,
+        CallFrame, Invariant, JT, Stdio, dispatch_loop,
         gc::{GcPtr, GcRef, Heap, Trace},
+        maybe_grow_stack, prepare_call, prepare_closure_call,
         value::{Str, ValueRaw},
     },
 };
@@ -71,6 +74,180 @@ impl<'a> Context<'a> {
     }
 
     #[inline]
+    pub(crate) fn sp(&self) -> Sp {
+        self.sp
+    }
+
+    #[inline]
+    pub fn call<'v, Args: TryIntoHebiArgs>(
+        &mut self,
+        callee: &ValueRoot,
+        args: Args,
+        ret: GcUninitRoot<'v>,
+    ) -> Result<ValueRoot<'v>> {
+        let vm = self.vm;
+
+        unsafe {
+            // 1. allocate stack space for ret and args
+            // new call frame will be above the current one, without overlap
+            let current_callee = self
+                .vm
+                .current_frame()
+                .callee()
+                .into_host()
+                .unwrap_unchecked();
+
+            // the slot after args:
+            //   [prev_frame.ret, a0, a1, .., aN, new_frame.ret]
+            //                                    ^^^^^^^^^^^^^
+            let ret_reg = Reg::new_unchecked(current_callee.as_ref().arity + 1);
+            let nargs = Args::LEN;
+
+            // context: type mismatch between the args. it seems like an off by one?
+
+            // 2. do a generic call
+            if let Some(callee) = callee.raw().into_object::<Function>() {
+                if callee.as_ref().nparams != nargs {
+                    return error(format!(
+                        "invalid number of args, expected {} but got {}",
+                        callee.as_ref().nparams,
+                        nargs
+                    ))
+                    .into();
+                }
+
+                let jt = JT.as_ptr();
+                let (sp, lp, ip) = prepare_call(callee, ret_reg, vm, 0);
+
+                let mut cx = Context::new(self.vm, sp, nargs);
+                args.try_into_hebi_args(&mut cx)?;
+
+                match dispatch_loop(vm, jt, ip, sp, lp) {
+                    Ok(value) => Ok(value.root(&mut *vm.heap(), ret)),
+                    Err(err) => {
+                        let err = vm.take_error(err);
+                        vm.unwind();
+                        debug_assert!(
+                            vm.current_frame()
+                                .callee()
+                                .into_host()
+                                .is_some_and(|c| { c.into_raw() == current_callee.into_raw() })
+                        );
+
+                        Err(err)
+                    }
+                }
+            } else if let Some(callee) = callee.raw().into_object::<Closure>() {
+                if callee.as_ref().func.as_ref().nparams != nargs {
+                    return error(format!(
+                        "invalid number of args, expected {} but got {}",
+                        callee.as_ref().func.as_ref().nparams,
+                        nargs
+                    ))
+                    .into();
+                }
+
+                let jt = JT.as_ptr();
+                let (sp, lp, ip) = prepare_closure_call(callee, ret_reg, vm, 0);
+
+                let mut cx = Context::new(self.vm, sp, nargs);
+                args.try_into_hebi_args(&mut cx)?;
+
+                match dispatch_loop(vm, jt, ip, sp, lp) {
+                    Ok(value) => Ok(value.root(&mut *vm.heap(), ret)),
+                    Err(err) => {
+                        let err = vm.take_error(err);
+                        vm.unwind();
+                        debug_assert!(
+                            vm.current_frame()
+                                .callee()
+                                .into_host()
+                                .is_some_and(|c| { c.into_raw() == current_callee.into_raw() })
+                        );
+
+                        Err(err)
+                    }
+                }
+            } else if let Some(callee) = callee.raw().into_object::<HostFunction>() {
+                if callee.as_ref().arity != nargs {
+                    return error(format!(
+                        "invalid number of args, expected {} but got {}",
+                        callee.as_ref().arity,
+                        nargs
+                    ))
+                    .into();
+                }
+
+                let return_addr = 0; // return to host
+                let sp = maybe_grow_stack(
+                    vm,
+                    vm.current_frame().stack_base() as usize + ret_reg.zx(),
+                    1 + nargs as usize,
+                );
+
+                let mut cx = {
+                    let stack_base = vm.current_frame().stack_base() + (ret_reg.get() as u32);
+                    debug_assert!(vm.has_enough_stack_space(
+                        stack_base as usize,
+                        1 + callee.as_ref().arity as usize
+                    ));
+                    vm.push_frame(CallFrame::host(callee, stack_base, return_addr));
+                    let sp: Sp = vm.stack_at(stack_base as usize);
+                    Context::new(vm, sp, nargs)
+                };
+
+                args.try_into_hebi_args(&mut cx)?;
+
+                let result = (callee.as_ref().f)(cx);
+                match result {
+                    Ok(value) => {
+                        debug_assert!(
+                            vm.current_frame()
+                                .callee()
+                                .into_host()
+                                .is_some_and(|c| { c.into_raw() == callee.into_raw() })
+                        );
+                        vm.pop_frame_unchecked();
+
+                        Ok(value.root(&mut *vm.heap(), ret))
+                    }
+                    Err(err) => {
+                        vm.unwind();
+                        debug_assert!(
+                            vm.current_frame()
+                                .callee()
+                                .into_host()
+                                .is_some_and(|c| { c.into_raw() == callee.into_raw() }),
+                            "expected frame {} but got {}",
+                            callee.as_ref().name.as_ref().as_str(),
+                            vm.current_frame().name().as_ref().as_str(),
+                        );
+                        vm.pop_frame_unchecked();
+
+                        return Err(err);
+                    }
+                }
+            } else {
+                return error("this value cannot be called").into();
+            }
+        }
+    }
+
+    /// Return a managed value.
+    ///
+    /// Note that just calling this is not enough: The resulting `Ret`
+    /// type _must_ be returned from the function.
+    #[inline]
+    pub fn ret(self, v: ValueRoot<'_>) -> Ret<'a> {
+        // SAFETY: rooted by `v` while being written,
+        // and by stack afterwards.
+        unsafe {
+            *self.sp.ret() = v.raw();
+            Ret::new()
+        }
+    }
+
+    #[inline]
     pub fn heap_mut(&mut self) -> &mut Heap {
         unsafe { &mut *self.vm.heap() }
     }
@@ -83,6 +260,20 @@ impl<'a> Context<'a> {
     #[inline]
     pub fn stdio(&mut self) -> &mut Stdio {
         unsafe { &mut *self.vm.stdio() }
+    }
+}
+
+impl std::ops::Deref for Context<'_> {
+    type Target = Heap;
+
+    fn deref(&self) -> &Self::Target {
+        self.heap()
+    }
+}
+
+impl std::ops::DerefMut for Context<'_> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.heap_mut()
     }
 }
 
@@ -106,14 +297,14 @@ impl HostFunction {
 
     #[inline(never)]
     pub fn new<'a>(
-        heap: &mut Heap,
+        heap: &Heap,
         root: GcUninitRoot<'a>,
         name: &GcRoot<'a, Str>,
         arity: u8,
         f: HostFunctionCallback,
     ) -> GcRoot<'a, Self> {
         let ptr = Self::alloc(heap, name.as_ptr(), arity, f);
-        unsafe { root.init_raw(heap, ptr) }
+        unsafe { root.init_raw(ptr) }
     }
 }
 

@@ -36,14 +36,14 @@ impl List {
         })
     }
 
-    pub fn new_zeroed<'a>(heap: &mut Heap, root: GcUninitRoot<'a>, len: usize) -> GcRoot<'a, Self> {
+    pub fn new_zeroed<'a>(heap: &Heap, root: GcUninitRoot<'a>, len: usize) -> GcRoot<'a, Self> {
         let ptr = Self::alloc_zeroed(heap, len);
-        unsafe { root.init_raw(heap, ptr) }
+        unsafe { root.init_raw(ptr) }
     }
 
-    pub fn new<'a>(heap: &mut Heap, root: GcUninitRoot<'a>, capacity: usize) -> GcRoot<'a, Self> {
+    pub fn new<'a>(heap: &Heap, root: GcUninitRoot<'a>, capacity: usize) -> GcRoot<'a, Self> {
         let ptr = Self::alloc(heap, capacity);
-        unsafe { root.init_raw(heap, ptr) }
+        unsafe { root.init_raw(ptr) }
     }
 }
 

@@ -6,7 +6,10 @@ use rustc_hash::FxBuildHasher;
 
 use crate::{
     error::{Error, Result, error},
-    gc::{GcAnyPtr, GcAnyRef, GcAnyRefMut, GcPtr, GcRefMut, Heap, Trace},
+    gc::{
+        GcAnyPtr, GcAnyRef, GcAnyRefMut, GcAnyRoot, GcPtr, GcRefMut, GcRoot, GcUninitRoot, Heap,
+        Trace, ValueRoot,
+    },
     vm::{
         gc::{GcRef, ValueRef},
         value::{
@@ -210,6 +213,12 @@ pub trait TryIntoHebiValueRaw: Sized {
     unsafe fn try_into_hebi_value_raw(self, cx: &mut Context<'_>) -> Result<ValueRaw>;
 }
 
+pub unsafe trait TryIntoHebiArgs: Sized {
+    const LEN: u8;
+
+    unsafe fn try_into_hebi_args(self, cx: &mut Context<'_>) -> Result<()>;
+}
+
 pub trait TryFromHebiValueRaw<'a>: Sized {
     unsafe fn try_from_hebi_value_raw(cx: &Context<'a>, value: ValueRaw) -> Result<Self>;
 }
@@ -334,8 +343,37 @@ macro_rules! impl_native_async_function_callback {
     };
 }
 
+macro_rules! impl_try_into_hebi_args {
+    ($count:literal, $($T:ident),*) => {
+        #[allow(non_snake_case)]
+        unsafe impl<$($T),*> TryIntoHebiArgs for ($($T,)*)
+        where
+            $($T: TryIntoHebiValueRaw,)*
+        {
+            const LEN: u8 = $count;
+
+            unsafe fn try_into_hebi_args(self, cx: &mut Context<'_>) -> Result<()> {
+                let sp = cx.sp();
+                let ($($T,)*) = self;
+
+                #[allow(unused_mut)]
+                let mut i = 1u8; // ret is at 0, args are 1..1+N
+                $(
+                    let r = unsafe { $crate::codegen::opcodes::Reg::new_unchecked(i) };
+                    *sp.at(r) = <$T as TryIntoHebiValueRaw>::try_into_hebi_value_raw($T, cx)?;
+                    i += 1;
+                )*
+                let _ = i;
+
+                Ok(())
+            }
+        }
+    };
+}
+
 all_the_tuples!(impl_native_function_callback);
 all_the_tuples!(impl_native_async_function_callback);
+all_the_tuples!(impl_try_into_hebi_args);
 
 ////////////////////////////////// impls //////////////////////////////////
 
@@ -398,6 +436,48 @@ impl TryIntoHebiValueRaw for String {
 
         let ptr = crate::value::Str::alloc(cx.heap_mut(), self.as_str());
         Ok(ValueRaw::Object(ptr.as_any()))
+    }
+}
+
+impl TryIntoHebiValueRaw for ValueRoot<'_> {
+    #[inline]
+    unsafe fn try_into_hebi_value_raw(self, cx: &mut Context<'_>) -> Result<ValueRaw> {
+        Ok(self.raw())
+    }
+}
+
+impl TryIntoHebiValueRaw for &ValueRoot<'_> {
+    #[inline]
+    unsafe fn try_into_hebi_value_raw(self, cx: &mut Context<'_>) -> Result<ValueRaw> {
+        Ok(self.raw())
+    }
+}
+
+impl TryIntoHebiValueRaw for GcAnyRoot<'_> {
+    #[inline]
+    unsafe fn try_into_hebi_value_raw(self, cx: &mut Context<'_>) -> Result<ValueRaw> {
+        Ok(ValueRaw::Object(self.as_ptr()))
+    }
+}
+
+impl TryIntoHebiValueRaw for &GcAnyRoot<'_> {
+    #[inline]
+    unsafe fn try_into_hebi_value_raw(self, cx: &mut Context<'_>) -> Result<ValueRaw> {
+        Ok(ValueRaw::Object(self.as_ptr()))
+    }
+}
+
+impl<T: Trace> TryIntoHebiValueRaw for GcRoot<'_, T> {
+    #[inline]
+    unsafe fn try_into_hebi_value_raw(self, cx: &mut Context<'_>) -> Result<ValueRaw> {
+        Ok(ValueRaw::Object(self.as_ptr().as_any()))
+    }
+}
+
+impl<T: Trace> TryIntoHebiValueRaw for &GcRoot<'_, T> {
+    #[inline]
+    unsafe fn try_into_hebi_value_raw(self, cx: &mut Context<'_>) -> Result<ValueRaw> {
+        Ok(ValueRaw::Object(self.as_ptr().as_any()))
     }
 }
 
@@ -569,6 +649,32 @@ impl<'a> Value<'a> {
             _ => None,
         }
     }
+
+    #[inline]
+    pub fn root<'u, 'v>(self, heap: &mut Heap, root: GcUninitRoot<'u>) -> ValueRoot<'u> {
+        // SAFETY: rooted by stack
+        unsafe { self.raw().root(heap, root) }
+    }
+}
+
+/// Marker for a return value passed through the stack.
+#[must_use = "must be returned"]
+pub struct Ret<'a> {
+    _lifetime: InvariantLifetime<'a>,
+}
+
+impl Ret<'_> {
+    pub(crate) unsafe fn new() -> Self {
+        Self {
+            _lifetime: PhantomData,
+        }
+    }
+}
+
+impl<'a> TryIntoHebiValueRaw for Ret<'a> {
+    unsafe fn try_into_hebi_value_raw(self, cx: &mut Context<'_>) -> Result<ValueRaw> {
+        Ok(*cx.sp().ret())
+    }
 }
 
 // TODO: passing `GcRef` into host functions is unsound.
@@ -613,7 +719,7 @@ impl<'a> TryFromHebiValueRaw<'a> for Value<'a> {
 #[cold]
 unsafe fn mismatched_type_error(expected: &'static str, actual: &ValueRaw) -> Error {
     error(format!(
-        "mismatched type, expected {expected}  got {}",
+        "mismatched type, expected {expected} got {}",
         actual.type_name()
     ))
 }
