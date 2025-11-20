@@ -770,7 +770,8 @@ impl<'a> TryFromHebiValueRaw<'a> for i64 {
     unsafe fn try_from_hebi_value_raw(cx: &Context<'a>, value: ValueRaw) -> Result<Self> {
         match value {
             ValueRaw::Int(v) => Ok(v),
-            v => Err(mismatched_type_error("Int", &v)),
+            ValueRaw::Float(v) => Ok(v as i64),
+            v => Err(mismatched_type_error("Int|Float", &v)),
         }
     }
 }
@@ -780,7 +781,8 @@ impl<'a> TryFromHebiValueRaw<'a> for f64 {
     unsafe fn try_from_hebi_value_raw(cx: &Context<'a>, value: ValueRaw) -> Result<Self> {
         match value {
             ValueRaw::Float(v) => Ok(v),
-            v => Err(mismatched_type_error("Float", &v)),
+            ValueRaw::Int(v) => Ok(v as f64),
+            v => Err(mismatched_type_error("Int|Float", &v)),
         }
     }
 }

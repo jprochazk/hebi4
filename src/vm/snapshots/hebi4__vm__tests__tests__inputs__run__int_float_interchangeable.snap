@@ -1,0 +1,16 @@
+---
+source: src/vm/tests.rs
+expression: snapshot
+---
+SOURCE
+do {
+printf("{t}({v})", {t:type_name(to_int(1.0)), v:to_int(1.0)})
+printf("{t}({v})", {t:type_name(to_int(1)), v:to_int(1)})
+}
+
+OK
+Nil
+
+STDOUT
+Int(1)
+Int(1)
