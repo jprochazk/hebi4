@@ -1,38 +1,98 @@
 ## Unsafe code
 
-This project uses unsafe code liberally. The reasoning for this is that it is _much_ harder
-to claw back performance gains when every part of the code is full of small inefficiencies.
-This kind of death by a thousand cuts is really difficult to come back from, often requiring
-massive rewrites and complex refactors.
+This project uses a lot of unsafe code.
 
-Safe code heavily relies on LLVM recognizing certain patterns and optimizing them appropriately.
-Compilers are _really_ good nowadays! They do an excellent job optimizing code. But it can be
-unreliable, and small changes can result in huge regressions in generated code.
+Care is taken to ensure soundness and most importantly _correctness_ of the compiler and VM.
+Every corner of the implementation is tested. Every test must pass `miri`.
+Unsafe code is paired with SAFETY comments as appropriate.
+Code exposed to users must not be able to cause UB unless it is marked `unsafe`.
 
-Here I try to take matters into my own hands, in an attempt to give less confusing IR to LLVM
-for optimization. A typical example is auto-vectorization and removal of bounds checks in code
-using `Iterator` combinators. For VM code, I prefer numeric `for` loops and `get_unchecked`. 
+The ultimate goal here is to match or exceed the performance of programming languages in the
+same category. That's difficult to do: Most of those languages are written in C, or C++,
+which are inherently unsafe languages, which rely on a lot of UB for their performance
+characteristics.
 
-That being said, care is taken to ensure soundness and most importantly _correctness_ of the
-compiler and VM. Every corner of the implementation is tested. Every test must pass `miri`.
-Unsafe code is paired with SAFETY comments as appropriate. It is not currently enforced, as
-implementation details are heavily in flux. Only _safe code_ may be exposed to users.
+To give a concrete example, the "traditional" way to write a bytecode interpreter in Rust is
+to use a loop with a large `match` statement in it:
 
-The code contains no _lies_ about unsafe parts being safe, even in the compiler and VM internals.
-Unsafe code is not wrapped in safe functions to make the code look prettier or simpler, as that
-only obscures the reality of what the code is doing.
+```rust
+fn interpreter(bytecode: &[Instruction], stack: &mut [Value]) {
+  let pc = 0;
+  loop {
+    match bytecode[pc] {
+      Instruction::Nop => {}
+      Instruction::Mov { src, dst } => {
+        stack[dst] = stack[src];
+      }
+      Instruction::Jmp { offset } => {
+        pc += offset;
+        continue;
+      }
+    }
+    pc += 1;
+  }
+}
+```
 
-Certain kinds of unsafe operations _are_ wrapped in unsafe functions when it can help prevent mistakes.
-For example, creating intermediate references while working with raw pointers is a surefire way to
-undefined behavior. In the VM, raw pointers are wrapped in newtyped structs, which have methods
-operating on `self`. These methods do the Right Thing on the inner pointers without creating
-intermediate references, or only creating them in the smallest region of code possible.
+This is perfectly functional, and it's fully safe. Unfortunately, it's also hopelessly slow:
 
-While unsafe code is used liberally, it still used _with intent_, and not just to avoid "dealing
-with the borrow checker". Safe code is preferred when it doesn't harm the goals of this project.
-Contributions which only change unsafe code into safe code are likely to be rejected, unless they
-are accompanied by benchmarks showing why it doesn't result in lower performance and less reliable
-optimizer behavior.
+- Stack accesses require bounds checks. Our bytecode compiler knows how large `stack`
+  must be at the time it generates bytecode. So why are we doing any bounds checks?
+- Reading an instruction also requires a bounds check.
+
+The worst part is that the `loop+match` pattern (probably) won't be recognized by LLVM, and
+optimized to "threaded" dispatch, where each instruction handler directly jumps to the next one.
+Instead, they'll jump to the start of the loop, and _then_ jump to the next instruction handler.
+
+In C, you can do something like this:
+
+```c
+void interpreter(Instruction* bytecode, Value* stack) {
+  static const void* jump_table[] = {&&nop, &&mov, &&jmp, &&halt};
+
+  Instruction insn = *bytecode;
+  goto *jump_table[opcode(insn)];
+
+  nop: {
+    insn = *bytecode++;
+    goto *jump_table[opcode(insn)];
+  };
+
+  mov: {
+    Reg src = operand_a8(insn);
+    Reg dst = operand_b8(insn);
+    stack[dst] = stack[src];
+
+    insn = *bytecode++;
+    goto *jump_table[opcode(insn)];
+  };
+
+  jmp: {
+    Offset offset = operand_a16(insn);
+
+    bytecode += offset;
+    insn = *bytecode;
+    goto *jump_table[opcode(insn)];
+  };
+
+  halt: {
+    return;
+  };
+}
+```
+
+There are a few ways in which this is faster:
+
+1. Each instruction handler directly jumps to the next one using a _computed goto_.
+2. There are no bounds checks, not when reading an instruction nor when accessing the stack.
+
+Now, the problem with writing all your code in C is that all your code is in C! I like Rust. It has
+a lot of nice features, and most of the compiler _can_ use safe code. Even a lot of the VM implementation
+can use safe code. It feels bad to have to give that up, just so that the instruction dispatch method
+used can be "optimal".
+
+We can't hope to match the performance of an interpeter in hand-written assembly, but we can get pretty
+close, or even beat one which is written in C.
 
 ### VM
 
@@ -55,57 +115,27 @@ operands being in bounds for the current call frame. There are other approaches 
 but any of the other ones I've managed to come up with always come with _some_ downside, like a
 practically unreachable panic path which just sits there, staring menacingly.
 
+Another thing is that the _instruction pointer_ is literally just a pointer. We don't carry around its
+length, and we don't perform a bounds check when reading from it. This means we assume that the compiler
+will:
+
+- Properly terminate all branches (with a `ret` or `stop` instruction)
+- Generate all `jmp` instruction with in-bounds targets
+
+Once again, big assumptions! But we need to make those assumptions in order to reach our performance targets.
+
 ### Garbage collection
 
 The language implemented here is garbage collected.
-
-The GC implementation landscape in Rust is pretty barren. Which makes sense, not many people are working on
-garbage-collected languages, and those who are typically just use `Rc`.
-
-Reference counting schemes are not viable for us. VM values must remain trivially copyable, and must not
-have `Drop` impls. _Especially_ not `drop`s which contain branches! A dynamically-typed `Value` with
-an `Rc` in one of its variants must first type-check before it can decrement the reference count.
-
-This naturally excludes not only `std::rc::Rc`, but also:
-- the [`gc`](https://docs.rs/gc/latest/gc/) crate, where `GcPtr` pointers track the number of roots,
-  similar to a reference count.
-- the [`bacon_rajan_cc`](https://docs.rs/bacon_rajan_cc/latest/bacon_rajan_cc/) crate
-
-among others.
-
-The mutator must be able to yield to the collector at _any_ point, not just well-defined safe points.
-This way, we avoid the problem of not being able to trigger a collection in nested `vm->rust->vm` calls,
-long loops, and similar scenarios, unless every code path is configured to be able to yield at any point.
-This means crates like [`gc-arena`](https://docs.rs/gc-arena/latest/gc_arena/), though very cool, are also
-unsuitable.
 
 It is possible to implement certain kinds of garbage collectors entirely within safe code
 (see [safe-gc](https://docs.rs/safe-gc/latest/safe_gc/)), but we don't want to accept the overheads associated
 with a fully safe implementation.
 
-#### GC implementation
-
 The approach used by the VM is not novel at all. It is inspired by:
 
 - The rooting API from [SpiderMonkey](https://spidermonkey.dev/)
-- The _gatekeeper_ `Heap` type from [safe-gc](https://docs.rs/safe-gc/latest/safe_gc/)
-
-To reduce implementation complexity, the GC is _not_ extensible by users. This means it is impossible for
-users to add a type into the GC's type hierarchy of traceable objects. Instead:
-- User types are wrapped in a "GC box", which manages the object's lifetime similar to a regular Rust `Box`
-- User types which refer to garbage collected objects must do so through a reference-counted handle type.
-  - The reference counted handles are only used by the userland API, not by the VM internals or builtin functions.
-
-It is likely possible to extend this API to be a generic one, and release it as a library. Some of the changes
-required may be:
-
-- Using a manually constructed VTable per object instead of a type tag.
-  - This VTable would hold impls for trace, drop, etc., and be used by the GC instead of having it match on the type tag,
-    and casting the type.
-- Adding a way to safely and atomically initialize an entire object in the presence of allocations, which may trigger a collection.
-  - An API similar to Rust for Linux Kernel's [`pin_init`](https://docs.rs/pin-init/latest/pin_init/) may be necessary here.
-- Extending the `GcRef` and `GcRefMut` types to userland, somehow.
-  - This may require the nightly `arbitrary_self_types` feature.
+- [safe-gc](https://docs.rs/safe-gc/latest/safe_gc/)
 
 The GC API outlined below supports precise, incremental, and generational garbage collection.
 Currently, it is only precise, and stop-the-world.
@@ -121,8 +151,8 @@ survive the next collection cycle, which makes it safe to dereference. To actual
 - `as_ref`, which requires a `&Heap` reference
 - `as_mut`, which requires a `&mut Heap` reference
 
-This is where the "gatekeeper" `Heap` comes in. It acts as a kind of token, of which there is only a single one active
-at a time in any given program. This token is passed around by reference, and must be used in order to _dereference_ roots.
+This is where the `Heap` comes in. It acts as a kind of token, of which there is only a single one active
+at a time in any given thread. This token is passed around by reference, and must be used in order to _dereference_ roots.
 
 - If you have a shared reference to the heap, you can dereference as many `GcRoot`s as you want to obtain shared access to them.
 - If you have a _unique_ reference to the heap, you can dereference exactly one `GcRoot` to obtain a unique mutable reference to it.

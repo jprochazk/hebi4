@@ -1,0 +1,11 @@
+[book]
+title = "Hebi"
+language = "en"
+src = "docs"
+
+[output.html]
+git-repository-url = "https://github.com/jprochazk/hebi4"
+edit-url-template = "https://github.com/jprochazk/hebi4/edit/main/{path}"
+
+[build]
+build-dir = "book"
