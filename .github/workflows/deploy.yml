@@ -19,7 +19,7 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: ./playground
+        working-directory: ./site
 
     steps:
       - name: Checkout
@@ -44,7 +44,7 @@ jobs:
         with:
           node-version: '20'
           cache: 'npm'
-          cache-dependency-path: playground/package-lock.json
+          cache-dependency-path: site/package-lock.json
 
       - name: Install dependencies
         run: npm ci
@@ -58,7 +58,7 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: ./playground/dist
+          path: ./site/dist
 
   deploy:
     environment:
