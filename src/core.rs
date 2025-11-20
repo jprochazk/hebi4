@@ -135,6 +135,7 @@ static CORE_LIB: CoreLibData = functions! {
     fmt::printf,
     fmt::format,
     list::map,
+    list::append,
     convert::to_str,
     convert::to_int,
     convert::to_float,

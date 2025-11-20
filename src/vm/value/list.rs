@@ -75,6 +75,11 @@ impl<'a> GcRef<'a, List> {
     }
 
     #[inline]
+    pub unsafe fn get_unchecked(&self, index: usize) -> ValueRef<'a> {
+        GcRef::map_value(self, |this| this.items.get_unchecked(index))
+    }
+
+    #[inline]
     pub fn iter(&self) -> ListIter<'a> {
         ListIter {
             list: *self,

@@ -481,6 +481,27 @@ impl<T: Trace> TryIntoHebiValueRaw for &GcRoot<'_, T> {
     }
 }
 
+impl<'a, T: Trace> TryIntoHebiValueRaw for Param<'a, T> {
+    #[inline]
+    unsafe fn try_into_hebi_value_raw(self, cx: &mut Context<'_>) -> Result<ValueRaw> {
+        Ok(ValueRaw::Object(self.ptr.as_any()))
+    }
+}
+
+impl<'a> TryIntoHebiValueRaw for Any<'a> {
+    #[inline]
+    unsafe fn try_into_hebi_value_raw(self, cx: &mut Context<'_>) -> Result<ValueRaw> {
+        Ok(ValueRaw::Object(self.ptr))
+    }
+}
+
+impl<'a> TryIntoHebiValueRaw for Value<'a> {
+    #[inline]
+    unsafe fn try_into_hebi_value_raw(self, cx: &mut Context<'_>) -> Result<ValueRaw> {
+        Ok(self.raw())
+    }
+}
+
 type Invariant<T> = PhantomData<fn(T) -> T>;
 type InvariantLifetime<'a> = Invariant<&'a ()>;
 

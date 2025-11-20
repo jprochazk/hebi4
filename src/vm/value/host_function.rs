@@ -4,7 +4,10 @@ use crate::{
     codegen::opcodes::{Reg, Sp, Vm},
     error::{Result, error, error_span},
     gc::{GcRoot, GcUninitRoot, ValueRoot},
-    module::native::{Ret, TryIntoHebiArgs},
+    module::{
+        TryIntoHebiValueRaw,
+        native::{Ret, TryIntoHebiArgs},
+    },
     span::Span,
     value::{Closure, Function},
     vm::{
@@ -238,12 +241,16 @@ impl<'a> Context<'a> {
     /// Note that just calling this is not enough: The resulting `Ret`
     /// type _must_ be returned from the function.
     #[inline]
-    pub fn ret(self, v: ValueRoot<'_>) -> Ret<'a> {
+    pub fn ret<T>(mut self, v: T) -> Result<Ret<'a>>
+    where
+        T: TryIntoHebiValueRaw,
+    {
         // SAFETY: rooted by `v` while being written,
         // and by stack afterwards.
         unsafe {
-            *self.sp.ret() = v.raw();
-            Ret::new()
+            let v = v.try_into_hebi_value_raw(&mut self)?;
+            *self.sp.ret() = v;
+            Ok(Ret::new())
         }
     }
 

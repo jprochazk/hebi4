@@ -1,0 +1,52 @@
+---
+source: src/vm/tests.rs
+expression: snapshot
+---
+SOURCE
+do {
+let list = [0]
+
+fn f(v) {
+  append(list, v)
+  v
+}
+
+map(list, f)
+}
+
+ERROR
+list size changed during `map`
+9 |  map(list, f)
+  |  ^^^^^^^^^^^^
+
+
+DISASM:
+
+.fn @main
+  params 0
+  stack 6
+  .locals
+    list = r1
+    f = r2
+  .code
+  0  llist r1, 1
+  1  lsmi r2, 0
+  2  sidxn r1, 0, r2
+  3  lclosure r2, l1   ; f, uv=1
+  4  mov r4, r1
+  5  mov r5, r2
+  6  call r3, map
+  7  retv r3
+
+.fn f
+  params 1
+  stack 5
+  .locals
+    v = r1
+  .upvalues
+    list = r1
+  .code
+  0  luv r3, u0
+  1  mov r4, r1
+  2  call r2, append
+  3  retv r1

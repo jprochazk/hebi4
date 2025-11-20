@@ -1,0 +1,8 @@
+let list = [0]
+
+fn f(v) {
+  append(list, v)
+  v
+}
+
+map(list, f)
