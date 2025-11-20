@@ -6,6 +6,8 @@ use check_tco::check_tco;
 mod ci;
 use ci::{ci_jobs, output_matrix};
 
+use crate::check_tco::disasm;
+
 fn main() {
     let args = std::env::args().skip(1).collect::<Vec<_>>();
 
@@ -14,6 +16,7 @@ fn main() {
 
         "miri" => miri(&args[1..]),
 
+        "disasm" => disasm(),
         "check-tco" => check_tco(),
 
         "test" => test(&args[1..]),

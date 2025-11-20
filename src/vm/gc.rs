@@ -14,19 +14,15 @@ use std::{
     cell::{Cell, UnsafeCell},
     marker::{PhantomData, PhantomPinned},
     mem::MaybeUninit,
-    num::NonZeroUsize,
     ops::{Deref, DerefMut},
     pin::Pin,
     ptr::{NonNull, null_mut},
 };
 
 use super::value::{StringHasher, ValueRaw};
+use crate::tag::TaggedPtr;
 
 // # Heap
-
-// TODO: require `HeapGuard` instead of `Heap`,
-// `HeapGuard` is acquired by `Heap::enter`, which guarantees
-// no two heaps exist on the same thread at the same time.
 
 #[repr(C)]
 pub struct Heap {
@@ -276,33 +272,39 @@ impl<T: Sized + 'static> GcPtr<T> {
     /// - The pointer must have been produced by `Gc::into_raw`.
     #[inline]
     pub(crate) unsafe fn from_raw(ptr: NonNull<T>) -> GcPtr<T> {
-        let offset = core::mem::offset_of!(GcBox<T>, value);
+        let offset = core::mem::offset_of!(GcBox<T>, __value);
         // CAST: `GcBox` is a `repr(C)` struct with `T` as its 2nd field
         let ptr = ptr.cast::<u8>().sub(offset).cast::<GcBox<T>>();
 
         GcPtr { ptr }
     }
 
+    #[inline]
+    pub(crate) unsafe fn into_raw(self) -> NonNull<T> {
+        let ptr = unsafe { &raw const (*self.ptr.as_ptr()).__value };
+        NonNull::new_unchecked(UnsafeCell::raw_get(ptr))
+    }
+
+    #[inline]
     pub(crate) unsafe fn from_raw_gcbox(ptr: NonNull<GcBox<T>>) -> GcPtr<T> {
         GcPtr { ptr }
     }
 
     #[inline]
-    pub(crate) unsafe fn into_raw(self) -> NonNull<T> {
-        let ptr = unsafe { &raw const (*self.ptr.as_ptr()).value };
-        NonNull::new_unchecked(UnsafeCell::raw_get(ptr))
+    pub(crate) unsafe fn into_raw_gcbox(self) -> NonNull<GcBox<T>> {
+        self.ptr
     }
 
     #[inline]
     pub(crate) unsafe fn vt(self) -> &'static GcVtable {
-        let header = &raw mut (*self.ptr.as_ptr()).header;
+        let header = &raw mut (*self.ptr.as_ptr()).__header;
         let header = UnsafeCell::raw_get(header);
         header.read().vt()
     }
 
     #[inline]
     unsafe fn set_mark(self, v: bool) {
-        let header = &raw mut (*self.ptr.as_ptr()).header;
+        let header = &raw mut (*self.ptr.as_ptr()).__header;
         let header = UnsafeCell::raw_get(header);
         let header = NonNull::new_unchecked(header);
         GcHeader::set_mark(header, v);
@@ -310,7 +312,7 @@ impl<T: Sized + 'static> GcPtr<T> {
 
     #[inline]
     unsafe fn is_marked(self) -> bool {
-        let header = &raw mut (*self.ptr.as_ptr()).header;
+        let header = &raw mut (*self.ptr.as_ptr()).__header;
         let header = UnsafeCell::raw_get(header);
         header.read().marked()
     }
@@ -348,7 +350,7 @@ impl<T: Trace> GcPtr<T> {
     /// - No unique reference to the object may already exist
     #[inline]
     pub unsafe fn as_rust_ref_very_unsafe<'a>(self) -> &'a T {
-        &*UnsafeCell::raw_get(&raw mut (*self.ptr.as_ptr()).value)
+        &*UnsafeCell::raw_get(&raw mut (*self.ptr.as_ptr()).__value)
     }
 
     /// ## Safety
@@ -356,7 +358,7 @@ impl<T: Trace> GcPtr<T> {
     /// - No other reference to the object may already exist
     #[inline]
     pub unsafe fn as_rust_ref_mut_very_unsafe<'a>(self) -> &'a mut T {
-        &mut *UnsafeCell::raw_get(&raw mut (*self.ptr.as_ptr()).value)
+        &mut *UnsafeCell::raw_get(&raw mut (*self.ptr.as_ptr()).__value)
     }
 
     #[inline]
@@ -421,77 +423,22 @@ macro_rules! generate_vtable_for {
     };
 }
 
-/// Tagged virtual table.
-///
-/// `GcVtable` is aligned to 16 bytes, so it has 4 free bits,
-/// and we use the first one as the mark bit.
-#[derive(Clone, Copy)]
-#[repr(transparent)]
-struct TaggedVt(NonNull<GcVtable>);
-
-const _: () = assert!(TaggedVt::ALIGN >= 16 && TaggedVt::ALIGN.is_power_of_two());
-
-impl TaggedVt {
-    const ALIGN: usize = core::mem::align_of::<GcVtable>();
-    const MASK: usize = Self::ALIGN - 1;
-
-    #[inline]
-    fn new(ptr: &'static GcVtable) -> Self {
-        let ptr = ptr as *const GcVtable as *mut GcVtable;
-        // SAFETY: pointer comes from a `&'static` ref.
-        Self(unsafe { NonNull::new_unchecked(ptr) })
-    }
-
-    /// Only uses first `Self::ALIGN` bits of `tag`.
-    #[inline]
-    fn with_tag(self, tag: usize) -> Self {
-        let tag = tag & Self::MASK;
-        Self(self.0.map_addr(
-            #[inline]
-            |addr| {
-                let addr = (addr.get() & !Self::MASK) | tag;
-                // SAFETY: guaranteed to still be non-zero, as the original address is non-zero.
-                unsafe { NonZeroUsize::new_unchecked(addr) }
-            },
-        ))
-    }
-
-    /// Get the first `Self::ALIGN` bits.
-    #[inline]
-    fn tag(self) -> usize {
-        self.0.addr().get() & Self::MASK
-    }
-
-    /// Get the vtable ptr.
-    #[inline]
-    pub(crate) fn vt(self) -> &'static GcVtable {
-        let ptr = self.0.map_addr(|addr| {
-            let addr = addr.get() & !Self::MASK;
-            // SAFETY: guaranteed to still be non-zero, as the original address is non-zero.
-            unsafe { NonZeroUsize::new_unchecked(addr) }
-        });
-
-        // SAFETY: pointer comes from a `&'static` ref.
-        unsafe { ptr.as_ref() }
-    }
-}
-
 #[derive(Clone, Copy)]
 #[repr(C, align(16))]
-struct GcHeader {
+pub(crate) struct GcHeader {
     /// Each managed object is linked into a global list of all allocated values.
     /// Objects are linked into it during allocation, and unlinked during the sweep phase of GC
     /// after being freed.
     next: Option<NonNull<GcHeader>>,
-    tagged_vt: TaggedVt,
+    tagged_vt: TaggedPtr<GcVtable>,
 }
 
 impl GcHeader {
     #[inline]
-    fn new(vtable: &'static GcVtable, next: Option<NonNull<GcHeader>>) -> Self {
+    pub(crate) fn new(vtable: &'static GcVtable, next: Option<NonNull<GcHeader>>) -> Self {
         Self {
             next,
-            tagged_vt: TaggedVt::new(vtable),
+            tagged_vt: TaggedPtr::new(NonNull::from_ref(vtable), 0),
         }
     }
 
@@ -507,7 +454,8 @@ impl GcHeader {
 
     #[inline]
     fn vt(self) -> &'static GcVtable {
-        self.tagged_vt.vt()
+        // SAFETY: ptr stored in `tagged_vt` comes from a `'static` ref
+        unsafe { self.tagged_vt.ptr().as_ref() }
     }
 
     #[inline]
@@ -538,11 +486,9 @@ impl GcHeader {
 // Think very carefully about changing the repr of this!
 #[repr(C, align(8))]
 pub(crate) struct GcBox<T: Sized + 'static> {
-    header: UnsafeCell<GcHeader>,
-    value: UnsafeCell<T>,
+    pub(crate) __header: UnsafeCell<GcHeader>,
+    pub(crate) __value: UnsafeCell<T>,
 }
-
-impl<T: 'static> GcPtr<T> {}
 
 impl<T: 'static> Clone for GcPtr<T> {
     #[inline]
@@ -633,19 +579,28 @@ impl GcAnyPtr {
     /// ## Safety
     /// - The pointer must have been produced by [`GcAnyPtr::into_raw`].
     #[inline]
-    pub(crate) unsafe fn from_raw(ptr: *mut ()) -> GcAnyPtr {
-        let offset = core::mem::offset_of!(GcBox<()>, value);
+    pub(crate) unsafe fn from_raw(ptr: NonNull<()>) -> Self {
+        let offset = core::mem::offset_of!(GcBox<()>, __value);
         // CAST: `GcBox` is a `repr(C)` struct with `T` as its 2nd field
         let ptr = ptr.cast::<u8>().sub(offset).cast::<GcBox<()>>();
-        let ptr = NonNull::new_unchecked(ptr);
 
-        GcAnyPtr { ptr }
+        Self { ptr }
     }
 
     #[inline]
     pub(crate) unsafe fn into_raw(self) -> NonNull<()> {
-        let ptr = unsafe { &raw const (*self.ptr.as_ptr()).value };
+        let ptr = unsafe { &raw const (*self.ptr.as_ptr()).__value };
         NonNull::new_unchecked(UnsafeCell::raw_get(ptr))
+    }
+
+    #[inline]
+    pub(crate) unsafe fn from_raw_gcbox(ptr: NonNull<GcBox<()>>) -> Self {
+        Self { ptr }
+    }
+
+    #[inline]
+    pub(crate) unsafe fn into_raw_gcbox(self) -> NonNull<GcBox<()>> {
+        self.ptr
     }
 
     /// ## Safety
@@ -653,7 +608,7 @@ impl GcAnyPtr {
     /// - Object must be live.
     #[inline]
     pub(crate) unsafe fn type_name(self) -> &'static str {
-        let header = &raw mut (*self.ptr.as_ptr()).header;
+        let header = &raw mut (*self.ptr.as_ptr()).__header;
         let header = UnsafeCell::raw_get(header);
         header.read().vt().type_name
     }
@@ -663,7 +618,7 @@ impl GcAnyPtr {
     /// - Object must be live.
     #[inline]
     pub(crate) unsafe fn vt(self) -> &'static GcVtable {
-        let header = &raw mut (*self.ptr.as_ptr()).header;
+        let header = &raw mut (*self.ptr.as_ptr()).__header;
         let header = UnsafeCell::raw_get(header);
         header.read().vt()
     }
@@ -673,7 +628,7 @@ impl GcAnyPtr {
     /// - Object must be live.
     #[inline]
     unsafe fn set_mark(self, v: bool) {
-        let header = &raw mut (*self.ptr.as_ptr()).header;
+        let header = &raw mut (*self.ptr.as_ptr()).__header;
         let header = UnsafeCell::raw_get(header);
         let header = NonNull::new_unchecked(header);
         GcHeader::set_mark(header, v);
@@ -684,7 +639,7 @@ impl GcAnyPtr {
     /// - Object must be live.
     #[inline]
     unsafe fn is_marked(self) -> bool {
-        let header = &raw mut (*self.ptr.as_ptr()).header;
+        let header = &raw mut (*self.ptr.as_ptr()).__header;
         let header = UnsafeCell::raw_get(header);
         header.read().marked()
     }
@@ -1079,7 +1034,9 @@ impl<'a, T: Trace> GcRoot<'a, T> {
     /// # assert_eq!(b.as_ref(heap).to_string(), "foo");
     /// ```
     #[inline]
-    pub fn update(&mut self, heap: &mut Heap, ptr: impl Rooted<T>) {
+    // NOTE: only `&Heap` here is OK, because `self` guarantees that any `GcRef` produced
+    // from this root will not be invalidated by the `set`
+    pub fn update(&mut self, heap: &Heap, ptr: impl Rooted<T>) {
         unsafe { self.update_raw(ptr.as_ptr()) }
     }
 
@@ -1089,6 +1046,11 @@ impl<'a, T: Trace> GcRoot<'a, T> {
     #[inline]
     pub unsafe fn update_raw(&mut self, ptr: GcPtr<T>) {
         self.place.as_mut().get_unchecked_mut().ptr = ptr;
+    }
+
+    #[inline]
+    pub fn deinit(self) -> GcUninitRoot<'a> {
+        unsafe { GcUninitRoot(self.set_ptr(__Empty::__get())) }
     }
 }
 
@@ -1120,16 +1082,18 @@ impl<'a, T: Sized + 'static> GcRoot<'a, T> {
     /// # assert_eq!(b.as_ref(heap).len(), 0);
     /// ```
     #[inline]
-    pub fn set<U: Trace>(self, heap: &mut Heap, ptr: impl Rooted<U>) -> GcRoot<'a, U> {
+    // NOTE: only `&Heap` here is OK, because `self` guarantees that any `GcRef` produced
+    // from this root will not be invalidated by the `set`
+    pub fn set<U: Trace>(self, heap: &Heap, ptr: impl Rooted<U>) -> GcRoot<'a, U> {
         // SAFETY: `ptr` is rooted, and it will still be rooted in `self`
-        unsafe { self.set_raw(ptr.as_ptr()) }
+        unsafe { self.set_ptr(ptr.as_ptr()) }
     }
 
     /// Root a different pointer in this `GcRoot`.
     ///
     /// The given `ptr` must still be live.
     #[inline]
-    pub unsafe fn set_raw<U: Trace>(self, ptr: GcPtr<U>) -> GcRoot<'a, U> {
+    pub unsafe fn set_ptr<U: Trace>(self, ptr: GcPtr<U>) -> GcRoot<'a, U> {
         let mut this: GcRoot<'a, U> = core::mem::transmute(self);
         this.place.as_mut().get_unchecked_mut().ptr = ptr;
         this
@@ -1175,6 +1139,11 @@ impl<'a> GcAnyRoot<'a> {
         GcAnyPtr {
             ptr: self.0.as_ptr().ptr.cast(),
         }
+    }
+
+    #[inline]
+    pub fn as_ref<'v>(&'v self, heap: &'v Heap) -> GcAnyRef<'v> {
+        GcAnyRef(self.as_ptr(), PhantomData)
     }
 
     /// Update the stored pointer.
@@ -1233,9 +1202,14 @@ impl std::fmt::Debug for GcAnyRoot<'_> {
 //   forever stay marked, so the cost of tracing them is actually a bit lower than
 //   most objects.
 //
-// It shoul be fairly rare to run a GC with any uninitialized roots in the root list,
+// It should be fairly rare to run a GC with any uninitialized roots in the root list,
 // so the additional cost of supporting uninitialized roots should be close to zero
 // in case there are none.
+
+// NOTE: only `&Heap` here is OK, because `self` is not initialized
+// yet, therefore no `GcRef`s exist to it. if it came from a `deinit`,
+// same story, the `self` on `fn deinit` ensures no live `GcRef` exist
+// at the time it's called.
 
 /// An uninitialized root. Before using it, it must be initialized to something.
 #[repr(transparent)]
@@ -1251,14 +1225,20 @@ impl<'a> GcUninitRoot<'a> {
 
     /// Initialize the root with `ptr`.
     #[inline]
-    pub fn init<T: Trace>(self, heap: &mut Heap, ptr: impl Rooted<T>) -> GcRoot<'a, T> {
+    pub fn init<T: Trace>(self, heap: &Heap, ptr: impl Rooted<T>) -> GcRoot<'a, T> {
         self.0.set(heap, ptr)
     }
 
     /// Initialize the root with `ptr`.
     #[inline]
-    pub unsafe fn init_raw<T: Trace>(self, heap: &mut Heap, ptr: GcPtr<T>) -> GcRoot<'a, T> {
-        self.0.set_raw(ptr)
+    pub unsafe fn init_raw<T: Trace>(self, ptr: GcPtr<T>) -> GcRoot<'a, T> {
+        self.0.set_ptr(ptr)
+    }
+
+    /// Initialize the root with `ptr`.
+    #[inline]
+    pub unsafe fn init_raw_any<'v>(self, heap: &Heap, ptr: GcAnyPtr) -> GcAnyRoot<'a> {
+        self.0.as_any().set_any_ptr(ptr)
     }
 }
 
@@ -1276,8 +1256,8 @@ impl __Empty {
         // NOTE: not part of any sweep list, so will never be freed.
         thread_local! {
             static MEMORY: std::cell::UnsafeCell<GcBox<__Empty>> = std::cell::UnsafeCell::new(GcBox {
-                header: UnsafeCell::new(GcHeader::new(__Empty::vtable(), None)),
-                value: UnsafeCell::new(__Empty {
+                __header: UnsafeCell::new(GcHeader::new(__Empty::vtable(), None)),
+                __value: UnsafeCell::new(__Empty {
                     _marker: PhantomData,
                 }),
             })
@@ -1603,13 +1583,24 @@ pub enum ValueRoot<'a> {
 
 impl<'a> ValueRoot<'a> {
     #[inline]
-    pub fn raw(self) -> ValueRaw {
+    pub fn raw(&self) -> ValueRaw {
         match self {
             ValueRoot::Nil => ValueRaw::Nil,
-            ValueRoot::Bool(v) => ValueRaw::Bool(v),
-            ValueRoot::Int(v) => ValueRaw::Int(v),
-            ValueRoot::Float(v) => ValueRaw::Float(v),
+            ValueRoot::Bool(v) => ValueRaw::Bool(*v),
+            ValueRoot::Int(v) => ValueRaw::Int(*v),
+            ValueRoot::Float(v) => ValueRaw::Float(*v),
             ValueRoot::Object(v) => ValueRaw::Object(v.as_ptr()),
+        }
+    }
+
+    #[inline]
+    pub fn as_ref<'v>(&'v self, heap: &'v Heap) -> ValueRef<'v> {
+        match self {
+            ValueRoot::Nil => ValueRef::Nil,
+            ValueRoot::Bool(v) => ValueRef::Bool(*v),
+            ValueRoot::Int(v) => ValueRef::Int(*v),
+            ValueRoot::Float(v) => ValueRef::Float(*v),
+            ValueRoot::Object(v) => ValueRef::Object(v.as_ref(heap)),
         }
     }
 }
@@ -1658,6 +1649,16 @@ impl<'a> ValueRef<'a> {
             ValueRef::Object(v) => v.cast(),
             _ => None,
         }
+    }
+
+    #[inline]
+    // NOTE: only `&Heap` here is OK, because the `root` is not initialized
+    // yet, therefore no `GcRef`s exist to it. if it came from a `deinit`,
+    // same story, the `self` on `fn deinit` ensures no live `GcRef` exist
+    // at the time it's called.
+    pub fn root<'u>(self, heap: &Heap, root: GcUninitRoot<'u>) -> ValueRoot<'u> {
+        // SAFETY: transitively rooted now, and rooted by `root` after
+        unsafe { self.raw().root(heap, root) }
     }
 
     // #[inline]
@@ -1792,6 +1793,13 @@ impl<T: Trace> Rooted<T> for &GcRoot<'_, T> {
     }
 }
 
+impl<T: Trace> private::Sealed for GcRef<'_, T> {}
+impl<T: Trace> Rooted<T> for GcRef<'_, T> {
+    fn as_ptr(&self) -> GcPtr<T> {
+        GcRef::as_ptr(self)
+    }
+}
+
 impl<T: Trace> private::Sealed for crate::module::native::Param<'_, T> {}
 impl<'a, T: Trace> Rooted<T> for crate::module::native::Param<'a, T> {
     fn as_ptr(&self) -> GcPtr<T> {
@@ -1816,18 +1824,18 @@ impl<'a, T: Trace> Rooted<T> for crate::module::native::Param<'a, T> {
 #[doc(hidden)]
 macro_rules! __let_root_unchecked {
     (unsafe in $heap:expr; mut $place:ident = $ptr:expr) => {
+        let heap: &$crate::gc::Heap = &$heap;
         let ptr = $ptr;
-        let mut place = unsafe { $crate::gc::StackRoot::from_heap_ptr($heap, ptr) };
-        let mut $place = unsafe {
-            $crate::gc::GcRoot::__new($heap, ::core::pin::Pin::new_unchecked(&mut place))
-        };
+        let mut place = unsafe { $crate::gc::StackRoot::from_heap_ptr(heap, ptr) };
+        let mut $place =
+            unsafe { $crate::gc::GcRoot::__new(heap, ::core::pin::Pin::new_unchecked(&mut place)) };
     };
     (unsafe in $heap:expr; $place:ident = $ptr:expr) => {
+        let heap: &$crate::gc::Heap = &$heap;
         let ptr = $ptr;
-        let mut place = unsafe { $crate::gc::StackRoot::from_heap_ptr($heap, ptr) };
-        let $place = unsafe {
-            $crate::gc::GcRoot::__new($heap, ::core::pin::Pin::new_unchecked(&mut place))
-        };
+        let mut place = unsafe { $crate::gc::StackRoot::from_heap_ptr(heap, ptr) };
+        let $place =
+            unsafe { $crate::gc::GcRoot::__new(heap, ::core::pin::Pin::new_unchecked(&mut place)) };
     };
 }
 
@@ -1858,23 +1866,25 @@ pub use crate::__let_root_unchecked as let_root_unchecked;
 #[doc(hidden)]
 macro_rules! __let_root {
     (in $heap:expr; mut $place:ident) => {
+        let heap: &$crate::gc::Heap = &$heap;
         #[allow(unused_unsafe)]
         let ptr = unsafe { $crate::gc::__Empty::__get() };
         #[allow(unused_unsafe)]
-        let mut place = unsafe { $crate::gc::StackRoot::from_heap_ptr($heap, ptr) };
+        let mut place = unsafe { $crate::gc::StackRoot::from_heap_ptr(heap, ptr) };
         #[allow(unused_unsafe)]
         let mut $place = unsafe {
-            $crate::gc::GcUninitRoot::__new($heap, ::core::pin::Pin::new_unchecked(&mut place))
+            $crate::gc::GcUninitRoot::__new(heap, ::core::pin::Pin::new_unchecked(&mut place))
         };
     };
     (in $heap:expr; $place:ident) => {
+        let heap: &$crate::gc::Heap = &$heap;
         #[allow(unused_unsafe)]
         let ptr = unsafe { $crate::gc::__Empty::__get() };
         #[allow(unused_unsafe)]
-        let mut place = unsafe { $crate::gc::StackRoot::from_heap_ptr($heap, ptr) };
+        let mut place = unsafe { $crate::gc::StackRoot::from_heap_ptr(heap, ptr) };
         #[allow(unused_unsafe)]
         let $place = unsafe {
-            $crate::gc::GcUninitRoot::__new($heap, ::core::pin::Pin::new_unchecked(&mut place))
+            $crate::gc::GcUninitRoot::__new(heap, ::core::pin::Pin::new_unchecked(&mut place))
         };
     };
 }
@@ -1907,7 +1917,10 @@ macro_rules! __reroot {
 
 /// Create a root on the stack from an existing root.
 ///
-/// Any `GcRoot` or `&GcRoot` is a valid target for re-rooting.
+/// Any rooted thing is a valid target for re-rooting, e.g.:
+/// - `&GcRoot` (rooted on native stack)
+/// - `GcRef` (transitively rooted)
+/// - `Param` (rooted on VM stack)
 ///
 /// Note that the type must be known, `GcAnyRoot` is not a valid target.
 ///
@@ -1920,3 +1933,16 @@ macro_rules! __reroot {
 /// println!("{}", a1.as_ref(heap).capacity());
 /// ```
 pub use crate::__reroot as reroot;
+
+#[macro_export]
+#[doc(hidden)]
+macro_rules! __reroot_value {
+    (in $heap:expr; mut $place:ident = $value:expr) => {
+        let ptr = $crate::gc::Rooted::as_ptr(&$ptr);
+        $crate::gc::let_root_unchecked!(unsafe in $heap; mut $place = ptr);
+    };
+    (in $heap:expr; $place:ident = $value:expr) => {
+        let ptr = $crate::gc::Rooted::as_ptr(&$ptr);
+        $crate::gc::let_root_unchecked!(unsafe in $heap; place = ptr);
+    };
+}

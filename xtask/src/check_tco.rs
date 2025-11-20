@@ -10,6 +10,16 @@ const TCO_EXCEPTIONS: &[&str] = &[
     "::hostcall",
 ];
 
+pub fn disasm() {
+    let c = cargo("build").with_args(["--release", "--package=hebi4-cli", "--bin=hebi4"]);
+    c.run();
+
+    let c = cmd(
+        "objdump -C --no-addresses --no-show-raw-insn -j .text -M intel -d target/release/hebi4",
+    );
+    c.run();
+}
+
 pub fn check_tco() {
     let o = {
         let c = cargo("build").with_args(["--release", "--package=hebi4-cli", "--bin=hebi4"]);
@@ -31,7 +41,7 @@ pub fn check_tco() {
     for section in parse_sections(&o, JUMP_TABLE_PREFIX) {
         jt.insert(section.name.strip_prefix(JUMP_TABLE_PREFIX).unwrap());
 
-        if !has_jump_to_reg(&section) {
+        if !has_tail_call(&section) {
             // this one is allowed to have no tail-call jump
             if TCO_EXCEPTIONS.iter().any(|ex| section.name.ends_with(ex)) {
                 continue;
@@ -88,15 +98,34 @@ fn is_register(s: &str) -> bool {
     }
 }
 
-fn has_jump_to_reg(section: &Section) -> bool {
+fn has_tail_call(section: &Section) -> bool {
     for ins in &section.code {
         if ins.op == "jmp" {
             let a = ins.args.trim();
-            // require a direct register, not memory
-            if !a.is_empty() && !a.contains('[') && !a.contains(']') {
+            if a.is_empty() {
+                continue;
+            }
+
+            // Check for direct register jump: `jmp rax`
+            if !a.contains('[') && !a.contains(']') {
                 let first_arg = a.split_whitespace().next().unwrap_or("");
                 if is_register(first_arg) {
                     return true;
+                }
+            }
+
+            // Check for indirect memory jump with register: `jmp QWORD PTR [rsi+rax*8]`
+            // Must contain a register to be a computed jump, not a static address
+            if let Some(start) = a.find('[') {
+                if let Some(end) = a.find(']') {
+                    let addr_expr = &a[start + 1..end];
+                    // Check if any register is used in the address expression
+                    if addr_expr
+                        .split(|c: char| !c.is_alphanumeric())
+                        .any(|part| is_register(part))
+                    {
+                        return true;
+                    }
                 }
             }
         }

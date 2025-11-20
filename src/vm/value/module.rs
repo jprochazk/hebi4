@@ -5,7 +5,7 @@ use rustc_hash::FxBuildHasher;
 
 use super::{Function, ValueRaw};
 use crate::{
-    codegen::opcodes::{FnId, Insn, Reg, asm},
+    codegen::opcodes::FnId,
     gc::Tracer,
     module::{FuncInfo, ImportBinding, Literal, Module, NativeModule},
     value::host_function::HostFunction,
@@ -17,7 +17,7 @@ use crate::{
 
 pub struct ModuleProto {
     pub(crate) name: GcPtr<Str>,
-    pub(crate) entrypoint: Option<GcPtr<Function>>,
+    pub(crate) main: FnId,
     pub(crate) functions: Box<[GcPtr<Function>]>,
     pub(crate) module_vars: Box<[ValueRaw]>,
 }
@@ -36,12 +36,8 @@ impl<'a> GcRef<'a, ModuleProto> {
     }
 
     #[inline]
-    pub(crate) fn entrypoint(&self) -> GcRef<'a, Function> {
-        GcRef::map(self, |this| match &this.entrypoint {
-            Some(entrypoint) => entrypoint,
-            // SAFETY: after initialization, `entrypoint` is never `None`
-            None => unsafe { core::hint::unreachable_unchecked() },
-        })
+    pub(crate) fn main(&self) -> GcRef<'a, Function> {
+        GcRef::map(self, |this| &this.functions[this.main.zx()])
     }
 
     #[inline]
@@ -85,8 +81,6 @@ unsafe impl Trace for ModuleProto {
     vtable!(ModuleProto);
 
     unsafe fn trace(&self, tracer: &crate::vm::gc::Tracer) {
-        tracer.visit(self.entrypoint.unwrap_unchecked());
-
         for function in self.functions.iter().copied() {
             tracer.visit(function);
         }
@@ -162,16 +156,13 @@ impl ModuleRegistry {
                 (functions.assume_init(), functions_by_name)
             };
 
-            m.init_raw(
-                heap,
-                heap.alloc_no_gc(|ptr| {
-                    (*ptr).write(NativeModuleProto {
-                        name: name.as_ptr(),
-                        functions,
-                        functions_by_name,
-                    });
-                }),
-            )
+            m.init_raw(heap.alloc_no_gc(|ptr| {
+                (*ptr).write(NativeModuleProto {
+                    name: name.as_ptr(),
+                    functions,
+                    functions_by_name,
+                });
+            }))
         };
         self.native_modules.insert(name, m.as_ptr());
     }
@@ -249,21 +240,6 @@ impl std::fmt::Debug for GcRef<'_, ImportProto> {
     }
 }
 
-// `ret`, assumes that it always returns _into_ something.
-// That allows `ret` to `pop_frame_unchecked`, removing a
-// branch from a very hot code path.
-// For the `main` entrypoint of a module, this is what it
-// will `ret` into. All it does is call the module's `main`,
-// and then halt the interpreter.
-const ENTRYPOINT: [Insn; 2] = unsafe {
-    [
-        // call the entrypoint
-        asm::fastcall(Reg::new_unchecked(0), FnId::new_unchecked(0)),
-        // halt the VM
-        asm::stop(),
-    ]
-};
-
 fn canonicalize<'a>(
     heap: &mut Heap,
     root: GcUninitRoot<'a>,
@@ -273,23 +249,17 @@ fn canonicalize<'a>(
     let name = Str::new(heap, name, info.name());
 
     let module_vars = vec![ValueRaw::Nil; info.module_vars()].into_boxed_slice();
+    let main = info.main();
     let module = unsafe {
-        root.init_raw(
-            heap,
-            heap.alloc_no_gc(|ptr| {
-                (*ptr).write(ModuleProto {
-                    name: name.as_ptr(),
-                    entrypoint: None,
-                    functions: Box::new([]),
-                    module_vars,
-                });
-            }),
-        )
+        root.init_raw(heap.alloc_no_gc(|ptr| {
+            (*ptr).write(ModuleProto {
+                name: name.as_ptr(),
+                main,
+                functions: Box::new([]),
+                module_vars,
+            });
+        }))
     };
-
-    let_root!(in heap; entrypoint);
-    let entrypoint = generate_entrypoint(heap, entrypoint, info.name(), &module);
-    module.as_mut(heap).entrypoint = Some(entrypoint.as_ptr());
 
     let mut functions = Vec::new();
     functions.reserve_exact(info.functions().len());
@@ -329,20 +299,17 @@ fn canonicalize_function<'a>(
     let dbg = function.dbg().cloned();
 
     unsafe {
-        root.init_raw(
-            heap,
-            heap.alloc_no_gc(|ptr| {
-                (*ptr).write(Function {
-                    name,
-                    nparams,
-                    nstack,
-                    code,
-                    literals,
-                    module,
-                    dbg,
-                });
-            }),
-        )
+        root.init_raw(heap.alloc_no_gc(|ptr| {
+            (*ptr).write(Function {
+                name,
+                nparams,
+                nstack,
+                code,
+                literals,
+                module,
+                dbg,
+            });
+        }))
     }
 }
 
@@ -393,31 +360,4 @@ fn canonicalize_literals(
         out.push(value);
     }
     out.into_boxed_slice()
-}
-
-fn generate_entrypoint<'a>(
-    heap: &mut Heap,
-    root: GcUninitRoot<'a>,
-    name: &str,
-    module: &GcRoot<'a, ModuleProto>,
-) -> GcRoot<'a, Function> {
-    let_root!(in heap; name_gc);
-    let name = Str::new(heap, name_gc, &format!("{name}#start"));
-
-    unsafe {
-        root.init_raw(
-            heap,
-            heap.alloc_no_gc(|ptr| {
-                (*ptr).write(Function {
-                    name: name.as_ptr(),
-                    nparams: 0,
-                    nstack: 1,
-                    code: Box::new(ENTRYPOINT),
-                    literals: Box::new([]),
-                    module: module.as_ptr(),
-                    dbg: None,
-                });
-            }),
-        )
-    }
 }

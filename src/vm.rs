@@ -59,14 +59,19 @@ use crate::{
     codegen::opcodes::*,
     core::RuntimeCoreLib,
     error::{Error, Result, error_span},
+    gc::GcAnyPtr,
     module::{self, ImportBinding},
     span::Span,
+    tag::TaggedPtr,
     value::module::ImportBindings,
-    vm::value::{
-        Closure, Function, ValueRaw,
-        closure::{ClosureProto, UpvalueDescriptor},
-        host_function::{Context, HostFunction},
-        module::{ImportProto, ModuleRegistry},
+    vm::{
+        array::DynStackIterRaw,
+        value::{
+            Closure, Function, ValueRaw,
+            closure::{ClosureProto, UpvalueDescriptor},
+            host_function::{Context, HostFunction},
+            module::{ImportProto, ModuleRegistry},
+        },
     },
 };
 
@@ -101,14 +106,6 @@ impl LpIdx for Lit8 {
 }
 
 impl Lp {
-    #[inline]
-    fn from_fn(f: GcPtr<Function>) -> Self {
-        unsafe {
-            let ptr = f.as_ref().literals().as_ptr().cast_mut();
-            Self(NonNull::new_unchecked(ptr))
-        }
-    }
-
     #[inline(always)]
     unsafe fn _at(self, r: isize) -> *const ValueRaw {
         self.0.offset(r).as_ptr()
@@ -176,14 +173,6 @@ impl Jt {
 
 impl Ip {
     #[inline]
-    fn from_fn(f: GcPtr<Function>) -> Self {
-        unsafe {
-            let ptr = f.as_mut().code_mut().as_mut_ptr();
-            Self(NonNull::new_unchecked(ptr))
-        }
-    }
-
-    #[inline]
     unsafe fn offset_from_unsigned(self, other: Self) -> usize {
         (self.0).offset_from_unsigned(other.0)
     }
@@ -215,10 +204,9 @@ impl Upvalues {
     }
 }
 
-// TODO: native call frames
 #[derive(Clone, Copy)]
 struct CallFrame {
-    callee: GcPtr<Function>,
+    callee: TaggedCalleePtr,
 
     /// Stack base of _this_ frame.
     stack_base: u32,
@@ -231,8 +219,88 @@ struct CallFrame {
     return_addr: u32,
 }
 
-const _: () =
-    assert!(core::mem::size_of::<Option<CallFrame>>() == core::mem::size_of::<CallFrame>());
+impl CallFrame {
+    #[inline]
+    fn host(callee: GcPtr<HostFunction>, stack_base: u32, return_addr: u32) -> Self {
+        Self {
+            callee: TaggedCalleePtr::host(callee),
+            stack_base,
+            return_addr,
+        }
+    }
+
+    #[inline]
+    fn script(callee: GcPtr<Function>, stack_base: u32, return_addr: u32) -> Self {
+        Self {
+            callee: TaggedCalleePtr::script(callee),
+            stack_base,
+            return_addr,
+        }
+    }
+}
+
+use tagged_callee_ptr::TaggedCalleePtr;
+mod tagged_callee_ptr {
+    use super::*;
+    use crate::gc::GcBox;
+
+    #[derive(Clone, Copy)]
+    #[repr(transparent)]
+    pub struct TaggedCalleePtr(TaggedPtr<GcBox<()>>);
+
+    impl TaggedCalleePtr {
+        const HOST_TAG: usize = 1;
+        const SCRIPT_TAG: usize = 0;
+
+        #[inline]
+        pub fn host(callee: GcPtr<HostFunction>) -> Self {
+            let v = Self(TaggedPtr::new(
+                unsafe { callee.as_any().into_raw_gcbox() },
+                Self::HOST_TAG,
+            ));
+            debug_assert!(v.is_host());
+            v
+        }
+
+        #[inline]
+        pub fn script(callee: GcPtr<Function>) -> Self {
+            let v = Self(TaggedPtr::new(
+                unsafe { callee.as_any().into_raw_gcbox() },
+                Self::SCRIPT_TAG,
+            ));
+            debug_assert!(v.is_script());
+            v
+        }
+
+        #[inline]
+        pub fn into_host(self) -> Option<GcPtr<HostFunction>> {
+            if self.is_host() {
+                Some(unsafe { GcAnyPtr::from_raw_gcbox(self.0.ptr()).cast_unchecked() })
+            } else {
+                None
+            }
+        }
+
+        #[inline]
+        pub fn into_script(self) -> Option<GcPtr<Function>> {
+            if self.is_script() {
+                Some(unsafe { GcAnyPtr::from_raw_gcbox(self.0.ptr()).cast_unchecked() })
+            } else {
+                None
+            }
+        }
+
+        #[inline]
+        pub fn is_host(self) -> bool {
+            self.0.tag() == Self::HOST_TAG
+        }
+
+        #[inline]
+        pub fn is_script(self) -> bool {
+            self.0.tag() == Self::SCRIPT_TAG
+        }
+    }
+}
 
 #[derive(Clone, Copy)]
 struct CallFramePtr(*mut CallFrame);
@@ -244,8 +312,30 @@ impl CallFramePtr {
     }
 
     #[inline]
-    unsafe fn callee(self) -> GcPtr<Function> {
+    unsafe fn callee(self) -> TaggedCalleePtr {
         (*self.0).callee
+    }
+
+    #[inline]
+    unsafe fn name(self) -> GcPtr<Str> {
+        if let Some(callee) = (*self.0).callee.into_script() {
+            callee.as_ref().name
+        } else if let Some(callee) = (*self.0).callee.into_host() {
+            callee.as_ref().name
+        } else {
+            unreachable!()
+        }
+    }
+
+    #[inline]
+    unsafe fn stack_size(self) -> u8 {
+        if let Some(callee) = (*self.0).callee.into_script() {
+            callee.as_ref().nstack
+        } else if let Some(callee) = (*self.0).callee.into_host() {
+            1 + callee.as_ref().arity
+        } else {
+            unreachable!()
+        }
     }
 
     #[inline]
@@ -260,6 +350,14 @@ impl CallFramePtr {
 }
 
 impl Vm {
+    #[inline]
+    unsafe fn previous_frame(self) -> CallFramePtr {
+        let frames = &raw mut (*self.0.as_ptr()).frames;
+        let n = (*frames).len() - 2;
+        let ptr = (*frames).at_unchecked(n);
+        CallFramePtr(ptr)
+    }
+
     #[inline]
     unsafe fn current_frame(self) -> CallFramePtr {
         let ptr = (*self.0.as_ptr()).frames.top_unchecked();
@@ -356,26 +454,87 @@ impl Vm {
     }
 
     #[inline]
-    unsafe fn take_error(mut self) -> Option<Error> {
-        self.0.as_mut().error.take()
+    unsafe fn take_error(mut self, err: VmError) -> Error {
+        if err.is_host() {
+            self.0.as_mut().error.take().unwrap().annotate(self)
+        } else {
+            err.annotate(self)
+        }
     }
 
     #[inline]
-    unsafe fn unwind(mut self) {
-        let this = self.0.as_mut();
+    unsafe fn call_frames(self) -> DynStackIterRaw<CallFrame> {
+        DynStack::iter_raw(&raw const (*self.0.as_ptr()).frames)
+    }
 
-        for frame in self.0.as_mut().frames.iter().rev() {
-            // TODO: print stack trace
+    // TODO: nicer error with stack trace
+    #[inline]
+    unsafe fn unwind(mut self) {
+        // The VM may have multiple host frames interleaved with
+        // script frames. Only unwind script frames, and let the
+        // host handle the error and pop its own frame.
+        let mut new_len = self.0.as_ref().frames.len();
+        for frame in self.call_frames().rev() {
+            let frame = CallFramePtr(frame);
+            if frame.callee().is_host() {
+                break;
+            }
+            new_len -= 1;
         }
 
-        self.0.as_mut().frames.clear();
+        #[cfg(debug_assertions)]
+        if std::env::var("PRINT_STACK_TRACE").is_ok() {
+            eprintln!("===== begin trace ======");
+            for frame in self.call_frames().rev() {
+                let frame = CallFramePtr(frame);
+                let stack_size = frame.stack_size();
+                let stack_base = frame.stack_base();
+
+                let stack = self.stack_at(stack_base as usize);
+                eprintln!(
+                    "[{name} ({kind})] stack: ",
+                    name = frame.name().as_ref().as_str(),
+                    kind = if frame.callee().is_host() {
+                        "host"
+                    } else {
+                        "script"
+                    }
+                );
+                for i in (0..stack_size).rev() {
+                    let r = unsafe { Reg::new_unchecked(i) };
+                    eprintln!(
+                        "{r} ({}) {:?}",
+                        stack_base + r.zx() as u32,
+                        (*stack.at(r)).as_ref()
+                    );
+                }
+                eprintln!();
+            }
+            eprintln!("=====  end trace =====");
+        }
+
+        // At least the VM start frame should remain.
+        debug_assert!(new_len > 0);
+        self.0.as_mut().frames.set_length(new_len);
     }
 
     #[inline]
     unsafe fn get_span(self, ip: Ip) -> Option<Span> {
-        let pc = ip.offset_from_unsigned(Ip::from_fn(self.current_frame().callee()));
-        match self.current_frame().callee().as_ref().dbg() {
-            Some(dbg) => Some(dbg.spans[pc]),
+        let callee = {
+            let mut first_non_host_callee = None;
+            for frame in self.call_frames() {
+                let frame = CallFramePtr(frame);
+                if let Some(callee) = frame.callee().into_script() {
+                    first_non_host_callee = Some(callee);
+                    break;
+                }
+            }
+            first_non_host_callee?
+        };
+
+        let pc = ip.offset_from_unsigned(Function::code_raw(callee));
+        match callee.as_ref().dbg() {
+            Some(dbg) => dbg.spans.get(pc).copied(),
             None => None,
         }
     }
@@ -405,6 +564,11 @@ impl Vm {
     #[inline]
     unsafe fn stdio(self) -> *mut Stdio {
         &raw mut (*self.0.as_ptr()).stdio
+    }
+
+    #[inline]
+    unsafe fn entrypoint(self) -> GcPtr<HostFunction> {
+        (*self.0.as_ptr()).entrypoint
     }
 
     #[inline]
@@ -646,6 +810,15 @@ impl Control {
     #[inline]
     fn error(code: VmError) -> Control {
         Control::Error(code)
+    }
+
+    #[inline]
+    fn is_error(self) -> bool {
+        if let Self::Error(code) = self {
+            true
+        } else {
+            false
+        }
     }
 }
 
@@ -1740,7 +1913,7 @@ unsafe fn call(vm: Vm, jt: Jt, ip: Ip, args: Call, sp: Sp, lp: Lp) -> Control {
     let callee = *sp.at(args.callee());
     let nargs = args.args().get();
 
-    do_generic_call(callee, ret, nargs, vm, jt, ip, sp, lp)
+    do_generic_call(callee, ret, nargs, vm, jt, sp, lp, ip)
 }
 
 #[cold]
@@ -1758,7 +1931,14 @@ unsafe fn fastcall(vm: Vm, jt: Jt, ip: Ip, args: Fastcall, sp: Sp, lp: Lp) -> Co
     let ret = args.dst();
     let callee = vm.get_function_in_current_module(args.id());
 
-    let (sp, lp, ip) = do_call(callee, ret, ip, vm);
+    // SAFETY: We're in the middle of executing bytecode, so current call frame is guaranteed
+    // to have a script callee.
+    let current_function_start =
+        Function::code_raw(vm.current_frame().callee().into_script().unwrap_unchecked());
+    // Return addr points to the next instruction after the call instruction.
+    let return_addr = 1 + ip.offset_from_unsigned(current_function_start) as u32;
+
+    let (sp, lp, ip) = prepare_call(callee, ret, vm, return_addr);
 
     dispatch_current(vm, jt, ip, sp, lp)
 }
@@ -1770,7 +1950,14 @@ unsafe fn hostcall(vm: Vm, jt: Jt, ip: Ip, args: Hostcall, sp: Sp, lp: Lp) -> Co
 
     let nargs = callee.as_ref().arity;
 
-    do_host_call(callee, vm, jt, ip, sp, lp, ret, nargs)
+    // SAFETY: We're in the middle of executing bytecode, so current call frame is guaranteed
+    // to have a script callee.
+    let current_function_start =
+        Function::code_raw(vm.current_frame().callee().into_script().unwrap_unchecked());
+    // Return addr points to the next instruction after the call instruction.
+    let return_addr = 1 + ip.offset_from_unsigned(current_function_start) as u32;
+
+    do_host_call(callee, vm, jt, sp, lp, ip, ret, nargs, return_addr)
 }
 
 unsafe fn import(vm: Vm, jt: Jt, ip: Ip, args: Import, sp: Sp, lp: Lp) -> Control {
@@ -1820,7 +2007,10 @@ unsafe fn module_item_not_found_error(ip: Ip, vm: Vm) -> Control {
 
 #[inline(always)]
 unsafe fn ret(vm: Vm, jt: Jt, ip: Ip, args: Ret, sp: Sp, lp: Lp) -> Control {
-    let (sp, lp, ip) = return_from_call(vm);
+    let (sp, lp, ip) = match return_from_call(vm) {
+        Some(v) => v,
+        None => return Control::stop(),
+    };
 
     dispatch_current(vm, jt, ip, sp, lp)
 }
@@ -1829,7 +2019,10 @@ unsafe fn ret(vm: Vm, jt: Jt, ip: Ip, args: Ret, sp: Sp, lp: Lp) -> Control {
 unsafe fn retv(vm: Vm, jt: Jt, ip: Ip, args: Retv, sp: Sp, lp: Lp) -> Control {
     *sp.ret() = *sp.at(args.src());
 
-    let (sp, lp, ip) = return_from_call(vm);
+    let (sp, lp, ip) = match return_from_call(vm) {
+        Some(v) => v,
+        None => return Control::stop(),
+    };
 
     dispatch_current(vm, jt, ip, sp, lp)
 }
@@ -1844,19 +2037,26 @@ unsafe fn do_generic_call(
     callee: ValueRaw,
     ret: Reg,
     nargs: u8,
-
     vm: Vm,
     jt: Jt,
-    ip: Ip,
     sp: Sp,
     lp: Lp,
+    ip: Ip,
 ) -> Control {
+    // SAFETY: We're in the middle of executing bytecode, so current call frame is guaranteed
+    // to have a script callee.
+    let current_function_start =
+        Function::code_raw(vm.current_frame().callee().into_script().unwrap_unchecked());
+    // Return addr points to the next instruction after the call instruction.
+    let return_addr = 1 + ip.offset_from_unsigned(current_function_start) as u32;
+
     if let Some(callee) = callee.into_object::<Function>() {
         if callee.as_ref().nparams != nargs {
             return arity_mismatch_error(ip, vm);
         }
 
-        let (sp, lp, ip) = do_call(callee, ret, ip, vm);
+        let jt = JT.as_ptr();
+        let (sp, lp, ip) = prepare_call(callee, ret, vm, return_addr);
 
         dispatch_current(vm, jt, ip, sp, lp)
     } else if let Some(callee) = callee.into_object::<Closure>() {
@@ -1864,7 +2064,8 @@ unsafe fn do_generic_call(
             return arity_mismatch_error(ip, vm);
         }
 
-        let (sp, lp, ip) = do_closure_call(callee, ret, ip, vm);
+        let jt = JT.as_ptr();
+        let (sp, lp, ip) = prepare_closure_call(callee, ret, vm, return_addr);
 
         dispatch_current(vm, jt, ip, sp, lp)
     } else if let Some(callee) = callee.into_object::<HostFunction>() {
@@ -1872,7 +2073,7 @@ unsafe fn do_generic_call(
             return arity_mismatch_error(ip, vm);
         }
 
-        do_host_call(callee, vm, jt, ip, sp, lp, ret, nargs)
+        do_host_call(callee, vm, jt, sp, lp, ip, ret, nargs, return_addr)
     } else {
         not_callable_error(ip, vm)
     }
@@ -1896,34 +2097,36 @@ unsafe fn do_generic_call(
 /// `r0` in the new frame will be in the same location as `r6`
 /// in the previous frame.
 #[inline(always)]
-unsafe fn do_call(callee: GcPtr<Function>, ret: Reg, ip: Ip, vm: Vm) -> (Sp, Lp, Ip) {
+unsafe fn prepare_call(
+    callee: GcPtr<Function>,
+    ret: Reg,
+    vm: Vm,
+    return_addr: u32,
+) -> (Sp, Lp, Ip) {
     // See doc comment.
     let stack_base = vm.current_frame().stack_base() + (ret.get() as u32);
     let frame_size = callee.as_ref().stack_size();
 
-    // Return addr points to the next instruction after the call instruction.
-    let current_function_start = Ip::from_fn(vm.current_frame().callee());
-    let return_addr = 1 + (ip.offset_from_unsigned(current_function_start) as u32);
-
     let sp: Sp = maybe_grow_stack(vm, stack_base as usize, frame_size);
-    let lp: Lp = Lp::from_fn(callee);
-    let ip: Ip = Ip::from_fn(callee);
+    let lp: Lp = Function::literals_raw(callee);
+    let ip: Ip = Function::code_raw(callee);
     vm.set_current_module_for(callee);
-    vm.push_frame(CallFrame {
-        callee,
-        stack_base,
-        return_addr,
-    });
+    vm.push_frame(CallFrame::script(callee, stack_base, return_addr));
 
     (sp, lp, ip)
 }
 
 /// Exactly like `do_call`, but also sets upvalue ptr.
 #[inline(always)]
-unsafe fn do_closure_call(callee: GcPtr<Closure>, ret: Reg, ip: Ip, vm: Vm) -> (Sp, Lp, Ip) {
+unsafe fn prepare_closure_call(
+    callee: GcPtr<Closure>,
+    ret: Reg,
+    vm: Vm,
+    return_addr: u32,
+) -> (Sp, Lp, Ip) {
     vm.set_current_upvalues_for(callee);
 
-    do_call(callee.as_ref().func, ret, ip, vm)
+    prepare_call(callee.as_ref().func, ret, vm, return_addr)
 }
 
 /// Call a host function.
@@ -1932,28 +2135,57 @@ unsafe fn do_closure_call(callee: GcPtr<Closure>, ret: Reg, ip: Ip, vm: Vm) -> (
 #[inline(always)]
 unsafe fn do_host_call(
     callee: GcPtr<HostFunction>,
+
     vm: Vm,
     jt: Jt,
-    ip: Ip,
     sp: Sp,
     lp: Lp,
+    ip: Ip,
     ret: Reg,
     nargs: u8,
+    return_addr: u32,
 ) -> Control {
     let context = {
-        let stack_base = (vm.current_frame().stack_base() + (ret.get() as u32)) as usize;
-        let sp: Sp = vm.stack_at(stack_base);
+        let stack_base = vm.current_frame().stack_base() + (ret.get() as u32);
+        debug_assert!(
+            vm.has_enough_stack_space(stack_base as usize, 1 + callee.as_ref().arity as usize)
+        );
+        vm.push_frame(CallFrame::host(callee, stack_base, return_addr));
+        let sp: Sp = vm.stack_at(stack_base as usize);
         Context::new(vm, sp, nargs)
     };
-    match (callee.as_ref().f)(context) {
+
+    let result = (callee.as_ref().f)(context);
+
+    match result {
         Ok(value) => {
             *sp.at(ret) = value;
+
+            debug_assert!(
+                vm.current_frame()
+                    .callee()
+                    .into_host()
+                    .is_some_and(|c| { c.into_raw() == callee.into_raw() })
+            );
+            vm.pop_frame_unchecked();
 
             dispatch_next(vm, jt, ip, sp, lp)
         }
         Err(err) => {
             vm.set_saved_ip(ip);
             vm.write_error(err);
+
+            vm.unwind();
+            debug_assert!(
+                vm.current_frame()
+                    .callee()
+                    .into_host()
+                    .is_some_and(|c| { c.into_raw() == callee.into_raw() }),
+                "expected frame {} but got {}",
+                callee.as_ref().name.as_ref().as_str(),
+                vm.current_frame().name().as_ref().as_str(),
+            );
+            vm.pop_frame_unchecked();
 
             Control::error(VmError::Host)
         }
@@ -1963,8 +2195,9 @@ unsafe fn do_host_call(
 /// If the stack does not have enough space, grow it.
 #[inline(always)]
 unsafe fn maybe_grow_stack(vm: Vm, stack_base: usize, frame_size: usize) -> Sp {
+    // TODO(?): always grow a fixed 255
     if !vm.has_enough_stack_space(stack_base, frame_size) {
-        grow_stack(vm, frame_size)
+        grow_stack(vm, frame_size);
     }
 
     vm.stack_at(stack_base)
@@ -1976,24 +2209,29 @@ unsafe fn grow_stack(vm: Vm, frame_size: usize) {
     vm.grow_stack(frame_size);
 }
 
-/// Returning from a call requires
 #[inline(always)]
-unsafe fn return_from_call(vm: Vm) -> (Sp, Lp, Ip) {
+unsafe fn return_from_call(vm: Vm) -> Option<(Sp, Lp, Ip)> {
     // Only called from `ret`, meaning we are guaranteed to have
     // at least the one call frame which is currently being executed.
 
-    let returning_from = core::ptr::replace(vm.current_frame().raw(), vm.pop_frame_unchecked());
+    let returning_from = vm.pop_frame_unchecked();
     let returning_to = vm.current_frame();
+
+    let Some(callee) = returning_to.callee().into_script() else {
+        // Yield to host
+        return None;
+    };
+    debug_assert!(callee.as_any().is::<Function>());
 
     let stack_base = returning_to.stack_base() as usize;
     let return_addr = returning_from.return_addr as usize;
 
     let sp: Sp = vm.stack_at(stack_base);
-    let lp: Lp = Lp::from_fn(returning_to.callee());
-    let ip: Ip = Ip::from_fn(returning_to.callee()).offset(return_addr as isize);
-    vm.set_current_module_for(returning_to.callee());
+    let lp: Lp = Function::literals_raw(callee);
+    let ip: Ip = Function::code_raw(callee).offset(return_addr as isize);
+    vm.set_current_module_for(callee);
 
-    (sp, lp, ip)
+    Some((sp, lp, ip))
 }
 
 pub trait StdioWrite: std::io::Write + std::any::Any + 'static {
@@ -2057,6 +2295,8 @@ pub(crate) struct VmState {
 
     current_upvalues: Option<Upvalues>,
 
+    entrypoint: GcPtr<HostFunction>,
+
     /// Saved error.
     ///
     /// Used to avoid bloating size of instruction handler return value.
@@ -2077,6 +2317,11 @@ impl Hebi {
 
         let heap = gc::Heap::new();
 
+        let entrypoint = {
+            let name = Str::alloc(&heap, "@start");
+            HostFunction::alloc(&heap, name, 0, std::rc::Rc::new(|_| unreachable!()))
+        };
+
         Hebi {
             inner: Box::new(VmState {
                 registry: ModuleRegistry::new(),
@@ -2087,6 +2332,8 @@ impl Hebi {
 
                 current_module: None,
                 current_upvalues: None,
+
+                entrypoint,
 
                 error: None,
                 saved_ip: None,
@@ -2150,6 +2397,7 @@ impl gc::ExternalRoots for VmRoots {
                 frames,
                 current_module,
                 current_upvalues,
+                entrypoint,
                 error,
                 saved_ip,
             } = todo!();
@@ -2167,30 +2415,46 @@ impl gc::ExternalRoots for VmRoots {
             this!()
                 .frames
                 .top()
-                .map(|f| 1 + ((*f).stack_base as usize) + (*f).callee.as_ref().stack_size())
+                .map(|f| 1
+                    + ((*f).stack_base as usize)
+                    + (*f)
+                        .callee
+                        .into_script()
+                        .map(|v| v.as_ref().stack_size())
+                        .unwrap_or_default())
                 .unwrap_or_default()
         );
 
         // call stack (holds functions)
         for frame in this!().frames.iter() {
-            tracer.visit(frame.callee);
+            if let Some(callee) = frame.callee.into_host() {
+                tracer.visit(callee);
+            } else if let Some(callee) = frame.callee.into_script() {
+                tracer.visit(callee);
+            } else {
+                unreachable!();
+            }
         }
 
         // value stack (registers)
         let frames = &mut this!().frames;
         let sp = this!().stack.offset(0);
         if let Some(frame) = frames.top() {
-            let base = (*frame).stack_base as usize;
-            let nstack = (*frame).callee.as_ref().stack_size();
-            let stack_len = base + nstack;
+            if let Some(callee) = (*frame).callee.into_script() {
+                let base = (*frame).stack_base as usize;
+                let nstack = callee.as_ref().stack_size();
+                let stack_len = base + nstack;
 
-            debug_print!("stack len: {stack_len}");
-            for i in 0..stack_len {
-                debug_print!("stack[{i}]");
-                tracer.visit_value(sp.add(i).read());
+                debug_print!("stack len: {stack_len}");
+                for i in 0..stack_len {
+                    debug_print!("stack[{i}]");
+                    tracer.visit_value(sp.add(i).read());
+                }
+                debug_print!("stack end");
             }
-            debug_print!("stack end");
         }
+
+        tracer.visit(this!().entrypoint);
 
         // modules
         this!().registry.trace(tracer);
@@ -2253,96 +2517,96 @@ impl<'vm> Runtime<'vm> {
     ///
     /// Note that modules must go through [`Runtime::load`] first.
     pub fn run(&mut self, m: &Module<'vm>) -> Result<ValueRaw> {
-        self.run_inner(m.inner)?;
+        let vm = Vm(self.vm);
+        let jt = JT.as_ptr();
 
-        // SAFETY: Functions always store their return values in slot 0,
-        // and are guaranteed to always allocate at least that slot.
-        //
-        // TODO: The resulting value is alive only because of implementation
-        // details - we need to guarantee this _somehow_. Currently no GC happens
-        // between the last `ret` and this point, and all stack values used
-        // by the main entrypoint are guaranteed to not have been collected yet
-        // until after its `ret`, at which point the stack frame is considered
-        // dead.
-        let vm = unsafe { self.vm.as_mut() };
-        let value = unsafe { *vm.stack.offset(0) };
-        Ok(value)
+        unsafe {
+            vm.push_frame(CallFrame::host(vm.entrypoint(), 0, 0));
+        }
+
+        let main = unsafe { m.inner.as_ref().main().as_ptr() };
+        let value = unsafe {
+            let (sp, lp, ip) = prepare_call(
+                main,
+                Reg::new_unchecked(0),
+                vm,
+                0, // return to host
+            );
+
+            dispatch_loop(vm, jt, ip, sp, lp)
+        };
+
+        let result = match value {
+            Ok(value) => Ok(value),
+            Err(err) => unsafe {
+                let err = vm.take_error(err);
+                vm.unwind();
+                Err(err)
+            },
+        };
+
+        unsafe {
+            debug_assert!((*self.vm.as_ptr()).frames.len() == 1);
+            debug_assert!(
+                (*self.vm.as_ptr())
+                    .frames
+                    .top()
+                    .is_some_and(|frame| (*frame).callee.into_host().unwrap().into_raw()
+                        == (*self.vm.as_ptr()).entrypoint.into_raw())
+            );
+
+            vm.pop_frame_unchecked();
+        }
+
+        result
     }
 
     #[cfg(feature = "async")]
     pub async fn run_async(&mut self, m: &Module<'vm>) -> Result<ValueRaw> {
         stackful::stackful(|| self.run(m)).await
     }
+}
 
-    fn run_inner(&mut self, m: GcPtr<ModuleProto>) -> Result<()> {
-        unsafe {
-            Vm(self.vm).push_frame(CallFrame {
-                callee: m.as_ref().entrypoint().as_ptr(),
-                stack_base: 0,
-                return_addr: 0,
-            });
-            self.vm.as_mut().current_module = Some(m);
+#[inline]
+unsafe fn dispatch_loop(vm: Vm, jt: Jt, ip: Ip, sp: Sp, lp: Lp) -> Result<ValueRaw, VmError> {
+    // In debug mode and Wasm, fall back to loop+match.
+    //
+    // Each instruction will return `Control::Continue`
+    // instead of tail-calling the next handler.
+    #[cfg(any(debug_assertions, target_arch = "wasm32"))]
+    {
+        let mut sp: Sp = sp;
+        let mut lp: Lp = lp;
+        let mut ip: Ip = ip;
 
-            let vm: Vm = Vm(self.vm);
-            let jt: Jt = JT.as_ptr();
-            let sp: Sp = vm.stack_at(0);
-            let lp: Lp = Lp::from_fn(vm.current_frame().callee());
-            let ip: Ip = Ip::from_fn(vm.current_frame().callee());
+        loop {
+            let insn = ip.get();
+            let op = jt.at(insn);
+            match op(vm, jt, ip, insn, sp, lp) {
+                Control::Stop => return Ok(*sp.ret()),
+                Control::Error(err) => return Err(err),
 
-            // In debug mode and Wasm, fall back to loop+match.
-            //
-            // Each instruction will return `Control::Continue`
-            // instead of tail-calling the next handler.
-            #[cfg(any(debug_assertions, target_arch = "wasm32"))]
-            {
-                let mut sp: Sp = sp;
-                let mut lp: Lp = lp;
-                let mut ip: Ip = ip;
-
-                loop {
-                    let insn = ip.get();
-                    let op = jt.at(insn);
-                    match op(vm, jt, ip, insn, sp, lp) {
-                        Control::Stop => return Ok(()),
-                        Control::Error(err) => {
-                            let err = if err.is_host() {
-                                vm.take_error().unwrap().annotate(vm)
-                            } else {
-                                err.annotate(vm)
-                            };
-                            vm.unwind();
-                            return Err(err);
-                        }
-
-                        #[cfg(any(debug_assertions, target_arch = "wasm32"))]
-                        Control::Continue(new_sp, new_lp, new_ip) => {
-                            sp = new_sp;
-                            lp = new_lp;
-                            ip = new_ip;
-                            continue;
-                        }
-                    }
+                #[cfg(any(debug_assertions, target_arch = "wasm32"))]
+                Control::Continue(new_sp, new_lp, new_ip) => {
+                    sp = new_sp;
+                    lp = new_lp;
+                    ip = new_ip;
+                    continue;
                 }
-            }
-
-            #[cfg(not(any(debug_assertions, target_arch = "wasm32")))]
-            {
-                let ctrl = dispatch_current(vm, jt, ip, sp, lp);
-
-                if ctrl.is_error() {
-                    let err = ctrl.error_code();
-                    let err = if err.is_host() {
-                        vm.take_error().unwrap().annotate(vm)
-                    } else {
-                        err.annotate(vm)
-                    };
-                    vm.unwind();
-                    return Err(err);
-                }
-
-                return Ok(());
             }
         }
+    }
+
+    #[cfg(not(any(debug_assertions, target_arch = "wasm32")))]
+    {
+        let ctrl = dispatch_current(vm, jt, ip, sp, lp);
+
+        if ctrl.is_error() {
+            let err = ctrl.error_code();
+            return Err(err);
+        }
+
+        return Ok(*sp.ret());
     }
 }
 

@@ -1,0 +1,28 @@
+---
+source: src/vm/tests.rs
+expression: snapshot
+---
+SOURCE
+//module
+// `cx.call` should work on:
+
+// regular functions
+fn square(n) { n*n }
+print(map([0,1,2], square))
+
+// closures
+fn multiply_by(y) {
+  return (fn(x) { x*y })
+}
+print(map([0,1,2], multiply_by(10)))
+
+// host functions
+print(map([0,1,2], to_str))
+
+OK
+Nil
+
+STDOUT
+[Int(0), Int(1), Int(4)]
+[Int(0), Int(10), Int(20)]
+["0", "1", "2"]

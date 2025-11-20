@@ -14,6 +14,7 @@ mod intern;
 
 pub mod module;
 
+mod tag;
 mod thin;
 
 #[macro_use]
@@ -38,8 +39,8 @@ pub mod prelude {
         codegen::EmitOptions,
         error::{Result as HebiResult, error},
         module::{
-            Module, NativeFunction, NativeModule, Param, TryFromHebiValueRaw, TryIntoHebiValueRaw,
-            Value, f,
+            Module, NativeFunction, NativeModule, Param, Ret, TryFromHebiValueRaw,
+            TryIntoHebiValueRaw, Value, f,
         },
         vm::{
             Hebi, Stdio, StdioWrite,

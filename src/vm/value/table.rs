@@ -27,9 +27,9 @@ impl Table {
     }
 
     #[inline(never)]
-    pub fn new<'a>(heap: &mut Heap, root: GcUninitRoot<'a>, capacity: usize) -> GcRoot<'a, Self> {
+    pub fn new<'a>(heap: &Heap, root: GcUninitRoot<'a>, capacity: usize) -> GcRoot<'a, Self> {
         let ptr = Self::alloc(heap, capacity);
-        unsafe { root.init_raw(heap, ptr) }
+        unsafe { root.init_raw(ptr) }
     }
 }
 

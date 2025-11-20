@@ -37,6 +37,15 @@ impl<T: Sized + Copy> DynStack<T> {
         self.length = 0;
     }
 
+    /// Set length to `new_len`.
+    ///
+    /// `new_len` must be less than or equal to current length.
+    #[inline]
+    pub unsafe fn set_length(&mut self, new_len: usize) {
+        debug_assert!(self.length >= new_len);
+        self.length = new_len;
+    }
+
     /// Push a value onto the stack.
     ///
     /// This grows the array if necessary.
@@ -77,6 +86,18 @@ impl<T: Sized + Copy> DynStack<T> {
         self.inner.base.add(self.length - 1)
     }
 
+    /// Read the `n`th value.
+    ///
+    /// Assumes length is non-zero.
+    ///
+    /// # Safety
+    /// - There must be a value at the top of the stack.
+    #[inline]
+    pub unsafe fn at_unchecked(&mut self, n: usize) -> *mut T {
+        debug_assert!(self.length > n);
+        self.inner.base.add(n)
+    }
+
     #[inline]
     pub fn top(&mut self) -> Option<*mut T> {
         if self.length == 0 {
@@ -102,6 +123,15 @@ impl<T: Sized + Copy> DynStack<T> {
             stack: self,
             front: 0,
             back: self.len().wrapping_sub(1),
+        }
+    }
+
+    #[inline]
+    pub unsafe fn iter_raw(this: *const Self) -> DynStackIterRaw<T> {
+        DynStackIterRaw {
+            stack: this,
+            front: 0,
+            back: (*this).length.wrapping_sub(1),
         }
     }
 }
@@ -137,6 +167,40 @@ impl<'a, T: Sized + Copy> DoubleEndedIterator for DynStackIter<'a, T> {
         self.back = self.back.wrapping_sub(1);
 
         Some(unsafe { &*self.stack.inner.offset(index) })
+    }
+}
+
+pub struct DynStackIterRaw<T: Sized + Copy> {
+    stack: *const DynStack<T>,
+    front: usize,
+    back: usize,
+}
+
+impl<T: Sized + Copy> Iterator for DynStackIterRaw<T> {
+    type Item = *mut T;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.front >= unsafe { (*self.stack).length } {
+            return None;
+        }
+
+        let index = self.front;
+        self.front = self.front.wrapping_add(1);
+
+        Some(unsafe { (*self.stack).inner.offset(index) })
+    }
+}
+
+impl<T: Sized + Copy> DoubleEndedIterator for DynStackIterRaw<T> {
+    fn next_back(&mut self) -> Option<Self::Item> {
+        if self.back >= unsafe { (*self.stack).length } {
+            return None;
+        }
+
+        let index = self.back;
+        self.back = self.back.wrapping_sub(1);
+
+        Some(unsafe { (*self.stack).inner.offset(index) })
     }
 }
 
