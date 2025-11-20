@@ -4,8 +4,9 @@ language = "en"
 src = "docs"
 
 [output.html]
+site-url = "/docs/"
 git-repository-url = "https://github.com/jprochazk/hebi4"
 edit-url-template = "https://github.com/jprochazk/hebi4/edit/main/{path}"
 
 [build]
-build-dir = "book"
+build-dir = "dist/docs"

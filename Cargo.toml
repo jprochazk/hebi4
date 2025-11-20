@@ -38,4 +38,4 @@ glob_test = { version = "0.1" }
 smol = "2.0.2"
 
 [workspace]
-members = ["asmgen", "astgen", "xtask", "cli", "playground"]
+members = ["asmgen", "astgen", "xtask", "cli", "site"]
