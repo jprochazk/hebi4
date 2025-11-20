@@ -1,8 +1,8 @@
-use std::sync::Arc;
+use std::{ptr::NonNull, sync::Arc};
 
 use super::Str;
 use crate::{
-    codegen::opcodes::Insn,
+    codegen::opcodes::{Insn, Ip, Lp},
     module::FuncDebugInfo,
     vm::{
         gc::{GcPtr, GcRef, GcRefMut, Trace},
@@ -65,6 +65,22 @@ impl<'a> GcRefMut<'a, Function> {
     #[inline]
     pub(crate) fn code_mut(&mut self) -> &mut [Insn] {
         &mut self.code[..]
+    }
+}
+
+impl Function {
+    #[inline]
+    pub(crate) unsafe fn code_raw(ptr: GcPtr<Function>) -> Ip {
+        let ptr = &raw mut *(*ptr.into_raw().as_ptr()).code;
+        let ptr = ptr as *mut Insn;
+        Ip(NonNull::new_unchecked(ptr))
+    }
+
+    #[inline]
+    pub(crate) unsafe fn literals_raw(ptr: GcPtr<Function>) -> Lp {
+        let ptr = &raw mut *(*ptr.into_raw().as_ptr()).literals;
+        let ptr = ptr as *mut ValueRaw;
+        Lp(NonNull::new_unchecked(ptr))
     }
 }
 

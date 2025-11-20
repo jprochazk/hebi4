@@ -106,14 +106,6 @@ impl LpIdx for Lit8 {
 }
 
 impl Lp {
-    #[inline]
-    fn from_fn(f: GcPtr<Function>) -> Self {
-        unsafe {
-            let ptr = f.as_ref().literals().as_ptr().cast_mut();
-            Self(NonNull::new_unchecked(ptr))
-        }
-    }
-
     #[inline(always)]
     unsafe fn _at(self, r: isize) -> *const ValueRaw {
         self.0.offset(r).as_ptr()
@@ -180,14 +172,6 @@ impl Jt {
 }
 
 impl Ip {
-    #[inline]
-    fn from_fn(f: GcPtr<Function>) -> Self {
-        unsafe {
-            let ptr = f.as_mut().code_mut().as_mut_ptr();
-            Self(NonNull::new_unchecked(ptr))
-        }
-    }
-
     #[inline]
     unsafe fn offset_from_unsigned(self, other: Self) -> usize {
         (self.0).offset_from_unsigned(other.0)
@@ -549,7 +533,7 @@ impl Vm {
             first_non_host_callee?
         };
 
-        let pc = ip.offset_from_unsigned(Ip::from_fn(callee));
+        let pc = ip.offset_from_unsigned(Function::code_raw(callee));
         match callee.as_ref().dbg() {
             Some(dbg) => dbg.spans.get(pc).copied(),
             None => None,
@@ -1951,7 +1935,7 @@ unsafe fn fastcall(vm: Vm, jt: Jt, ip: Ip, args: Fastcall, sp: Sp, lp: Lp) -> Co
     // SAFETY: We're in the middle of executing bytecode, so current call frame is guaranteed
     // to have a script callee.
     let current_function_start =
-        Ip::from_fn(vm.current_frame().callee().into_script().unwrap_unchecked());
+        Function::code_raw(vm.current_frame().callee().into_script().unwrap_unchecked());
     // Return addr points to the next instruction after the call instruction.
     let return_addr = 1 + ip.offset_from_unsigned(current_function_start) as u32;
 
@@ -1970,7 +1954,7 @@ unsafe fn hostcall(vm: Vm, jt: Jt, ip: Ip, args: Hostcall, sp: Sp, lp: Lp) -> Co
     // SAFETY: We're in the middle of executing bytecode, so current call frame is guaranteed
     // to have a script callee.
     let current_function_start =
-        Ip::from_fn(vm.current_frame().callee().into_script().unwrap_unchecked());
+        Function::code_raw(vm.current_frame().callee().into_script().unwrap_unchecked());
     // Return addr points to the next instruction after the call instruction.
     let return_addr = 1 + ip.offset_from_unsigned(current_function_start) as u32;
 
@@ -2063,7 +2047,7 @@ unsafe fn do_generic_call(
     // SAFETY: We're in the middle of executing bytecode, so current call frame is guaranteed
     // to have a script callee.
     let current_function_start =
-        Ip::from_fn(vm.current_frame().callee().into_script().unwrap_unchecked());
+        Function::code_raw(vm.current_frame().callee().into_script().unwrap_unchecked());
     // Return addr points to the next instruction after the call instruction.
     let return_addr = 1 + ip.offset_from_unsigned(current_function_start) as u32;
 
@@ -2125,8 +2109,8 @@ unsafe fn prepare_call(
     let frame_size = callee.as_ref().stack_size();
 
     let sp: Sp = maybe_grow_stack(vm, stack_base as usize, frame_size);
-    let lp: Lp = Lp::from_fn(callee);
-    let ip: Ip = Ip::from_fn(callee);
+    let lp: Lp = Function::literals_raw(callee);
+    let ip: Ip = Function::code_raw(callee);
     vm.set_current_module_for(callee);
     vm.push_frame(CallFrame::script(callee, stack_base, return_addr));
 
@@ -2244,8 +2228,8 @@ unsafe fn return_from_call(vm: Vm) -> Option<(Sp, Lp, Ip)> {
     let return_addr = returning_from.return_addr as usize;
 
     let sp: Sp = vm.stack_at(stack_base);
-    let lp: Lp = Lp::from_fn(callee);
-    let ip: Ip = Ip::from_fn(callee).offset(return_addr as isize);
+    let lp: Lp = Function::literals_raw(callee);
+    let ip: Ip = Function::code_raw(callee).offset(return_addr as isize);
     vm.set_current_module_for(callee);
 
     Some((sp, lp, ip))
