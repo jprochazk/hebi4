@@ -10,7 +10,6 @@ macro_rules! debug_print {
     }};
 }
 
-use crate::tag::TaggedPtr;
 use std::{
     cell::{Cell, UnsafeCell},
     marker::{PhantomData, PhantomPinned},
@@ -21,6 +20,7 @@ use std::{
 };
 
 use super::value::{StringHasher, ValueRaw};
+use crate::tag::TaggedPtr;
 
 // # Heap
 
