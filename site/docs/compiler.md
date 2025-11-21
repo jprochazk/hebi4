@@ -70,9 +70,9 @@ the code generator allocates contiguous registers for the return slot and call a
 
 The "holy grail" is that something like:
 
-```js
-var table = {}
-var value = 100
+```rust
+let table = {}
+let value = 100
 table["constant_key"] = value
 ```
 
@@ -86,8 +86,6 @@ skeyc r1, l0, r2  # store `r2` in `r1` at key `l0`
 
 ### Dead code elimination
 
-NOTE: This is not implemented yet.
-
 We keep track of basic block boundaries during compilation. A basic block entry is either the beginning
 of a function, or a jump target. A basic block exit is any control flow instruction, such as `jmp`
 or `ret`.
@@ -95,6 +93,26 @@ or `ret`.
 When inside a basic block, we don't do anything special. But when encountering a BB exit, we mark any
 subsequent generated code as "unreachable". Unreachable code is never even emitted, though we still
 traverse the AST as usual.
+
+### Instruction specialization
+
+Some instructions have variants which perform fewer checks or allow for using some sort of shortcut
+to achieve the same outcome.
+
+For example, there is a generic `call` instruction, with variants:
+
+- `fastcall`, which directly dispatches a function by ID and performs no type or arity checking.
+- `hostcall`, which dispatches a _host function_ from the language's core library.
+
+In the VM, values may be stored in:
+
+- Registers
+- Upvalues
+- Module variables
+- Literal slots
+
+Some instructions are specialized to accept these as operands directly, others require materializing
+these into registers first.
 
 ## Errors
 
