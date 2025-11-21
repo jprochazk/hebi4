@@ -68,7 +68,7 @@ void interpreter(Instruction* bytecode, Value* stack) {
   };
 
   jmp: {
-    Offset offset = operand_a16(insn);
+    Offset offset = operand_a24(insn);
 
     bytecode += offset;
     insn = *bytecode;
@@ -91,10 +91,70 @@ a lot of nice features, and most of the compiler _can_ use safe code. Even a lot
 can use safe code. It feels bad to have to give that up, just so that the instruction dispatch method
 used can be "optimal".
 
-We can't hope to match the performance of an interpeter in hand-written assembly, but we can get pretty
-close, or even beat one which is written in C.
+We can mostly have our cake and eat it too, using tail calls.
+
+```rust
+enum Control {
+  Stop,
+  Error,
+}
+
+const JUMP_TABLE: [fn(Ip, Sp, Instruction) -> Control; 256] = [
+  nop,
+  mov,
+  jmp,
+  halt,
+  // ...
+];
+
+fn dispatch_current(ip: Ip, sp: Sp) -> Control {
+  let insn = ip.read();
+  JUMP_TABLE[opcode(insn)](ip, sp)
+}
+
+fn dispatch_next(ip: Ip, sp: Sp) -> Control {
+  let ip = ip.next();
+  dispatch_current(ip, sp)
+}
+
+fn nop(ip: Ip, sp: Sp, insn: Instruction) -> Control {
+  dispatch_next(ip, sp)
+}
+
+fn mov(ip: Ip, sp: Sp, insn: Instruction) -> Control {
+  let src = operand_a8(insn);
+  let dst = operand_b8(insn);
+
+  let tmp = sp.read(src);
+  sp.write(dst, tmp);
+
+  dispatch_next(ip, sp)
+}
+
+fn jmp(ip: Ip, sp: Sp, insn: Instruction) -> Control {
+  let offset = operand_a24(insn);
+
+  let ip = ip.add(offset);
+
+  dispatch_current(ip, sp)
+}
+
+fn halt(ip: Ip, sp: Sp, insn: Instruction) -> Control {
+  Control::Stop
+}
+```
+
+The above code optimizes to something _very_ close to computed goto. Every instruction handler tail-calls
+the next one. The downside here is that each function is still a full function, prelude and all. It needs to
+save/restore volatile registers, and sometimes allocate stack space for additional intermediates.
+
+With this, we still can't hope to match the performance of an interpeter in hand-written assembly,
+but we can get pretty close to or even beat one which is written in C!
 
 ### VM
+
+In release mode, the VM is written to take advantage of tail call optimization.
+It falls back to loop+match in debug mode.
 
 The VM is pretty much entirely unsafe code. It relies on invariants from the compiler and semantics
 of the language to maintain a high standard of quality for the generated assembly. We aim to avoid:
@@ -115,7 +175,7 @@ operands being in bounds for the current call frame. There are other approaches 
 but any of the other ones I've managed to come up with always come with _some_ downside, like a
 practically unreachable panic path which just sits there, staring menacingly.
 
-Another thing is that the _instruction pointer_ is literally just a pointer. We don't carry around its
+Another thing is that the _instruction pointer_ is just a pointer. We don't carry around its
 length, and we don't perform a bounds check when reading from it. This means we assume that the compiler
 will:
 
@@ -180,5 +240,3 @@ Internally, they may unwrap the `GcRoot` and store the raw `GcPtr<T>`. This is a
 That's it! The resulting GC and object API is actually pretty nice, and it is _fully_ safe to use. Compiler-enforced safety is vital here.
 Not only because GC bugs can be some of the worst heisenbugs in existence, and I wouldn't wish them upon anybody, but also because
 the API is exposed as the embedding API as well. If it's exposed to users, it _must_ be safe code.
-
-
