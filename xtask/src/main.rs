@@ -48,7 +48,7 @@ fn miri(args: &[String]) {
 }
 
 fn playground() {
-    cmd("npm --prefix playground run dev").exec();
+    cmd("npm --prefix site run dev").exec();
 }
 
 fn test(args: &[String]) {
