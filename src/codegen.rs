@@ -110,8 +110,9 @@ pub(crate) mod opcodes;
 
 use beef::lean::Cow;
 use bumpalo::{Bump, collections::Vec, vec};
-use hashbrown::HashMap;
+use hashbrown::{HashMap, HashSet};
 use opcodes::{FnId, Imm8, Imm16, Imm16s, Imm24s, Insn, Lit, Lit8, Opcode, Reg, asm, i24};
+use rustc_hash::FxBuildHasher;
 
 use crate::{
     ast::{self, Ast, Ident, Node, NodeList, Stmt, f64n},
@@ -211,6 +212,7 @@ struct State<'a> {
     module_vars: Vec<'a, ModuleVar<'a>>,
 }
 
+#[derive(Clone)]
 struct ModuleVar<'a> {
     name: &'a str,
     span: Span,
@@ -1074,39 +1076,15 @@ impl<'a> State<'a> {
         self.func_stack.len() == 1 && f!(&self).scopes.len() == 1
     }
 
-    fn declare_module_var(&mut self, name: &'a str, span: Span) -> Result<Mvar> {
-        let id = self.module_vars.len();
-        if id >= u8::MAX as usize {
-            return error_span(
-                format!("too many module variables, maximum is {}", u8::MAX),
-                span,
-            )
-            .into();
-        }
-        let id = unsafe { Mvar::new_unchecked(id as u8) };
-        self.module_vars.push(ModuleVar { name, span, id });
-        Ok(id)
+    fn declare_local(&mut self, name: &'a str, span: Span) -> Result<Reg> {
+        let reg = fresh_var(self, span)?;
+        f!(self).declare_local(name, reg, span);
+        Ok(reg)
     }
 
-    fn declare_local(&mut self, name: &'a str, span: Span) -> Result<FreshVar> {
-        if self.is_top_level() {
-            let id = self.declare_module_var(name, span)?;
-            Ok(FreshVar::Mvar(id))
-        } else {
-            let reg = fresh_var(self, span)?;
-            f!(self).declare_local(name, reg, span);
-            Ok(FreshVar::Reg(reg))
-        }
-    }
-
-    fn declare_local_in(&mut self, name: &'a str, reg: Reg, span: Span) -> Result<FreshVar> {
-        if self.is_top_level() {
-            let id = self.declare_module_var(name, span)?;
-            Ok(FreshVar::Mvar(id))
-        } else {
-            f!(self).declare_local(name, reg, span);
-            Ok(FreshVar::Reg(reg))
-        }
+    fn declare_local_in(&mut self, name: &'a str, reg: Reg, span: Span) -> Result<Reg> {
+        f!(self).declare_local(name, reg, span);
+        Ok(reg)
     }
 
     fn resolve(&mut self, name: &'a str, span: Span) -> Result<Option<Symbol>> {
@@ -1249,6 +1227,14 @@ impl<'a> State<'a> {
     /// Define an function once that it's been emitted
     fn define_function(&mut self, id: FnId, f: FuncInfo) {
         self.func_table.define(id, f);
+    }
+
+    fn expect_module_var(&self, name: &str) -> ModuleVar<'a> {
+        let Some(mvar) = self.module_vars.iter().find(|mv| mv.name == name).cloned() else {
+            unreachable!("ICE: cannot find module var {name:?}");
+        };
+
+        mvar
     }
 
     fn enter_basic_block(&mut self) {
@@ -1533,21 +1519,72 @@ fn eval_block<'a>(
 
 fn emit_stmt_list<'a>(m: &mut State<'a>, list: NodeList<'a, Stmt>) -> Result<()> {
     if m.is_top_level() {
-        // 1. declare all functions in the stmt list
+        // 1. Declare all functions and variables in the stmt list
         let mut undefined_functions = vec![in m.buf];
-        for stmt in list.iter().rev() {
-            if let ast::StmtKind::FuncDecl(node) = stmt.kind() {
-                let id = m.declare_function(
-                    node.name().get(),
-                    node.params().len() as u8,
-                    node.name_span(),
-                )?;
-                undefined_functions.push(id);
-            }
+        let mut module_vars = vec![in m.buf];
+        let mut module_var_names =
+            HashSet::with_capacity_and_hasher_in(16, FxBuildHasher::default(), m.buf);
+
+        macro_rules! try_insert_module_var {
+            ($name:expr, $span:expr $(,)?) => {{
+                let name = $name;
+                let span = $span;
+                if !module_var_names.insert(name) {
+                    return Err(error_span("cannot shadow module variables", span));
+                }
+                if module_vars.len() >= u8::MAX as usize {
+                    return Err(error_span(
+                        format!("too many module variables, maximum is {}", u8::MAX),
+                        span,
+                    ));
+                }
+                let id = module_vars.len() as u8;
+                let id = unsafe { Mvar::new_unchecked(id) };
+                module_vars.push(ModuleVar { name, span, id });
+                Ok(())
+            }};
         }
 
-        // undefined functions needs to be in reverse order of declaration
-        // undefined_functions.reverse();
+        macro_rules! try_insert_function {
+            ($name:expr, $arity:expr, $span:expr $(,)?) => {{
+                let name = $name;
+                let arity = $arity;
+                let span = $span;
+                if !module_var_names.insert(name) {
+                    return Err(error_span("cannot shadow module variables", span));
+                }
+                let id = m.declare_function(name, arity, span)?;
+                undefined_functions.push(id);
+                Ok(())
+            }};
+        }
+
+        for stmt in list.iter().rev() {
+            match stmt.kind() {
+                ast::StmtKind::FuncDecl(node) => {
+                    try_insert_function!(
+                        node.name().get(),
+                        // NOTE: `params` is always less than `u8::MAX`
+                        node.params().len() as u8,
+                        node.name_span(),
+                    )?;
+                }
+                ast::StmtKind::Var(node) => {
+                    try_insert_module_var!(node.name().get(), node.name_span())?
+                }
+                ast::StmtKind::Import(node) => {
+                    for (node, span) in node.items().iter().zip(node.items_spans()) {
+                        try_insert_module_var!(node.name().get(), node.name_span())?;
+                    }
+                }
+                ast::StmtKind::ImportBare(node) => {
+                    try_insert_module_var!(node.binding().get(), node.binding_span())?;
+                }
+                _ => {
+                    continue;
+                }
+            }
+        }
 
         f!(m)
             .scopes
@@ -1555,11 +1592,15 @@ fn emit_stmt_list<'a>(m: &mut State<'a>, list: NodeList<'a, Stmt>) -> Result<()>
             .expect("some scope")
             .undefined_functions = undefined_functions;
 
-        // 2. then process the stmt list
-        // as the stmt list is traversed, we come across `FuncDecl` again,
-        // at which point we _define_ the given function.
-        // to get its id, we `pop` from the `undefined_functions` list,
-        // because we are guaranteed to process them in the same order.
+        m.module_vars = module_vars;
+
+        // 2. Then process the stmt list.
+        // As the stmt list is traversed, we come across `FuncDecl`/`Var`
+        // again, at which point we _define_ them.
+        //
+        // To get the id of a function declaration, we `pop` from the
+        // `undefined_functions` list, because we are guaranteed to
+        // process them in the same order.
     }
 
     for (i, stmt) in list.iter().enumerate() {
@@ -1587,7 +1628,19 @@ fn emit_stmt<'a>(m: &mut State<'a>, stmt: Node<'a, Stmt>, span: Span) -> Result<
 }
 
 fn emit_stmt_var<'a>(m: &mut State<'a>, var: Node<'a, ast::Var>) -> Result<()> {
-    m.check_top_level_shadowing(var.name().get(), var.name_span())?;
+    if m.is_top_level() {
+        // NOTE: `emit_stmt_list` already checks for invalid shadowing
+        // fast path: module variable
+
+        let id = m.expect_module_var(var.name().get()).id;
+        let tmp = fresh_reg(m, var.value_span())?;
+        let value = eval_expr_reuse(m, var.value(), var.value_span(), tmp)?;
+        value_force_reg(m, value, tmp)?;
+        m.emit(asm::smvar(id, tmp), var.name_span());
+        free_reg(m, tmp);
+
+        return Ok(());
+    }
 
     let dst = match m.resolve_in_scope(var.name().get()) {
         Some(Symbol::Local { reg, .. }) => Some(reg),
@@ -1595,26 +1648,16 @@ fn emit_stmt_var<'a>(m: &mut State<'a>, var: Node<'a, ast::Var>) -> Result<()> {
     };
 
     if let Some(dst) = dst {
-        // not a module variable - reuse `reg`
+        // variable shadowing, reuse `reg`
         let value = eval_expr_reuse(m, var.value(), var.value_span(), dst)?;
         value_force_reg(m, value, dst)?;
         let _ = m.declare_local_in(var.name().get(), dst, var.name_span())?;
     } else {
-        if m.is_top_level() {
-            // module variable, use a temporary register
-            let tmp = fresh_reg(m, var.value_span())?;
-            let value = eval_expr_reuse(m, var.value(), var.value_span(), tmp)?;
-            value_force_reg(m, value, tmp)?;
-            let id = m.declare_module_var(var.name().get(), var.name_span())?;
-            m.emit(asm::smvar(id, tmp), var.name_span());
-            free_reg(m, tmp);
-        } else {
-            // fresh variable in some local scope
-            let tmp = fresh_var(m, var.value_span())?;
-            let value = eval_expr_reuse(m, var.value(), var.value_span(), tmp)?;
-            value_force_reg(m, value, tmp)?;
-            let _ = m.declare_local_in(var.name().get(), tmp, var.name_span())?;
-        }
+        // fresh variable in some local scope
+        let tmp = fresh_var(m, var.value_span())?;
+        let value = eval_expr_reuse(m, var.value(), var.value_span(), tmp)?;
+        value_force_reg(m, value, tmp)?;
+        let _ = m.declare_local_in(var.name().get(), tmp, var.name_span())?;
     }
 
     Ok(())
@@ -1685,13 +1728,8 @@ fn emit_stmt_func<'a>(m: &mut State<'a>, func: Node<'a, ast::FuncDecl>) -> Resul
         m.func_table.define(id, func);
         let id = f!(m).literals.closure(closure, span)?;
 
-        match m.declare_local(name, span)? {
-            FreshVar::Reg(reg) => {
-                m.emit(asm::lclosure(reg, id), span);
-            }
-            FreshVar::Mvar(mvar) => unreachable!("ICE: stmt_func closure in mvar"),
-        }
-
+        let reg = m.declare_local(name, span)?;
+        m.emit(asm::lclosure(reg, id), span);
         Ok(())
     }
 }
@@ -1715,14 +1753,12 @@ fn emit_stmt_import<'a>(m: &mut State<'a>, node: Import<'a>, span: Span) -> Resu
                     None => name,
                 };
 
-                let var = m.declare_local(alias, item.alias_span())?;
-                match var {
-                    FreshVar::Reg(reg) => {
-                        bindings.push((name.to_string(), ImportBinding::Reg(reg)))
-                    }
-                    FreshVar::Mvar(id) => {
-                        bindings.push((name.to_string(), ImportBinding::Mvar(id)))
-                    }
+                if m.is_top_level() {
+                    let id = m.expect_module_var(name).id;
+                    bindings.push((name.to_string(), ImportBinding::Mvar(id)))
+                } else {
+                    let reg = m.declare_local(alias, item.alias_span())?;
+                    bindings.push((name.to_string(), ImportBinding::Reg(reg)))
                 }
             }
 
@@ -1733,10 +1769,12 @@ fn emit_stmt_import<'a>(m: &mut State<'a>, node: Import<'a>, span: Span) -> Resu
             let spec = node.path().get();
             let binding = node.binding().get();
 
-            let var = m.declare_local(binding, node.binding_span())?;
-            let binding = match var {
-                FreshVar::Reg(reg) => ImportBinding::Reg(reg),
-                FreshVar::Mvar(id) => ImportBinding::Mvar(id),
+            let binding = if m.is_top_level() {
+                let id = m.expect_module_var(binding).id;
+                ImportBinding::Mvar(id)
+            } else {
+                let reg = m.declare_local(binding, node.binding_span())?;
+                ImportBinding::Reg(reg)
             };
 
             ImportInfo::bare(spec.to_string(), binding)
