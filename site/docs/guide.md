@@ -1,4 +1,4 @@
-# Syntax
+# Language guide
 
 Hebi's syntax is inspired by, and borrows from:
 
@@ -11,8 +11,11 @@ Hebi's syntax is inspired by, and borrows from:
 It's in the same family of _bracketed_ programming languages as Rust (the [BCPL](https://en.wikipedia.org/wiki/BCPL) family)
 with some [ML](https://en.wikipedia.org/wiki/Standard_ML) influences, such as [_implicit returns_](#implicit-returns).
 
+> Note: Hebi's implementation is still _heavily_ in flux, and syntax may still change at any point!
+
 ```js
-import service, response, header, body from "std/http/server"
+// disclaimer: this module doesn't actually exist :)
+import {service, response, header, body} from "std/http/server"
 
 fn fib(n) {
   if n < 2 { n }
@@ -48,7 +51,7 @@ There are no block comments or special doc comments.
 
 ## Statements
 
-The unit of syntax in Hebi is a _statement_. Every program consists of statements.
+The base unit of syntax in Hebi is a _statement_. Every program consists of statements.
 Each statement does something, and produces no value.
 
 ### Variables
@@ -57,7 +60,7 @@ Each statement does something, and produces no value.
 let v = nil
 ```
 
-Each variable must have both a name and a value. `let` without value is a syntax error:
+Variables must have both a name and a value. `let` without value is a syntax error:
 
 ```
 $ hebi4 -e 'let v'
@@ -66,6 +69,26 @@ expected '=', found '<eof>'
 1 |  let v
   |       ^
 ```
+
+All variables in Hebi are mutable, meaning you can change their value by _assigning_ to them:
+
+```js
+let v = nil
+print(v) // prints "nil"
+v = 10
+print(v) // prints "10"
+```
+
+There are two kinds of variables:
+
+- Module variables (module-scoped globals)
+- Local variables (block-scoped)
+
+Variables scoped to a module can be accessed by other modules.
+They are also shared by all functions in the same module.
+
+Block-scoped variables are only visible to other statements in the same scope.
+They can also be _captured_ by functions, which is discussed in the next section.
 
 ### Functions
 
@@ -84,38 +107,23 @@ fn outer() {
 }
 ```
 
-Any function can refer to variables outside of its scope, as long as those
-variables are declared _before_ the function:
+All functions are also _closures_. Functions in the module scope close over
+the entire module, while functions in inner blocks close over only local
+variables and functions visible to them.
 
 ```rust
-let v = "hi"
 fn f() {
   print(v)
 }
 
+let v = "hi"
+```
+
+You can of course _call_ functions, if they're in scope:
+
+```rust
 f() // prints "hi"
 ```
-
-```rust
-// f.hi
-fn f() {
-  print(v)
-}
-let v = "hi"
-f()
-```
-
-```
-$ hebi4 f.hi
-
-could not resolve name
-2 |    print(v)
-  |          ^
-```
-
-There's a special exception for functions calling other functions. If you're
-at the top-level of a module, then any function may call any other function,
-and they'll be resolved correctly:
 
 ```rust
 fn is_even(n) {
@@ -131,51 +139,8 @@ fn is_odd(n) {
 print(is_even(10)) // prints "true"
 ```
 
-This is not the case for an inner scope:
-
-```rust
-// bad.hi
-fn main() {
-  fn is_even(n) {
-    if n == 1 { false }
-    else { is_odd(n-1) }
-  }
-
-  fn is_odd(n) {
-    if n == 1 { true }
-    else { is_even(n-1) }
-  }
-
-  print(is_even(10)) // prints "true"
-}
-```
-
-```
-could not resolve name
-4 |      else { is_odd(n-1) }
-  |             ^^^^^^
-```
-
-When a variable is _captured_, its value is copied into the function's
-closure environment:
-
-```rust
-fn counter() {
-  let v = 0
-  return (fn() {
-    let tmp = v
-    v += 1
-    v
-  })
-}
-
-let c = counter()
-print(c()) // 0
-print(c()) // 1
-```
-
-Key word being _copy_ - the _variable_ isn't shared, unlike in languages
-like Lua and JavaScript, only the _value_ is.
+When a _local variable_ is _captured_, its value is copied into the function's closure environment.
+This is different from how closures work in JavaScript, Lua, and Python.
 
 ```rust
 fn counter() {
@@ -194,7 +159,7 @@ c.set(10)
 print(c.get()) // still 0
 ```
 
-If you want shared mutable state, you can wrap your data in a [table](#tables):
+If you want a shared mutable closure environment, you can wrap your data in a [table](#tables):
 
 ```rust
 fn counter() {
@@ -213,27 +178,12 @@ c.set(10)
 print(c.get()) // 10
 ```
 
-...and again, there is an exception for top-level code.
-Top-level functions _do_ share variables, not just values:
-
-```rust
-let v = 0
-
-fn get() { v }
-fn set(n) { v = n }
-
-print(get()) // 0
-set(10)
-print(get()) // 10
-```
-
 ### Imports
 
 Modules may import other modules.
 
 ```js
-import a, b, c from "foo"
-import "bar" as bar
+import {a, b, c} from "foo"
 ```
 
 They are evaluated dynamically, wherever the import appears.
@@ -241,34 +191,199 @@ To import something lazily, you can wrap it in a function:
 
 ```js
 fn f() {
-  import foo from "bar"
+  import {a, b, c} from "foo"
 
   foo()
 }
 ```
 
+You can either import parts of a module, or the entire module:
+
+```js
+import {a,b,c} from "foo" // import only parts of the module
+import {a,b,c} from foo // same thing, but the module specifier is an identifier
+
+import foo from "foo" // import entire module
+import foo from foo // same as above
+import foo // shorthand for `foo from foo`
+```
+
 ## Expressions
+
+Statements operate on _values_, which are produced by _expressions_.
 
 ### Literals
 
+Literals (also known as constants) are values which are taken _literally_ from the source code.
+
 #### Nil
+
+The "nothing" value:
+```lua
+v = nil
+```
 
 #### Booleans
 
+A binary _true_ or _false_ value.
+
+```js
+v = true
+v = false
+```
+
+Used in [control flow](#control-flow).
+
 #### Numbers
+
+There are two kinds of numbers:
+
+- _Floating point_ numbers, and
+- _Integers_
+
+They are distinct types, but are generally interchangeable:
+
+```js
+let int = 2
+let float = 3.14
+
+print(int * float)
+```
+
+If you want to convert between them explicitly, you can use the built-in `to_int` and `to_float`.
+
+Calling `to_int` on a floating point has the same effect as _rounding down_ the float.
 
 #### Strings
 
-#### Arrays
+A string is a sequence of characters. Strings in Hebi use UTF-8 encoding. They are also immutable.
+
+```js
+let v = "hi!"
+```
+
+Strings also support _escape sequences_, which have special meaning:
+
+|      | meaning |
+|------|---------|
+| `\a` | alert   |
+| `\b` | non-destructive backspace |
+| `\v` | vertical tab |
+| `\f` | form feed |
+| `\n` | new line |
+| `\r` | carriage return |
+| `\t` | horizontal tab |
+| `\'` | single quote |
+| `\"` | double quote |
+| `\\` | backslash |
+| `\e` | escape |
+| `\x` | hex code |
+| `\u` | unicode byte sequence |
+
+`\x` and `\u` can be used to directly embed _byte sequences_ in strings:
+
+- `\x0A` is equivalent to `\n`
+- `\u{1F602}` is an emoji (😂)
+
+Note that they must still result in valid utf-8.
+
+Many of these escapes are pretty archaic and aren't really useful anymore.
+An example of that is `\a` (alert), which was used to literally produce some kind of sound when
+the computer detected it in standard output.
+
+Use these wisely!
+
+### Containers
+
+Hebi has two built-in container types: arrays and tables.
+
+#### Array
+
+An array is a dynamically-sized sequence of values.
+
+```js
+let v = [0,1,2]
+```
 
 #### Tables
 
+A table is a sequence of _key-value pairs_. They are sometimes called _hash maps_ or _associative arrays_.
+
+```js
+let v = {a:0, b:1, c:2}
+```
+
 ### Blocks
+
+```js
+let v = do { 1 + 1 }
+```
+
+You can use these to limit the scope of something. The final expression in the block is its value.
+This is known as an [implicit return](#implicit-returns).
 
 ### Implicit returns
 
+In Hebi, the final expression in any block of code is its return value, just like in Rust.
+
+```rust
+fn foo() {
+  "hi"
+}
+
+print(foo()) // prints "hi"
+```
+
+```rust
+print(do { "hi" }) // prints "hi"
+```
+
 ### Control flow
 
-### Assignment
+Hebi is a Turing-complete language, offering loops and conditional expressions:
 
-### Function calls
+```rust
+let i = 0
+loop {
+  print(i)
+  if i == 10 {
+    print("end")
+    break
+  }
+  i += 1
+}
+```
+
+`if` expressions also support [implicit returns](#implicit-returns):
+
+```rust
+fn test(number) {
+  if number > 10 {
+    "That's more than I can count."
+  } else {
+    to_str(number)
+  }
+}
+
+print(test(1)) // prints "1"
+print(test(100)) // prints "That's more than I can count."
+```
+
+## That's it!
+
+As you can tell, some stuff is missing. Hebi is quite minimal right now, and while it will
+stay minimal, it shouldn't stay _this_ minimal.
+
+For example, we definitely want more kinds of loops:
+
+- `for i in 0..n`
+- `for v in array`
+- `while i < 10`
+
+We'd also like _pipeline_ syntax:
+
+```js
+let number = 10
+
+print(number |> double())
+```
