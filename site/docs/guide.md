@@ -383,6 +383,27 @@ loop {
 }
 ```
 
+#### If expressions
+
+```rust
+fn fizzbuzz(n) {
+  if n % 3 == 0 and n % 5 == 0 {
+    "fizzbuzz"
+  } else if n % 3 == 0 {
+    "fizz"
+  } else if n % 5 == 0 {
+    "buzz"
+  }
+}
+
+let i = 0
+loop {
+  if i > 100 { break }
+  printf("{i} {v}", {i, v:fizzbuzz(i)})
+  i += 1
+}
+```
+
 `if` expressions also support [implicit returns](#implicit-returns):
 
 ```rust
@@ -398,21 +419,20 @@ print(test(1)) // prints "1"
 print(test(100)) // prints "That's more than I can count."
 ```
 
+#### Loops
+
+Currently, the only loop kind is an infinite loop:
+
+```rust
+loop {
+  // ...
+}
+```
+
+You can `break` out of it, or `continue` to go back to the start of the loop.
+
 ## That's it!
 
 As you can tell, some stuff is missing. Hebi is quite minimal right now, and while it will
 stay minimal, it shouldn't stay _this_ minimal.
 
-For example, we definitely want more kinds of loops:
-
-- `for i in 0..n`
-- `for v in array`
-- `while i < 10`
-
-We'd also like _pipeline_ syntax:
-
-```js
-let number = 10
-
-print(number |> double())
-```
