@@ -5,7 +5,7 @@ use crate::{
     error::Result,
     module::{NativeModule, f},
     value::ValueRaw,
-    vm::{self, Context, Runtime, Stdio},
+    vm::{self, Runtime, Stdio},
 };
 
 fn module(input: &str) -> crate::module::Module {
@@ -90,6 +90,8 @@ fn snapshot<'vm>(
 }
 
 fn native_modules() -> impl IntoIterator<Item = NativeModule> {
+    use crate::prelude::*;
+
     [
         {
             fn foo(cx: Context<'_>) -> &'static str {
@@ -138,6 +140,32 @@ fn native_modules() -> impl IntoIterator<Item = NativeModule> {
                         state.value
                     }
                 }))
+                .finish()
+        },
+        {
+            #[derive(Debug)]
+            struct Foo {
+                value: i64,
+            }
+
+            extern_data!(Foo);
+
+            fn foo_new<'a>(cx: Context<'a>, value: i64) -> HebiResult<Ret<'a>> {
+                crate::prelude::let_root!(in &cx; buf);
+                let buf = Extern::new(&cx, buf, Foo { value });
+
+                cx.ret(buf)
+            }
+
+            fn foo_value(cx: Context, foo: Param<Extern>) -> HebiResult<i64> {
+                let foo = foo.as_ref(&cx);
+                let foo: &Foo = foo.cast_ref()?;
+                Ok(foo.value)
+            }
+
+            NativeModule::builder("test3")
+                .function(self::f!(foo_new))
+                .function(self::f!(foo_value))
                 .finish()
         },
     ]

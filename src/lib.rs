@@ -48,7 +48,7 @@ pub mod prelude {
                 self, GcAnyRef, GcAnyRoot, GcRef, GcRoot, GcUninitRoot, Heap, ValueRef, ValueRoot,
                 let_root, let_root_unchecked, reroot,
             },
-            value::{self, List, Str, Table, host_function::Context},
+            value::{self, Extern, List, Str, Table, extern_data, host_function::Context},
         },
     };
 }

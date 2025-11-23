@@ -1,0 +1,4 @@
+import {foo_new, foo_value} from "test3"
+
+let foo = foo_new(100)
+print(foo_value(foo))

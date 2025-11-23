@@ -96,24 +96,24 @@ impl ValueRaw {
 }
 
 pub mod closure;
+pub mod external;
 pub mod function;
 pub mod host_function;
 pub mod list;
 pub mod module;
 pub mod string;
 pub mod table;
-pub mod userdata;
 
 pub(crate) use self::string::StringHasher;
 #[allow(unused_imports)] // re-exports
 pub use self::{
     closure::Closure,
+    external::{Extern, extern_data},
     function::Function,
     list::{List, ListIter},
     module::ModuleProto,
     string::Str,
     table::{Table, TableEntries},
-    userdata::UserData,
 };
 
 #[cfg(test)]
