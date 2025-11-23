@@ -8,6 +8,6 @@ SOURCE
 import foo from
 
 ERROR
-expected '<string>', found '<eof>'
+expected string or identifier
 3 |  import foo from
   |                 ^

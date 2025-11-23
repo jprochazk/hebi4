@@ -4,7 +4,7 @@ expression: snapshot
 ---
 SOURCE
 do {
-import read_file, write_file, exists from "fs"
+import {read_file, write_file, exists} from "fs"
 }
 
 OK

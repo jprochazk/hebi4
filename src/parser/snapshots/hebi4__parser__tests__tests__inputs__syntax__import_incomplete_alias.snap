@@ -5,9 +5,9 @@ expression: snapshot
 SOURCE
 //parse
 
-import foo as from "module"
+import {foo as} from "module"
 
 ERROR
-expected '<ident>', found 'from'
-3 |  import foo as from "module"
-  |                ^^^^
+expected '<ident>', found '}'
+3 |  import {foo as} from "module"
+  |                ^

@@ -84,6 +84,11 @@ impl<'src> Tokens<'src> {
     }
 
     #[inline]
+    pub fn span_lexeme(&self, span: Span) -> &'src str {
+        &self.src[span]
+    }
+
+    #[inline]
     pub fn debug<'tokens>(&'tokens self, token: Token) -> DebugToken<'src, 'tokens> {
         DebugToken {
             tokens: self,
@@ -257,6 +262,11 @@ pub struct TokenCursor<'src, 'tokens> {
 }
 
 impl<'src, 'tokens> TokenCursor<'src, 'tokens> {
+    #[inline]
+    pub fn tokens(&self) -> &'tokens Tokens<'src> {
+        self.tokens
+    }
+
     #[inline]
     pub fn kind(&self, token: Token) -> TokenKind {
         self.tokens.kind(token)

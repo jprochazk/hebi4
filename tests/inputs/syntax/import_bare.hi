@@ -1,7 +1,5 @@
 //parse
 
-import "std/math" as math
-import "std/collections" as collections
-import "http" as http_module
-
-let x = 42
+import math from "std/math"
+import collections from "std/collections"
+import http_module from "http"

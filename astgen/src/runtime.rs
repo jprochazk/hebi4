@@ -490,7 +490,7 @@ struct Inline {
 }
 
 /// Marker for types which are transparent wrappers over [`Packed`].
-pub unsafe trait PackedAbi: Sealed + Sized {
+pub unsafe trait PackedAbi: Sealed + Sized + Copy {
     /// Check if `kind` matches `Self`'s kind.
     fn check_kind(kind: NodeKind) -> bool;
 }
@@ -584,7 +584,7 @@ pub trait Pack {
 
 pub struct Node<'a, T: PackedAbi> {
     pub(super) ast: &'a Ast,
-    pub(super) node: &'a T,
+    pub(super) node: T,
 }
 
 impl<'a, T: PackedAbi> Clone for Node<'a, T> {
@@ -602,7 +602,7 @@ impl<'a, T: PackedAbi> std::ops::Deref for Node<'a, T> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
-        self.node
+        &self.node
     }
 }
 
@@ -654,7 +654,7 @@ impl<'a, T: PackedAbi> NodeList<'a, T> {
         Node {
             ast: self.ast,
             node: unsafe {
-                T::from_packed(self.ast.nodes.get_unchecked(self.first_node_index + index))
+                *T::from_packed(self.ast.nodes.get_unchecked(self.first_node_index + index))
             },
         }
     }
@@ -841,7 +841,7 @@ impl<'a, T: PackedAbi> Node<'a, Opt<T>> {
     pub fn as_option(&self) -> Option<Node<'a, T>> {
         self.node.as_option().map(|node| Node {
             ast: self.ast,
-            node,
+            node: *node,
         })
     }
 }

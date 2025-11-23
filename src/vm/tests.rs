@@ -286,7 +286,7 @@ fn nested_enter() {
 #[test]
 fn async_run() {
     let src = r#"
-import sleep from "eepy"
+import {sleep} from "eepy"
 print("before")
 sleep(1)
 print("after")

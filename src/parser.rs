@@ -215,22 +215,23 @@ fn parse_stmt_loop(p: &mut State, buf: &Bump) -> Result<Spanned<Stmt>> {
     Ok(p.close(node, Loop { body }).map_into())
 }
 
-/// `"import" import_item,+ "from" STRING` or `"import" STRING "as" IDENT`
+/// - `"import" IDENT`
+/// - `"import" IDENT "from" STRING|IDENT`
+/// - `"import" { import_item,+ } "from" STRING|IDENT`
 ///
 /// `p` must be at "import"
 fn parse_stmt_import(p: &mut State, buf: &Bump) -> Result<Spanned<Stmt>> {
     let import_token_span = p.span();
     p.must(t![import])?;
 
-    // Check if bare import (string) or named import (identifier)
-    if p.at(t![str]) {
-        parse_stmt_import_bare(p, buf, import_token_span)
-    } else {
+    if p.at(t!["{"]) {
         parse_stmt_import_named(p, buf, import_token_span)
+    } else {
+        parse_stmt_import_bare(p, buf, import_token_span)
     }
 }
 
-/// `"import" import_item,+ "from" STRING`
+/// `"import" { import_item,+ } "from" STRING`
 ///
 /// `p` must be after "import" keyword
 fn parse_stmt_import_named(
@@ -241,24 +242,18 @@ fn parse_stmt_import_named(
     let mut node = p.open();
     node.start = import_token_span.start;
 
-    // Parse comma-separated list of import items (at least one)
-    let mut items = temp(buf);
-    loop {
-        items.push(parse_import_item(p, buf)?);
-        if !p.eat(t![,]) {
-            break;
-        }
-    }
+    let items = bracketed_list(p, buf, Brackets::Curly, parse_import_item)?;
 
     p.must(t![from])?;
-    let path = parse_str(p, buf)?;
+    let path = parse_str_or_ident_as_str(p, buf)?;
 
     let items = items.as_slice();
 
     Ok(p.close(node, Import { items, path }).map_into())
 }
 
-/// `"import" STRING "as" IDENT`
+/// - `"import" IDENT`
+/// - `"import" IDENT "from" STRING|IDENT`
 ///
 /// `p` must be after "import" keyword
 fn parse_stmt_import_bare(
@@ -269,9 +264,12 @@ fn parse_stmt_import_bare(
     let mut node = p.open();
     node.start = import_token_span.start;
 
-    let path = parse_str(p, buf)?;
-    p.must(t![as])?;
     let binding = parse_ident(p, buf)?;
+    let path = if p.eat(t![from]) {
+        parse_str_or_ident_as_str(p, buf)?
+    } else {
+        ident_to_str(p, buf, binding)
+    };
 
     Ok(p.close(node, ImportBare { path, binding }).map_into())
 }
@@ -296,14 +294,6 @@ fn parse_stmt_expr(p: &mut State, buf: &Bump) -> Result<Spanned<Stmt>> {
     let inner = parse_expr_top_level(p, buf)?;
 
     Ok(p.close(node, StmtExpr { inner }).map_into())
-}
-
-fn parse_ident(p: &mut State, _: &Bump) -> Result<Spanned<ast::Ident>> {
-    let node = p.open();
-    let lexeme = p.lexeme();
-    p.must(t![ident])?;
-    let id = p.ast.intern_ident(lexeme);
-    Ok(p.close(node, Ident { id }))
 }
 
 fn parse_expr_top_level(p: &mut State, buf: &Bump) -> Result<Spanned<Expr>> {
@@ -975,6 +965,38 @@ fn parse_str(p: &mut State, _: &Bump) -> Result<Spanned<ast::Str>> {
     let id = p.ast.intern_str(value.as_ref());
 
     Ok(p.close(node, Str { id }))
+}
+
+fn parse_ident(p: &mut State, _: &Bump) -> Result<Spanned<ast::Ident>> {
+    let node = p.open();
+    let lexeme = p.lexeme();
+    p.must(t![ident])?;
+    let id = p.ast.intern_ident(lexeme);
+    Ok(p.close(node, Ident { id }))
+}
+
+fn parse_str_or_ident_as_str(p: &mut State, buf: &Bump) -> Result<Spanned<ast::Str>> {
+    if p.at(t![ident]) {
+        parse_ident_as_str(p, buf)
+    } else if p.at(t![str]) {
+        parse_str(p, buf)
+    } else {
+        return error_span("expected string or identifier", p.span()).into();
+    }
+}
+
+fn parse_ident_as_str(p: &mut State, buf: &Bump) -> Result<Spanned<ast::Str>> {
+    let node = p.open();
+    let lexeme = p.lexeme();
+    p.must(t![ident])?;
+    let id = p.ast.intern_str(lexeme);
+    Ok(p.close(node, Str { id }))
+}
+
+fn ident_to_str(p: &mut State, buf: &Bump, ident: Spanned<ast::Ident>) -> Spanned<ast::Str> {
+    let str = p.cursor.tokens().span_lexeme(ident.span);
+    let id = p.ast.intern_str(str);
+    Spanned::new(Str { id }.pack(&mut p.ast), ident.span)
 }
 
 mod escape;

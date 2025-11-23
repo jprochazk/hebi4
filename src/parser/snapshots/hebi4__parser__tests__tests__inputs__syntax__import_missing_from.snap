@@ -5,9 +5,24 @@ expression: snapshot
 SOURCE
 //parse
 
+// NOTE: parsed as bare import and a string literal, which is fine
 import foo "module"
 
-ERROR
-expected 'from', found '"module"'
-3 |  import foo "module"
-  |             ^^^^^^^^
+OK
+Root(
+    [
+        ImportBare(
+            Str(
+                "foo",
+            ),
+            Ident(
+                "foo",
+            ),
+        ),
+        StmtExpr(
+            Str(
+                "module",
+            ),
+        ),
+    ],
+)

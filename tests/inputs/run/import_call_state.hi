@@ -1,4 +1,4 @@
-import reset, inc, dec, get from "test2"
+import {reset, inc, dec, get} from "test2"
 
 reset()
 print(get())

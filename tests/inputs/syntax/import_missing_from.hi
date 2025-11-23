@@ -1,3 +1,4 @@
 //parse
 
+// NOTE: parsed as bare import and a string literal, which is fine
 import foo "module"

@@ -1,5 +1,5 @@
 //module
-import foo from "test"
+import {foo} from "test"
 
 fn test() {
   foo()

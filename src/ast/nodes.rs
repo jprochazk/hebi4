@@ -417,7 +417,7 @@ struct Inline {
 }
 
 /// Marker for types which are transparent wrappers over [`Packed`].
-pub unsafe trait PackedAbi: Sealed + Sized {
+pub unsafe trait PackedAbi: Sealed + Sized + Copy {
     /// Check if `kind` matches `Self`'s kind.
     fn check_kind(kind: NodeKind) -> bool;
 }
@@ -511,7 +511,7 @@ pub trait Pack {
 
 pub struct Node<'a, T: PackedAbi> {
     pub(super) ast: &'a Ast,
-    pub(super) node: &'a T,
+    pub(super) node: T,
 }
 
 impl<'a, T: PackedAbi> Clone for Node<'a, T> {
@@ -529,7 +529,7 @@ impl<'a, T: PackedAbi> std::ops::Deref for Node<'a, T> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
-        self.node
+        &self.node
     }
 }
 
@@ -581,7 +581,7 @@ impl<'a, T: PackedAbi> NodeList<'a, T> {
         Node {
             ast: self.ast,
             node: unsafe {
-                T::from_packed(self.ast.nodes.get_unchecked(self.first_node_index + index))
+                *T::from_packed(self.ast.nodes.get_unchecked(self.first_node_index + index))
             },
         }
     }
@@ -768,7 +768,7 @@ impl<'a, T: PackedAbi> Node<'a, Opt<T>> {
     pub fn as_option(&self) -> Option<Node<'a, T>> {
         self.node.as_option().map(|node| Node {
             ast: self.ast,
-            node,
+            node: *node,
         })
     }
 }
@@ -888,31 +888,31 @@ pub enum StmtKind<'a> {
 impl<'a> Node<'a, Stmt> {
     #[inline]
     pub fn kind(&self) -> StmtKind<'a> {
-        let node: &'a Stmt = &*self.node;
+        let node: Stmt = self.node;
         match node.0.kind() {
             NodeKind::Var => StmtKind::Var(Node {
                 ast: self.ast,
-                node: unsafe { Var::from_packed(&node.0) },
+                node: unsafe { *Var::from_packed(&node.0) },
             }),
             NodeKind::Loop => StmtKind::Loop(Node {
                 ast: self.ast,
-                node: unsafe { Loop::from_packed(&node.0) },
+                node: unsafe { *Loop::from_packed(&node.0) },
             }),
             NodeKind::FuncDecl => StmtKind::FuncDecl(Node {
                 ast: self.ast,
-                node: unsafe { FuncDecl::from_packed(&node.0) },
+                node: unsafe { *FuncDecl::from_packed(&node.0) },
             }),
             NodeKind::Import => StmtKind::Import(Node {
                 ast: self.ast,
-                node: unsafe { Import::from_packed(&node.0) },
+                node: unsafe { *Import::from_packed(&node.0) },
             }),
             NodeKind::ImportBare => StmtKind::ImportBare(Node {
                 ast: self.ast,
-                node: unsafe { ImportBare::from_packed(&node.0) },
+                node: unsafe { *ImportBare::from_packed(&node.0) },
             }),
             NodeKind::StmtExpr => StmtKind::StmtExpr(Node {
                 ast: self.ast,
-                node: unsafe { StmtExpr::from_packed(&node.0) },
+                node: unsafe { *StmtExpr::from_packed(&node.0) },
             }),
             // SAFETY: guaranteed to be a valid `Stmt`
             _ => unsafe { std::hint::unreachable_unchecked() },
@@ -951,107 +951,107 @@ pub enum ExprKind<'a> {
 impl<'a> Node<'a, Expr> {
     #[inline]
     pub fn kind(&self) -> ExprKind<'a> {
-        let node: &'a Expr = &*self.node;
+        let node: Expr = self.node;
         match node.0.kind() {
             NodeKind::Return => ExprKind::Return(Node {
                 ast: self.ast,
-                node: unsafe { Return::from_packed(&node.0) },
+                node: unsafe { *Return::from_packed(&node.0) },
             }),
             NodeKind::Break => ExprKind::Break(Node {
                 ast: self.ast,
-                node: unsafe { Break::from_packed(&node.0) },
+                node: unsafe { *Break::from_packed(&node.0) },
             }),
             NodeKind::Continue => ExprKind::Continue(Node {
                 ast: self.ast,
-                node: unsafe { Continue::from_packed(&node.0) },
+                node: unsafe { *Continue::from_packed(&node.0) },
             }),
             NodeKind::IfSimple => ExprKind::IfSimple(Node {
                 ast: self.ast,
-                node: unsafe { IfSimple::from_packed(&node.0) },
+                node: unsafe { *IfSimple::from_packed(&node.0) },
             }),
             NodeKind::IfMulti => ExprKind::IfMulti(Node {
                 ast: self.ast,
-                node: unsafe { IfMulti::from_packed(&node.0) },
+                node: unsafe { *IfMulti::from_packed(&node.0) },
             }),
             NodeKind::Block => ExprKind::Block(Node {
                 ast: self.ast,
-                node: unsafe { Block::from_packed(&node.0) },
+                node: unsafe { *Block::from_packed(&node.0) },
             }),
             NodeKind::FuncAnon => ExprKind::FuncAnon(Node {
                 ast: self.ast,
-                node: unsafe { FuncAnon::from_packed(&node.0) },
+                node: unsafe { *FuncAnon::from_packed(&node.0) },
             }),
             NodeKind::GetVar => ExprKind::GetVar(Node {
                 ast: self.ast,
-                node: unsafe { GetVar::from_packed(&node.0) },
+                node: unsafe { *GetVar::from_packed(&node.0) },
             }),
             NodeKind::SetVar => ExprKind::SetVar(Node {
                 ast: self.ast,
-                node: unsafe { SetVar::from_packed(&node.0) },
+                node: unsafe { *SetVar::from_packed(&node.0) },
             }),
             NodeKind::GetField => ExprKind::GetField(Node {
                 ast: self.ast,
-                node: unsafe { GetField::from_packed(&node.0) },
+                node: unsafe { *GetField::from_packed(&node.0) },
             }),
             NodeKind::SetField => ExprKind::SetField(Node {
                 ast: self.ast,
-                node: unsafe { SetField::from_packed(&node.0) },
+                node: unsafe { *SetField::from_packed(&node.0) },
             }),
             NodeKind::GetIndex => ExprKind::GetIndex(Node {
                 ast: self.ast,
-                node: unsafe { GetIndex::from_packed(&node.0) },
+                node: unsafe { *GetIndex::from_packed(&node.0) },
             }),
             NodeKind::SetIndex => ExprKind::SetIndex(Node {
                 ast: self.ast,
-                node: unsafe { SetIndex::from_packed(&node.0) },
+                node: unsafe { *SetIndex::from_packed(&node.0) },
             }),
             NodeKind::Call => ExprKind::Call(Node {
                 ast: self.ast,
-                node: unsafe { Call::from_packed(&node.0) },
+                node: unsafe { *Call::from_packed(&node.0) },
             }),
             NodeKind::Infix => ExprKind::Infix(Node {
                 ast: self.ast,
-                node: unsafe { Infix::from_packed(&node.0) },
+                node: unsafe { *Infix::from_packed(&node.0) },
             }),
             NodeKind::Prefix => ExprKind::Prefix(Node {
                 ast: self.ast,
-                node: unsafe { Prefix::from_packed(&node.0) },
+                node: unsafe { *Prefix::from_packed(&node.0) },
             }),
             NodeKind::List => ExprKind::List(Node {
                 ast: self.ast,
-                node: unsafe { List::from_packed(&node.0) },
+                node: unsafe { *List::from_packed(&node.0) },
             }),
             NodeKind::Table => ExprKind::Table(Node {
                 ast: self.ast,
-                node: unsafe { Table::from_packed(&node.0) },
+                node: unsafe { *Table::from_packed(&node.0) },
             }),
             NodeKind::Int32 => ExprKind::Int32(Node {
                 ast: self.ast,
-                node: unsafe { Int32::from_packed(&node.0) },
+                node: unsafe { *Int32::from_packed(&node.0) },
             }),
             NodeKind::Int64 => ExprKind::Int64(Node {
                 ast: self.ast,
-                node: unsafe { Int64::from_packed(&node.0) },
+                node: unsafe { *Int64::from_packed(&node.0) },
             }),
             NodeKind::Float32 => ExprKind::Float32(Node {
                 ast: self.ast,
-                node: unsafe { Float32::from_packed(&node.0) },
+                node: unsafe { *Float32::from_packed(&node.0) },
             }),
             NodeKind::Float64 => ExprKind::Float64(Node {
                 ast: self.ast,
-                node: unsafe { Float64::from_packed(&node.0) },
+                node: unsafe { *Float64::from_packed(&node.0) },
             }),
             NodeKind::Bool => ExprKind::Bool(Node {
                 ast: self.ast,
-                node: unsafe { Bool::from_packed(&node.0) },
+                node: unsafe { *Bool::from_packed(&node.0) },
             }),
             NodeKind::Str => ExprKind::Str(Node {
                 ast: self.ast,
-                node: unsafe { Str::from_packed(&node.0) },
+                node: unsafe { *Str::from_packed(&node.0) },
             }),
             NodeKind::Nil => ExprKind::Nil(Node {
                 ast: self.ast,
-                node: unsafe { Nil::from_packed(&node.0) },
+                node: unsafe { *Nil::from_packed(&node.0) },
             }),
             // SAFETY: guaranteed to be a valid `Stmt`
             _ => unsafe { std::hint::unreachable_unchecked() },
@@ -3203,7 +3203,7 @@ impl<'a> Node<'a, Var> {
         let node = unsafe { self.ast.nodes.get_unchecked(index + OFFSET) };
         Node {
             ast: self.ast,
-            node: unsafe { <Ident>::from_packed(node) },
+            node: unsafe { *<Ident>::from_packed(node) },
         }
     }
 
@@ -3215,7 +3215,7 @@ impl<'a> Node<'a, Var> {
         let node = unsafe { self.ast.nodes.get_unchecked(index + OFFSET) };
         Node {
             ast: self.ast,
-            node: unsafe { <Expr>::from_packed(node) },
+            node: unsafe { *<Expr>::from_packed(node) },
         }
     }
 }
@@ -3250,7 +3250,7 @@ impl<'a> Node<'a, FuncDecl> {
         let node = unsafe { self.ast.nodes.get_unchecked(index + OFFSET) };
         Node {
             ast: self.ast,
-            node: unsafe { <Ident>::from_packed(node) },
+            node: unsafe { *<Ident>::from_packed(node) },
         }
     }
 
@@ -3262,7 +3262,7 @@ impl<'a> Node<'a, FuncDecl> {
         let node = unsafe { self.ast.nodes.get_unchecked(index + OFFSET) };
         Node {
             ast: self.ast,
-            node: unsafe { <Block>::from_packed(node) },
+            node: unsafe { *<Block>::from_packed(node) },
         }
     }
 
@@ -3295,7 +3295,7 @@ impl<'a> Node<'a, Import> {
         let node = unsafe { self.ast.nodes.get_unchecked(index + OFFSET) };
         Node {
             ast: self.ast,
-            node: unsafe { <Str>::from_packed(node) },
+            node: unsafe { *<Str>::from_packed(node) },
         }
     }
 
@@ -3328,7 +3328,7 @@ impl<'a> Node<'a, ImportBare> {
         let node = unsafe { self.ast.nodes.get_unchecked(index + OFFSET) };
         Node {
             ast: self.ast,
-            node: unsafe { <Str>::from_packed(node) },
+            node: unsafe { *<Str>::from_packed(node) },
         }
     }
 
@@ -3340,7 +3340,7 @@ impl<'a> Node<'a, ImportBare> {
         let node = unsafe { self.ast.nodes.get_unchecked(index + OFFSET) };
         Node {
             ast: self.ast,
-            node: unsafe { <Ident>::from_packed(node) },
+            node: unsafe { *<Ident>::from_packed(node) },
         }
     }
 }
@@ -3354,7 +3354,7 @@ impl<'a> Node<'a, StmtExpr> {
         let node = unsafe { self.ast.nodes.get_unchecked(index + OFFSET) };
         Node {
             ast: self.ast,
-            node: unsafe { <Expr>::from_packed(node) },
+            node: unsafe { *<Expr>::from_packed(node) },
         }
     }
 }
@@ -3368,7 +3368,7 @@ impl<'a> Node<'a, Return> {
         let node = unsafe { self.ast.nodes.get_unchecked(index + OFFSET) };
         Node {
             ast: self.ast,
-            node: unsafe { <Opt<Expr>>::from_packed(node) },
+            node: unsafe { *<Opt<Expr>>::from_packed(node) },
         }
     }
 }
@@ -3382,7 +3382,7 @@ impl<'a> Node<'a, IfSimple> {
         let node = unsafe { self.ast.nodes.get_unchecked(index + OFFSET) };
         Node {
             ast: self.ast,
-            node: unsafe { <Expr>::from_packed(node) },
+            node: unsafe { *<Expr>::from_packed(node) },
         }
     }
 
@@ -3394,7 +3394,7 @@ impl<'a> Node<'a, IfSimple> {
         let node = unsafe { self.ast.nodes.get_unchecked(index + OFFSET) };
         Node {
             ast: self.ast,
-            node: unsafe { <Opt<Block>>::from_packed(node) },
+            node: unsafe { *<Opt<Block>>::from_packed(node) },
         }
     }
 
@@ -3427,7 +3427,7 @@ impl<'a> Node<'a, IfMulti> {
         let node = unsafe { self.ast.nodes.get_unchecked(index + OFFSET) };
         Node {
             ast: self.ast,
-            node: unsafe { <Opt<Block>>::from_packed(node) },
+            node: unsafe { *<Opt<Block>>::from_packed(node) },
         }
     }
 
@@ -3481,7 +3481,7 @@ impl<'a> Node<'a, FuncAnon> {
         let node = unsafe { self.ast.nodes.get_unchecked(index + OFFSET) };
         Node {
             ast: self.ast,
-            node: unsafe { <Opt<Ident>>::from_packed(node) },
+            node: unsafe { *<Opt<Ident>>::from_packed(node) },
         }
     }
 
@@ -3493,7 +3493,7 @@ impl<'a> Node<'a, FuncAnon> {
         let node = unsafe { self.ast.nodes.get_unchecked(index + OFFSET) };
         Node {
             ast: self.ast,
-            node: unsafe { <Block>::from_packed(node) },
+            node: unsafe { *<Block>::from_packed(node) },
         }
     }
 
@@ -3526,7 +3526,7 @@ impl<'a> Node<'a, GetVar> {
         let node = unsafe { self.ast.nodes.get_unchecked(index + OFFSET) };
         Node {
             ast: self.ast,
-            node: unsafe { <Ident>::from_packed(node) },
+            node: unsafe { *<Ident>::from_packed(node) },
         }
     }
 }
@@ -3540,7 +3540,7 @@ impl<'a> Node<'a, SetVar> {
         let node = unsafe { self.ast.nodes.get_unchecked(index + OFFSET) };
         Node {
             ast: self.ast,
-            node: unsafe { <GetVar>::from_packed(node) },
+            node: unsafe { *<GetVar>::from_packed(node) },
         }
     }
 
@@ -3552,7 +3552,7 @@ impl<'a> Node<'a, SetVar> {
         let node = unsafe { self.ast.nodes.get_unchecked(index + OFFSET) };
         Node {
             ast: self.ast,
-            node: unsafe { <Expr>::from_packed(node) },
+            node: unsafe { *<Expr>::from_packed(node) },
         }
     }
 
@@ -3575,7 +3575,7 @@ impl<'a> Node<'a, GetField> {
         let node = unsafe { self.ast.nodes.get_unchecked(index + OFFSET) };
         Node {
             ast: self.ast,
-            node: unsafe { <Expr>::from_packed(node) },
+            node: unsafe { *<Expr>::from_packed(node) },
         }
     }
 
@@ -3587,7 +3587,7 @@ impl<'a> Node<'a, GetField> {
         let node = unsafe { self.ast.nodes.get_unchecked(index + OFFSET) };
         Node {
             ast: self.ast,
-            node: unsafe { <Ident>::from_packed(node) },
+            node: unsafe { *<Ident>::from_packed(node) },
         }
     }
 }
@@ -3601,7 +3601,7 @@ impl<'a> Node<'a, SetField> {
         let node = unsafe { self.ast.nodes.get_unchecked(index + OFFSET) };
         Node {
             ast: self.ast,
-            node: unsafe { <GetField>::from_packed(node) },
+            node: unsafe { *<GetField>::from_packed(node) },
         }
     }
 
@@ -3613,7 +3613,7 @@ impl<'a> Node<'a, SetField> {
         let node = unsafe { self.ast.nodes.get_unchecked(index + OFFSET) };
         Node {
             ast: self.ast,
-            node: unsafe { <Expr>::from_packed(node) },
+            node: unsafe { *<Expr>::from_packed(node) },
         }
     }
 
@@ -3636,7 +3636,7 @@ impl<'a> Node<'a, GetIndex> {
         let node = unsafe { self.ast.nodes.get_unchecked(index + OFFSET) };
         Node {
             ast: self.ast,
-            node: unsafe { <Expr>::from_packed(node) },
+            node: unsafe { *<Expr>::from_packed(node) },
         }
     }
 
@@ -3648,7 +3648,7 @@ impl<'a> Node<'a, GetIndex> {
         let node = unsafe { self.ast.nodes.get_unchecked(index + OFFSET) };
         Node {
             ast: self.ast,
-            node: unsafe { <Expr>::from_packed(node) },
+            node: unsafe { *<Expr>::from_packed(node) },
         }
     }
 }
@@ -3662,7 +3662,7 @@ impl<'a> Node<'a, SetIndex> {
         let node = unsafe { self.ast.nodes.get_unchecked(index + OFFSET) };
         Node {
             ast: self.ast,
-            node: unsafe { <GetIndex>::from_packed(node) },
+            node: unsafe { *<GetIndex>::from_packed(node) },
         }
     }
 
@@ -3674,7 +3674,7 @@ impl<'a> Node<'a, SetIndex> {
         let node = unsafe { self.ast.nodes.get_unchecked(index + OFFSET) };
         Node {
             ast: self.ast,
-            node: unsafe { <Expr>::from_packed(node) },
+            node: unsafe { *<Expr>::from_packed(node) },
         }
     }
 
@@ -3697,7 +3697,7 @@ impl<'a> Node<'a, Call> {
         let node = unsafe { self.ast.nodes.get_unchecked(index + OFFSET) };
         Node {
             ast: self.ast,
-            node: unsafe { <Expr>::from_packed(node) },
+            node: unsafe { *<Expr>::from_packed(node) },
         }
     }
 
@@ -3730,7 +3730,7 @@ impl<'a> Node<'a, Infix> {
         let node = unsafe { self.ast.nodes.get_unchecked(index + OFFSET) };
         Node {
             ast: self.ast,
-            node: unsafe { <Expr>::from_packed(node) },
+            node: unsafe { *<Expr>::from_packed(node) },
         }
     }
 
@@ -3742,7 +3742,7 @@ impl<'a> Node<'a, Infix> {
         let node = unsafe { self.ast.nodes.get_unchecked(index + OFFSET) };
         Node {
             ast: self.ast,
-            node: unsafe { <Expr>::from_packed(node) },
+            node: unsafe { *<Expr>::from_packed(node) },
         }
     }
 
@@ -3765,7 +3765,7 @@ impl<'a> Node<'a, Prefix> {
         let node = unsafe { self.ast.nodes.get_unchecked(index + OFFSET) };
         Node {
             ast: self.ast,
-            node: unsafe { <Expr>::from_packed(node) },
+            node: unsafe { *<Expr>::from_packed(node) },
         }
     }
 
@@ -3896,7 +3896,7 @@ impl<'a> Node<'a, ImportItem> {
         let node = unsafe { self.ast.nodes.get_unchecked(index + OFFSET) };
         Node {
             ast: self.ast,
-            node: unsafe { <Ident>::from_packed(node) },
+            node: unsafe { *<Ident>::from_packed(node) },
         }
     }
 
@@ -3908,7 +3908,7 @@ impl<'a> Node<'a, ImportItem> {
         let node = unsafe { self.ast.nodes.get_unchecked(index + OFFSET) };
         Node {
             ast: self.ast,
-            node: unsafe { <Opt<Ident>>::from_packed(node) },
+            node: unsafe { *<Opt<Ident>>::from_packed(node) },
         }
     }
 }
@@ -3922,7 +3922,7 @@ impl<'a> Node<'a, Branch> {
         let node = unsafe { self.ast.nodes.get_unchecked(index + OFFSET) };
         Node {
             ast: self.ast,
-            node: unsafe { <Expr>::from_packed(node) },
+            node: unsafe { *<Expr>::from_packed(node) },
         }
     }
 
@@ -3955,7 +3955,7 @@ impl<'a> Node<'a, TableEntry> {
         let node = unsafe { self.ast.nodes.get_unchecked(index + OFFSET) };
         Node {
             ast: self.ast,
-            node: unsafe { <Str>::from_packed(node) },
+            node: unsafe { *<Str>::from_packed(node) },
         }
     }
 
@@ -3967,7 +3967,7 @@ impl<'a> Node<'a, TableEntry> {
         let node = unsafe { self.ast.nodes.get_unchecked(index + OFFSET) };
         Node {
             ast: self.ast,
-            node: unsafe { <Expr>::from_packed(node) },
+            node: unsafe { *<Expr>::from_packed(node) },
         }
     }
 }

@@ -786,7 +786,7 @@ fn emit_category_kind_enums(nodes: &Nodes, out: &mut String) {
             impl<'a> Node<'a, {category_name}> {{
                 #[inline]
                 pub fn kind(&self) -> {category_name}Kind<'a> {{
-                    let node: &'a {category_name} = &*self.node;
+                    let node: {category_name} = self.node;
                     match node.0.kind() {{
                         {kinds}
                         // SAFETY: guaranteed to be a valid `Stmt`
@@ -801,7 +801,7 @@ fn emit_category_kind_enums(nodes: &Nodes, out: &mut String) {
                 .map(|node| {
                     let name = AsPascalCase(node.name);
                     format!(
-                        "NodeKind::{name} => {category_name}Kind::{name}(Node {{ ast: self.ast, node: unsafe {{ {name}::from_packed(&node.0) }} }}),"
+                        "NodeKind::{name} => {category_name}Kind::{name}(Node {{ ast: self.ast, node: unsafe {{ *{name}::from_packed(&node.0) }} }}),"
                     )
                 })
                 .join('\n')
@@ -1241,7 +1241,7 @@ fn emit_unpack_impls(nodes: &Nodes, out: &mut String) {
                 .map(|&id| &nodes.flat[id.0])
                 .map(|node| {
                     let kind = AsPascalCase(node.name);
-                    format!("{name}Kind::{kind} => parts::{name}::{kind}(unsafe {{ PackedNode::from_packed(&self.0) }}),")
+                    format!("{name}Kind::{kind} => parts::{name}::{kind}(unsafe {{ *PackedNode::from_packed(&self.0) }}),")
                 })
                 .join('\n')
         );
@@ -1290,7 +1290,7 @@ fn emit_unpack_impls(nodes: &Nodes, out: &mut String) {
                         .iter()
                         .enumerate()
                         .map(|(i, Field { name, .. })| format!(
-                            "let {name} = unsafe {{ <_>::from_packed(*raw.get_unchecked({i})) }};"
+                            "let {name} = unsafe {{ *<_>::from_packed(*raw.get_unchecked({i})) }};"
                         ))
                         .join('\n'),
                     fields = fields.iter().map(|f| f.name).join(','),
@@ -1317,7 +1317,7 @@ fn emit_unpack_impls(nodes: &Nodes, out: &mut String) {
                         .iter()
                         .enumerate()
                         .map(|(i, Field { name, .. })| format!(
-                            "let {name} = unsafe {{ <_>::from_packed(*raw.get_unchecked({i})) }};"
+                            "let {name} = unsafe {{ *<_>::from_packed(*raw.get_unchecked({i})) }};"
                         ))
                         .join('\n'),
                     fields = fields.iter().map(|f| f.name).join(','),
@@ -1355,7 +1355,7 @@ fn emit_unpack_impls(nodes: &Nodes, out: &mut String) {
                         .iter()
                         .enumerate()
                         .map(|(i, Field { name, .. })| format!(
-                            "let {name} = unsafe {{ <_>::from_packed(*raw.get_unchecked({i})) }};"
+                            "let {name} = unsafe {{ *<_>::from_packed(*raw.get_unchecked({i})) }};"
                         ))
                         .join('\n'),
                     fields = fields.iter().map(|f| f.name).join(','),
@@ -1410,7 +1410,7 @@ fn emit_field_getters(nodes: &Nodes, out: &mut String) {
                             let repr = unsafe {{ self.node.0.as_{repr}() }};
                             let index = repr.index as usize;
                             let node = unsafe {{ self.ast.nodes.get_unchecked(index + OFFSET) }};
-                            Node {{ ast: self.ast, node: unsafe {{ <{ty}>::from_packed(node) }} }}
+                            Node {{ ast: self.ast, node: unsafe {{ *<{ty}>::from_packed(node) }} }}
                         }}\n
                         ",
                         field = field.name,
@@ -1468,7 +1468,7 @@ fn emit_field_getters(nodes: &Nodes, out: &mut String) {
                             let repr = unsafe {{ self.node.0.as_mixed_arity() }};
                             let index = repr.index as usize;
                             let node = unsafe {{ self.ast.nodes.get_unchecked(index + OFFSET) }};
-                            Node {{ ast: self.ast, node: unsafe {{ <{ty}>::from_packed(node) }} }}
+                            Node {{ ast: self.ast, node: unsafe {{ *<{ty}>::from_packed(node) }} }}
                         }}\n
                         ",
                         field = field.name,

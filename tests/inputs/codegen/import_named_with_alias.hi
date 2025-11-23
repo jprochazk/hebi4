@@ -1,1 +1,1 @@
-import read_file as read, write_file as write from "fs"
+import {read_file as read, write_file as write} from "fs"

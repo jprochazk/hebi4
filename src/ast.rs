@@ -210,7 +210,7 @@ mod private {
         }
 
         pub fn root(&self) -> Node<'_, Root> {
-            let root = self.root.as_ref().unwrap();
+            let root = self.root.unwrap();
             Node {
                 ast: self,
                 node: root,
