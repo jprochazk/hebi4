@@ -39,7 +39,7 @@ pub mod prelude {
         codegen::EmitOptions,
         error::{Result as HebiResult, error},
         module::{
-            Module, NativeFunction, NativeModule, Param, Ret, TryFromHebiValueRaw,
+            Extern, Module, NativeFunction, NativeModule, Param, Ret, TryFromHebiValueRaw,
             TryIntoHebiValueRaw, Value, f,
         },
         vm::{
@@ -48,7 +48,7 @@ pub mod prelude {
                 self, GcAnyRef, GcAnyRoot, GcRef, GcRoot, GcUninitRoot, Heap, ValueRef, ValueRoot,
                 let_root, let_root_unchecked, reroot,
             },
-            value::{self, Extern, List, Str, Table, extern_data, host_function::Context},
+            value::{self, ExternAny, List, Str, Table, extern_data, host_function::Context},
         },
     };
 }

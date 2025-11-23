@@ -1,0 +1,35 @@
+---
+source: src/vm/tests.rs
+expression: snapshot
+---
+SOURCE
+do {
+import {bar_new, foo_value} from "test3"
+
+let bar = bar_new(100)
+print(foo_value(bar))
+}
+
+ERROR
+type mismatch: expected Extern<Foo>, got Extern<Bar>
+5 |  print(foo_value(bar))
+  |        ^^^^^^^^^^^^^^
+
+
+DISASM:
+
+.fn @main
+  params 0
+  stack 7
+  .locals
+     = r1
+     = r2
+    bar = r3
+  .code
+  0  import l0   ; {import "test3", n=2}
+  1  lsmi r4, 100
+  2  call r3, r1, 1   ; dyn
+  3  mov r6, r3
+  4  call r5, r2, 1   ; dyn
+  5  call r4, print
+  6  retv r4

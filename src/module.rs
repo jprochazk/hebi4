@@ -4,7 +4,8 @@ use std::sync::Arc;
 
 use beef::lean::Cow;
 pub use native::{
-    NativeFunction, NativeModule, Param, Ret, TryFromHebiValueRaw, TryIntoHebiValueRaw, Value, f,
+    Extern, NativeFunction, NativeModule, Param, Ret, TryFromHebiValueRaw, TryIntoHebiValueRaw,
+    Value, f,
 };
 
 use crate::{

@@ -43,7 +43,7 @@ pub fn map<'a>(
 
 pub fn append<'a>(
     mut cx: Context<'a>,
-    list: Param<'a, List>,
+    mut list: Param<'a, List>,
     value: Value<'a>,
 ) -> HebiResult<Ret<'a>> {
     let_root!(in cx; value_root);

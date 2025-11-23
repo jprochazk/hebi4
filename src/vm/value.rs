@@ -108,7 +108,7 @@ pub(crate) use self::string::StringHasher;
 #[allow(unused_imports)] // re-exports
 pub use self::{
     closure::Closure,
-    external::{Extern, extern_data},
+    external::{ExternAny, extern_data},
     function::Function,
     list::{List, ListIter},
     module::ModuleProto,

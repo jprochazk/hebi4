@@ -10,6 +10,7 @@ use crate::{
         GcAnyPtr, GcAnyRef, GcAnyRefMut, GcAnyRoot, GcPtr, GcRefMut, GcRoot, GcUninitRoot, Heap,
         Trace, ValueRoot,
     },
+    value::{ExternAny, external::ExternData},
     vm::{
         gc::{GcRef, ValueRef},
         value::{
@@ -488,6 +489,13 @@ impl<'a, T: Trace> TryIntoHebiValueRaw for Param<'a, T> {
     }
 }
 
+impl<'a, T: ExternData> TryIntoHebiValueRaw for Extern<'a, T> {
+    #[inline]
+    unsafe fn try_into_hebi_value_raw(self, cx: &mut Context<'_>) -> Result<ValueRaw> {
+        Ok(ValueRaw::Object(self.ptr.as_any()))
+    }
+}
+
 impl<'a> TryIntoHebiValueRaw for Any<'a> {
     #[inline]
     unsafe fn try_into_hebi_value_raw(self, cx: &mut Context<'_>) -> Result<ValueRaw> {
@@ -504,6 +512,37 @@ impl<'a> TryIntoHebiValueRaw for Value<'a> {
 
 type Invariant<T> = PhantomData<fn(T) -> T>;
 type InvariantLifetime<'a> = Invariant<&'a ()>;
+
+pub struct Extern<'a, T: ExternData> {
+    ptr: GcPtr<ExternAny>,
+    _marker: Invariant<T>,
+    _lifetime: InvariantLifetime<'a>,
+}
+
+impl<'a, T: ExternData> Extern<'a, T> {
+    #[inline]
+    pub fn as_ptr(&self) -> GcPtr<ExternAny> {
+        self.ptr
+    }
+
+    #[inline]
+    pub fn as_ref<'v>(&'v self, heap: &'v Heap) -> &'v T {
+        // SAFETY:
+        // - The lifetime of the resulting reference is restricted to `'v`,
+        //   which borrows the heap.
+        // - Type check already happened upon construction.
+        unsafe { ExternAny::cast_ref_raw(self.ptr).unwrap_unchecked() }
+    }
+
+    #[inline]
+    pub fn as_mut<'v>(&'v self, heap: &'v mut Heap) -> &'v mut T {
+        // SAFETY:
+        // - The lifetime of the resulting reference is restricted to `'v`,
+        //   which uniquely borrows the heap.
+        // - Type check already happened upon construction.
+        unsafe { ExternAny::cast_mut_raw(self.ptr).unwrap_unchecked() }
+    }
+}
 
 /// A direct reference to a parameter.
 ///
@@ -533,7 +572,7 @@ impl<'a, T: Trace> Param<'a, T> {
     }
 
     #[inline]
-    pub fn as_mut<'v>(&'v self, heap: &'v mut Heap) -> GcRefMut<'v, T> {
+    pub fn as_mut<'v>(&'v mut self, heap: &'v mut Heap) -> GcRefMut<'v, T> {
         #[cfg(debug_assertions)]
         debug_assert!(heap.id() == self.heap_id);
 
@@ -716,6 +755,19 @@ impl<'a, T: Trace> TryFromHebiValueRaw<'a> for Param<'a, T> {
             ));
         };
         Ok(value)
+    }
+}
+
+impl<'a, T: ExternData> TryFromHebiValueRaw<'a> for Extern<'a, T> {
+    #[inline]
+    unsafe fn try_from_hebi_value_raw(cx: &Context<'a>, value: ValueRaw) -> Result<Self> {
+        let value = Param::<ExternAny>::try_from_hebi_value_raw(cx, value)?;
+        value.as_ref(cx).is::<T>()?;
+        Ok(Self {
+            ptr: value.ptr,
+            _marker: PhantomData,
+            _lifetime: PhantomData,
+        })
     }
 }
 
