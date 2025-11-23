@@ -305,6 +305,14 @@ An array is a dynamically-sized sequence of values.
 let v = [0,1,2]
 ```
 
+You can access the values in an array using an _index_:
+
+```js
+v[0] + v[1]
+```
+
+Only _integers_ are valid indices.
+
 #### Tables
 
 A table is a sequence of _key-value pairs_. They are sometimes called _hash maps_ or _associative arrays_.
@@ -313,13 +321,34 @@ A table is a sequence of _key-value pairs_. They are sometimes called _hash maps
 let v = {a:0, b:1, c:2}
 ```
 
+Tables are indexed by _strings_.
+
+```js
+print(v["a"]) // 0
+```
+
+Other types must be explicitly converted to strings before being used as keys:
+
+```js
+let k = to_str(0)
+v[k] = "hi"!
+
+print(v[k])
+```
+
+You can also use the _field_ syntax to index tables:
+
+```js
+print(v.a) // 0
+```
+
 ### Blocks
 
 ```js
 let v = do { 1 + 1 }
 ```
 
-You can use these to limit the scope of something. The final expression in the block is its value.
+You can use these to limit the scope of things. The final expression in the block is its value.
 This is known as an [implicit return](#implicit-returns).
 
 ### Implicit returns
