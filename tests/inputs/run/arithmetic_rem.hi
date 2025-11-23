@@ -1,0 +1,10 @@
+let result = 5
+let a = 10
+let b = 19
+
+// note: integer division
+result %= a % b  // 5 % (10 % 19) = 5 % 10 = 5
+result %= 10 % b // 5 % (10 % 19) = 5 % 10 = 5
+result %= a % 19 // 5 % (10 % 19) = 5 % 10 = 5
+
+result //=5

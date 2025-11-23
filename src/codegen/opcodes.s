@@ -203,6 +203,13 @@ divvn dst:reg lhs:reg rhs:lit8;
 /* `dst = lhs / rhs` (literal, register) */
 divnv dst:reg lhs:lit8 rhs:reg;
 
+/* `dst = lhs % rhs` (register, register) */
+remvv dst:reg lhs:reg rhs:reg;
+/* `dst = lhs % rhs` (register, literal) */
+remvn dst:reg lhs:reg rhs:lit8;
+/* `dst = lhs % rhs` (literal, register) */
+remnv dst:reg lhs:lit8 rhs:reg;
+
 # Unary instructions
 
 /* `dst = -rhs` */

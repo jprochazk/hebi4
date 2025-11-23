@@ -601,15 +601,18 @@ pub enum DecodedInsn {
     Divvv { dst: Reg, lhs: Reg, rhs: Reg } = 58,
     Divvn { dst: Reg, lhs: Reg, rhs: Lit8 } = 59,
     Divnv { dst: Reg, lhs: Lit8, rhs: Reg } = 60,
-    Unm { dst: Reg, rhs: Reg } = 61,
-    Not { dst: Reg, rhs: Reg } = 62,
-    Call { dst: Reg, callee: Reg, args: Imm8 } = 63,
-    Fastcall { dst: Reg, id: FnId } = 64,
-    Hostcall { dst: Reg, id: HostId } = 65,
-    Import { _unused: Reg, id: Lit } = 66,
-    Ret {} = 67,
-    Retv { src: Reg } = 68,
-    Stop {} = 69,
+    Remvv { dst: Reg, lhs: Reg, rhs: Reg } = 61,
+    Remvn { dst: Reg, lhs: Reg, rhs: Lit8 } = 62,
+    Remnv { dst: Reg, lhs: Lit8, rhs: Reg } = 63,
+    Unm { dst: Reg, rhs: Reg } = 64,
+    Not { dst: Reg, rhs: Reg } = 65,
+    Call { dst: Reg, callee: Reg, args: Imm8 } = 66,
+    Fastcall { dst: Reg, id: FnId } = 67,
+    Hostcall { dst: Reg, id: HostId } = 68,
+    Import { _unused: Reg, id: Lit } = 69,
+    Ret {} = 70,
+    Retv { src: Reg } = 71,
+    Stop {} = 72,
 }
 
 impl Insn {
@@ -873,6 +876,21 @@ impl Insn {
                 lhs: Divnv(self).lhs(),
                 rhs: Divnv(self).rhs(),
             },
+            Opcode::Remvv => DecodedInsn::Remvv {
+                dst: Remvv(self).dst(),
+                lhs: Remvv(self).lhs(),
+                rhs: Remvv(self).rhs(),
+            },
+            Opcode::Remvn => DecodedInsn::Remvn {
+                dst: Remvn(self).dst(),
+                lhs: Remvn(self).lhs(),
+                rhs: Remvn(self).rhs(),
+            },
+            Opcode::Remnv => DecodedInsn::Remnv {
+                dst: Remnv(self).dst(),
+                lhs: Remnv(self).lhs(),
+                rhs: Remnv(self).rhs(),
+            },
             Opcode::Unm => DecodedInsn::Unm {
                 dst: Unm(self).dst(),
                 rhs: Unm(self).rhs(),
@@ -970,15 +988,18 @@ pub enum Opcode {
     Divvv = 58,
     Divvn = 59,
     Divnv = 60,
-    Unm = 61,
-    Not = 62,
-    Call = 63,
-    Fastcall = 64,
-    Hostcall = 65,
-    Import = 66,
-    Ret = 67,
-    Retv = 68,
-    Stop = 69,
+    Remvv = 61,
+    Remvn = 62,
+    Remnv = 63,
+    Unm = 64,
+    Not = 65,
+    Call = 66,
+    Fastcall = 67,
+    Hostcall = 68,
+    Import = 69,
+    Ret = 70,
+    Retv = 71,
+    Stop = 72,
 }
 #[doc = "Do nothing."]
 #[derive(Clone, Copy)]
@@ -2105,6 +2126,72 @@ impl Divnv {
     }
 }
 
+#[doc = "`dst = lhs % rhs` (register, register)"]
+#[derive(Clone, Copy)]
+#[repr(transparent)]
+pub struct Remvv(Insn);
+
+impl Remvv {
+    #[allow(unnecessary_transmutes)]
+    pub fn dst(self) -> Reg {
+        Reg(unsafe { ::core::mem::transmute(self.0.a()) })
+    }
+
+    #[allow(unnecessary_transmutes)]
+    pub fn lhs(self) -> Reg {
+        Reg(unsafe { ::core::mem::transmute(self.0.b()) })
+    }
+
+    #[allow(unnecessary_transmutes)]
+    pub fn rhs(self) -> Reg {
+        Reg(unsafe { ::core::mem::transmute(self.0.c()) })
+    }
+}
+
+#[doc = "`dst = lhs % rhs` (register, literal)"]
+#[derive(Clone, Copy)]
+#[repr(transparent)]
+pub struct Remvn(Insn);
+
+impl Remvn {
+    #[allow(unnecessary_transmutes)]
+    pub fn dst(self) -> Reg {
+        Reg(unsafe { ::core::mem::transmute(self.0.a()) })
+    }
+
+    #[allow(unnecessary_transmutes)]
+    pub fn lhs(self) -> Reg {
+        Reg(unsafe { ::core::mem::transmute(self.0.b()) })
+    }
+
+    #[allow(unnecessary_transmutes)]
+    pub fn rhs(self) -> Lit8 {
+        Lit8(unsafe { ::core::mem::transmute(self.0.c()) })
+    }
+}
+
+#[doc = "`dst = lhs % rhs` (literal, register)"]
+#[derive(Clone, Copy)]
+#[repr(transparent)]
+pub struct Remnv(Insn);
+
+impl Remnv {
+    #[allow(unnecessary_transmutes)]
+    pub fn dst(self) -> Reg {
+        Reg(unsafe { ::core::mem::transmute(self.0.a()) })
+    }
+
+    #[allow(unnecessary_transmutes)]
+    pub fn lhs(self) -> Lit8 {
+        Lit8(unsafe { ::core::mem::transmute(self.0.b()) })
+    }
+
+    #[allow(unnecessary_transmutes)]
+    pub fn rhs(self) -> Reg {
+        Reg(unsafe { ::core::mem::transmute(self.0.c()) })
+    }
+}
+
 #[doc = "`dst = -rhs`"]
 #[derive(Clone, Copy)]
 #[repr(transparent)]
@@ -2307,6 +2394,9 @@ pub mod __operands {
     pub type divvv = super::Divvv;
     pub type divvn = super::Divvn;
     pub type divnv = super::Divnv;
+    pub type remvv = super::Remvv;
+    pub type remvn = super::Remvn;
+    pub type remnv = super::Remnv;
     pub type unm = super::Unm;
     pub type not = super::Not;
     pub type call = super::Call;
@@ -2564,6 +2654,18 @@ pub mod asm {
     pub const fn divnv(dst: Reg, lhs: Lit8, rhs: Reg) -> Insn {
         op_abc(Opcode::Divnv, dst.0, lhs.0, rhs.0)
     }
+    #[doc = "`dst = lhs % rhs` (register, register)"]
+    pub const fn remvv(dst: Reg, lhs: Reg, rhs: Reg) -> Insn {
+        op_abc(Opcode::Remvv, dst.0, lhs.0, rhs.0)
+    }
+    #[doc = "`dst = lhs % rhs` (register, literal)"]
+    pub const fn remvn(dst: Reg, lhs: Reg, rhs: Lit8) -> Insn {
+        op_abc(Opcode::Remvn, dst.0, lhs.0, rhs.0)
+    }
+    #[doc = "`dst = lhs % rhs` (literal, register)"]
+    pub const fn remnv(dst: Reg, lhs: Lit8, rhs: Reg) -> Insn {
+        op_abc(Opcode::Remnv, dst.0, lhs.0, rhs.0)
+    }
     #[doc = "`dst = -rhs`"]
     pub const fn unm(dst: Reg, rhs: Reg) -> Insn {
         op_abc(Opcode::Unm, dst.0, rhs.0, 0)
@@ -2664,6 +2766,9 @@ pub struct JumpTable {
     pub divvv: OpaqueHandler,
     pub divvn: OpaqueHandler,
     pub divnv: OpaqueHandler,
+    pub remvv: OpaqueHandler,
+    pub remvn: OpaqueHandler,
+    pub remnv: OpaqueHandler,
     pub unm: OpaqueHandler,
     pub not: OpaqueHandler,
     pub call: OpaqueHandler,

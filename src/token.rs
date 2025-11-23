@@ -231,6 +231,7 @@ macro_rules! t {
     (-=) => ($crate::token::TokenKind::MinusEq);
     (*=) => ($crate::token::TokenKind::StarEq);
     (/=) => ($crate::token::TokenKind::SlashEq);
+    (%=) => ($crate::token::TokenKind::PercentEq);
     (or) => ($crate::token::TokenKind::Or);
     (and) => ($crate::token::TokenKind::And);
     (==) => ($crate::token::TokenKind::EqEq);
@@ -243,6 +244,7 @@ macro_rules! t {
     (-) => ($crate::token::TokenKind::Minus);
     (*) => ($crate::token::TokenKind::Star);
     (/) => ($crate::token::TokenKind::Slash);
+    (%) => ($crate::token::TokenKind::Percent);
     (not) => ($crate::token::TokenKind::Not);
 
     (ident) => ($crate::token::TokenKind::Ident);
@@ -387,6 +389,8 @@ pub enum TokenKind {
     StarEq,
     #[token("/=")]
     SlashEq,
+    #[token("%=")]
+    PercentEq,
     #[token("or")]
     Or,
     #[token("and")]
@@ -411,6 +415,8 @@ pub enum TokenKind {
     Star,
     #[token("/")]
     Slash,
+    #[token("%")]
+    Percent,
     #[token("not")]
     Not,
 
@@ -472,6 +478,7 @@ impl TokenKind {
             TokenKind::MinusEq => "-=",
             TokenKind::StarEq => "*=",
             TokenKind::SlashEq => "/=",
+            TokenKind::PercentEq => "%=",
             TokenKind::Or => "or",
             TokenKind::And => "and",
             TokenKind::EqEq => "==",
@@ -484,6 +491,7 @@ impl TokenKind {
             TokenKind::Minus => "-",
             TokenKind::Star => "*",
             TokenKind::Slash => "/",
+            TokenKind::Percent => "%",
             TokenKind::Not => "not",
             TokenKind::True => "true",
             TokenKind::False => "false",

@@ -17,6 +17,7 @@ pub enum AssignOp {
     Mul,
     // TODO: integer division
     Div,
+    Rem,
 }
 
 #[rustfmt::skip]
@@ -28,7 +29,7 @@ pub enum InfixOp {
     Gt, Ge, Lt, Le,
     Add, Sub,
     // TODO: integer division
-    Mul, Div
+    Mul, Div, Rem,
 }
 
 impl InfixOp {
@@ -46,7 +47,8 @@ impl InfixOp {
             | InfixOp::Add
             | InfixOp::Sub
             | InfixOp::Mul
-            | InfixOp::Div => false,
+            | InfixOp::Div
+            | InfixOp::Rem => false,
         }
     }
 
@@ -62,7 +64,8 @@ impl InfixOp {
             | InfixOp::Add
             | InfixOp::Sub
             | InfixOp::Mul
-            | InfixOp::Div => false,
+            | InfixOp::Div
+            | InfixOp::Rem => false,
         }
     }
 
@@ -80,7 +83,8 @@ impl InfixOp {
             | InfixOp::Add
             | InfixOp::Sub
             | InfixOp::Mul
-            | InfixOp::Div => false,
+            | InfixOp::Div
+            | InfixOp::Rem => false,
         }
     }
 }
@@ -161,6 +165,14 @@ impl std::ops::Div<f64n> for f64n {
 
     fn div(self, rhs: f64n) -> Self::Output {
         f64n::new(self.get() / self.get())
+    }
+}
+
+impl std::ops::Rem<f64n> for f64n {
+    type Output = f64n;
+
+    fn rem(self, rhs: f64n) -> Self::Output {
+        f64n::new(self.get() % self.get())
     }
 }
 

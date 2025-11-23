@@ -2360,6 +2360,7 @@ fn eval_expr_set_var<'a>(
         ast::AssignOp::Sub => (asm::subvv, asm::subvn),
         ast::AssignOp::Mul => (asm::mulvv, asm::mulvn),
         ast::AssignOp::Div => (asm::divvv, asm::divvn),
+        ast::AssignOp::Rem => (asm::remvv, asm::remvn),
     };
 
     // For arithmetic assign, first need to load the value from upvalue/module var.
@@ -2824,6 +2825,12 @@ fn runtime_eval_expr_infix_arith<'a>(
             (O::Const(lhs), O::Reg(rhs)) => asm::divnv(dst, lhs, rhs),
             _ => unreachable!("ICE: const/const in non-const path"),
         },
+        ast::InfixOp::Rem => match (lhs, rhs) {
+            (O::Reg(lhs), O::Reg(rhs)) => asm::remvv(dst, lhs, rhs),
+            (O::Reg(lhs), O::Const(rhs)) => asm::remvn(dst, lhs, rhs),
+            (O::Const(lhs), O::Reg(rhs)) => asm::remnv(dst, lhs, rhs),
+            _ => unreachable!("ICE: const/const in non-const path"),
+        },
         op => unreachable!("ICE: invalid op in infix: {op:?}"),
     };
 
@@ -2843,9 +2850,9 @@ fn const_eval_expr_infix_arith<'a>(
         fn(f64n, f64n) -> f64n,
         &'static str,
     ) = match op {
-        Op::Add => (|a, b| Ok(a + b), |a, b| a + b, "add"),
-        Op::Sub => (|a, b| Ok(a - b), |a, b| a - b, "subtract"),
-        Op::Mul => (|a, b| Ok(a * b), |a, b| a * b, "multiply"),
+        Op::Add => (|a, b| Ok(a + b), |a, b| a + b, "+"),
+        Op::Sub => (|a, b| Ok(a - b), |a, b| a - b, "-"),
+        Op::Mul => (|a, b| Ok(a * b), |a, b| a * b, "*"),
         Op::Div => (
             |a: i64, b: i64| {
                 if b == 0 {
@@ -2855,7 +2862,18 @@ fn const_eval_expr_infix_arith<'a>(
                 }
             },
             |a, b| a / b,
-            "divide",
+            "/",
+        ),
+        Op::Rem => (
+            |a: i64, b: i64| {
+                if b == 0 {
+                    Err("evaluation would fail: cannot divide by zero")
+                } else {
+                    Ok(a % b)
+                }
+            },
+            |a, b| a % b,
+            "%",
         ),
         op => unreachable!("ICE: invalid op in infix: {op:?}"),
     };
@@ -2871,8 +2889,9 @@ fn const_eval_expr_infix_arith<'a>(
         _ => {
             return error_span(
                 format!(
-                    "evaluation would fail with a type mismatch: cannot {desc} {} and {}",
+                    "evaluation would fail with a type mismatch: {} {} {}",
                     lhs.type_name(),
+                    desc,
                     rhs.type_name()
                 ),
                 span,
@@ -3532,6 +3551,9 @@ fn is_basic_block_exit(prev: Insn, insn: Insn) -> bool {
         | Opcode::Divvv
         | Opcode::Divvn
         | Opcode::Divnv
+        | Opcode::Remvv
+        | Opcode::Remvn
+        | Opcode::Remnv
         | Opcode::Unm
         | Opcode::Not
         | Opcode::Call
@@ -3605,6 +3627,9 @@ fn is_jump_condition(insn: Insn) -> bool {
         | Opcode::Divvv
         | Opcode::Divvn
         | Opcode::Divnv
+        | Opcode::Remvv
+        | Opcode::Remvn
+        | Opcode::Remnv
         | Opcode::Unm
         | Opcode::Not
         | Opcode::Call

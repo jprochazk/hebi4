@@ -190,6 +190,13 @@ impl<'a> std::fmt::Display for DisasmFuncWithSrc<'a> {
                 I::Divnv { dst, lhs, rhs } => {
                     writeln!(f, "div {dst}, {lhs}, {rhs}", lhs = func.literal(lhs.zx()))?
                 }
+                I::Remvv { dst, lhs, rhs } => writeln!(f, "rem {dst}, {lhs}, {rhs}")?,
+                I::Remvn { dst, lhs, rhs } => {
+                    writeln!(f, "rem {dst}, {lhs}, {rhs}", rhs = func.literal(rhs.zx()))?
+                }
+                I::Remnv { dst, lhs, rhs } => {
+                    writeln!(f, "rem {dst}, {lhs}, {rhs}", lhs = func.literal(lhs.zx()))?
+                }
                 I::Unm { dst, rhs } => writeln!(f, "unm {dst}, {rhs}")?,
                 I::Not { dst, rhs } => writeln!(f, "not {dst}, {rhs}")?,
                 I::Call { dst, callee, args } => {

@@ -747,6 +747,9 @@ static JT: JumpTable = jump_table! {
     divvv,
     divvn,
     divnv,
+    remvv,
+    remvn,
+    remnv,
     unm,
     not,
     call,
@@ -1872,6 +1875,67 @@ unsafe fn divnv(vm: Vm, jt: Jt, ip: Ip, args: Divnv, sp: Sp, lp: Lp) -> Control 
     let rhs = *sp.at(args.rhs());
 
     try_div_eval!(dst, lhs, rhs, vm, ip);
+
+    dispatch_next(vm, jt, ip, sp, lp)
+}
+
+macro_rules! try_rem_eval {
+    ($dst:ident, $lhs:ident, $rhs:ident, $vm:ident, $ip:ident) => {
+        use ValueRaw::*;
+        match ($lhs, $rhs) {
+            (Int(lhs), Int(rhs)) => match lhs.checked_rem(rhs) {
+                Some(v) => *$dst = Int(v),
+                None => {
+                    vm_exit!($vm, $ip, DivisionByZero)
+                }
+            },
+
+            // float div by zero = inf
+            (Float(lhs), Float(rhs)) => {
+                *$dst = Float(lhs % rhs);
+            }
+            (Float(lhs), Int(rhs)) => {
+                *$dst = Float(lhs % (rhs as f64));
+            }
+            (Int(lhs), Float(rhs)) => {
+                *$dst = Float((lhs as f64) % rhs);
+            }
+            _ => {
+                vm_exit!($vm, $ip, ArithTypeError);
+            }
+        }
+    };
+}
+
+#[inline(always)]
+unsafe fn remvv(vm: Vm, jt: Jt, ip: Ip, args: Remvv, sp: Sp, lp: Lp) -> Control {
+    let dst = sp.at(args.dst());
+    let lhs = *sp.at(args.lhs());
+    let rhs = *sp.at(args.rhs());
+
+    try_rem_eval!(dst, lhs, rhs, vm, ip);
+
+    dispatch_next(vm, jt, ip, sp, lp)
+}
+
+#[inline(always)]
+unsafe fn remvn(vm: Vm, jt: Jt, ip: Ip, args: Remvn, sp: Sp, lp: Lp) -> Control {
+    let dst = sp.at(args.dst());
+    let lhs = *sp.at(args.lhs());
+    let rhs = lp.int_or_float_unchecked(args.rhs());
+
+    try_rem_eval!(dst, lhs, rhs, vm, ip);
+
+    dispatch_next(vm, jt, ip, sp, lp)
+}
+
+#[inline(always)]
+unsafe fn remnv(vm: Vm, jt: Jt, ip: Ip, args: Remnv, sp: Sp, lp: Lp) -> Control {
+    let dst = sp.at(args.dst());
+    let lhs = lp.int_or_float_unchecked(args.lhs());
+    let rhs = *sp.at(args.rhs());
+
+    try_rem_eval!(dst, lhs, rhs, vm, ip);
 
     dispatch_next(vm, jt, ip, sp, lp)
 }

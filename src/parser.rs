@@ -525,6 +525,7 @@ fn parse_expr_assign(p: &mut State, buf: &Bump) -> Result<Spanned<Expr>> {
         t![-=] => AssignOp::Sub,
         t![*=] => AssignOp::Mul,
         t![/=] => AssignOp::Div,
+        t![%=] => AssignOp::Rem,
         _ => return Ok(lhs),
     };
     p.advance(); // eat op
@@ -648,6 +649,7 @@ fn parse_expr_mul(p: &mut State, buf: &Bump) -> Result<Spanned<Expr>> {
     let token_to_op = token_map! {
         [*] => InfixOp::Mul,
         [/] => InfixOp::Div,
+        [%] => InfixOp::Rem,
     };
     let next = parse_expr_prefix;
     parse_binop(p, buf, token_to_op, next)

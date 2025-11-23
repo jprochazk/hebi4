@@ -8,6 +8,6 @@ do {
 }
 
 ERROR
-evaluation would fail with a type mismatch: cannot add Int and Str
+evaluation would fail with a type mismatch: Int + Str
 2 |  1 + "test"
   |  ^^^^^^^^^^
