@@ -420,12 +420,6 @@ impl Vm {
     }
 
     #[inline]
-    unsafe fn set_current_module_for(self, f: GcPtr<Function>) {
-        let module = f.as_ref().module().as_ptr();
-        (*self.0.as_ptr()).current_module = Some(module);
-    }
-
-    #[inline]
     unsafe fn get_host_function(self, id: HostId) -> GcPtr<HostFunction> {
         (*self.0.as_ptr())
             .core
@@ -443,9 +437,56 @@ impl Vm {
     }
 
     #[inline]
+    unsafe fn current_literals(self) -> Lp {
+        let literals = (*self.0.as_ptr()).current_literals;
+        debug_assert!(literals.is_some());
+        let ptr = literals.unwrap_unchecked();
+
+        debug_assert!(
+            ptr.0
+                == Function::literals_raw(
+                    self.current_frame()
+                        .callee()
+                        .into_script()
+                        .unwrap_unchecked(),
+                )
+                .0
+        );
+
+        ptr
+    }
+
+    #[inline]
+    unsafe fn set_current_module_for(self, f: GcPtr<Function>) {
+        let module = f.as_ref().module().as_ptr();
+        debug_print!(
+            "enter module for {} (nvars={})",
+            module.as_ref().name.as_ref(),
+            module.as_ref().module_vars.len(),
+        );
+        (*self.0.as_ptr()).current_module = Some(module);
+    }
+
+    #[inline]
     unsafe fn set_current_upvalues_for(self, f: GcPtr<Closure>) {
+        debug_print!(
+            "set literals for {} (nuv={})",
+            f.as_ref().func.as_ref().name.as_ref(),
+            f.as_ref().upvalues.len()
+        );
         let upvalues = NonNull::new_unchecked(f.as_mut().upvalues.as_mut_ptr());
         (*self.0.as_ptr()).current_upvalues = Some(Upvalues(upvalues));
+    }
+
+    #[inline]
+    unsafe fn set_current_literals_for(self, f: GcPtr<Function>) {
+        debug_print!(
+            "set literals for {} (nlit={})",
+            f.as_ref().name.as_ref(),
+            f.as_ref().literals.len()
+        );
+        let literals = Function::literals_raw(f);
+        (*self.0.as_ptr()).current_literals = Some(literals);
     }
 
     #[inline]
@@ -800,7 +841,7 @@ impl Control {
 pub(crate) enum Control {
     Stop,
     Error(VmError),
-    Continue(Sp, Lp, Ip),
+    Continue(Sp, Ip),
 }
 
 #[cfg(any(debug_assertions, target_arch = "wasm32"))]
@@ -827,69 +868,69 @@ impl Control {
 
 /// Dispatch instruction at `ip`
 #[inline(always)]
-unsafe fn dispatch_current(vm: Vm, jt: Jt, ip: Ip, sp: Sp, lp: Lp) -> Control {
+unsafe fn dispatch_current(vm: Vm, ip: Ip, sp: Sp) -> Control {
     #[cfg(any(debug_assertions, target_arch = "wasm32"))]
     {
-        Control::Continue(sp, lp, ip)
+        Control::Continue(sp, ip)
     }
 
     #[cfg(not(any(debug_assertions, target_arch = "wasm32")))]
     {
         let insn = ip.get();
-        let op = jt.at(insn);
-        op(vm, jt, ip, insn, sp, lp)
+        let op = JT.as_ptr().at(insn);
+        op(vm, ip, insn, sp)
     }
 }
 
 /// Dispatch instruction at `ip+1`
 #[inline(always)]
-unsafe fn dispatch_next(vm: Vm, jt: Jt, ip: Ip, sp: Sp, lp: Lp) -> Control {
+unsafe fn dispatch_next(vm: Vm, ip: Ip, sp: Sp) -> Control {
     let ip = ip.next();
-    dispatch_current(vm, jt, ip, sp, lp)
+    dispatch_current(vm, ip, sp)
 }
 
 #[inline(always)]
-unsafe fn nop(vm: Vm, jt: Jt, ip: Ip, args: Nop, sp: Sp, lp: Lp) -> Control {
-    dispatch_next(vm, jt, ip, sp, lp)
+unsafe fn nop(vm: Vm, ip: Ip, args: Nop, sp: Sp) -> Control {
+    dispatch_next(vm, ip, sp)
 }
 
 #[inline(always)]
-unsafe fn mov(vm: Vm, jt: Jt, ip: Ip, args: Mov, sp: Sp, lp: Lp) -> Control {
+unsafe fn mov(vm: Vm, ip: Ip, args: Mov, sp: Sp) -> Control {
     *sp.at(args.dst()) = *sp.at(args.src());
 
-    dispatch_next(vm, jt, ip, sp, lp)
+    dispatch_next(vm, ip, sp)
 }
 
 #[inline(always)]
-unsafe fn lmvar(vm: Vm, jt: Jt, ip: Ip, args: Lmvar, sp: Sp, lp: Lp) -> Control {
+unsafe fn lmvar(vm: Vm, ip: Ip, args: Lmvar, sp: Sp) -> Control {
     *sp.at(args.dst()) = *vm.var_in_current_module(args.src());
 
-    dispatch_next(vm, jt, ip, sp, lp)
+    dispatch_next(vm, ip, sp)
 }
 
 #[inline(always)]
-unsafe fn smvar(vm: Vm, jt: Jt, ip: Ip, args: Smvar, sp: Sp, lp: Lp) -> Control {
+unsafe fn smvar(vm: Vm, ip: Ip, args: Smvar, sp: Sp) -> Control {
     *vm.var_in_current_module(args.dst()) = *sp.at(args.src());
 
-    dispatch_next(vm, jt, ip, sp, lp)
+    dispatch_next(vm, ip, sp)
 }
 
 #[inline(always)]
-unsafe fn luv(vm: Vm, jt: Jt, ip: Ip, args: Luv, sp: Sp, lp: Lp) -> Control {
+unsafe fn luv(vm: Vm, ip: Ip, args: Luv, sp: Sp) -> Control {
     *sp.at(args.dst()) = *vm.current_upvalues().at(args.src());
 
-    dispatch_next(vm, jt, ip, sp, lp)
+    dispatch_next(vm, ip, sp)
 }
 
 #[inline(always)]
-unsafe fn suv(vm: Vm, jt: Jt, ip: Ip, args: Suv, sp: Sp, lp: Lp) -> Control {
+unsafe fn suv(vm: Vm, ip: Ip, args: Suv, sp: Sp) -> Control {
     *vm.current_upvalues().at(args.dst()) = *sp.at(args.src());
 
-    dispatch_next(vm, jt, ip, sp, lp)
+    dispatch_next(vm, ip, sp)
 }
 
 #[inline(always)]
-unsafe fn lidx(vm: Vm, jt: Jt, ip: Ip, args: Lidx, sp: Sp, lp: Lp) -> Control {
+unsafe fn lidx(vm: Vm, ip: Ip, args: Lidx, sp: Sp) -> Control {
     let dst = sp.at(args.dst());
     let target = *sp.at(args.target());
     let idx = *sp.at(args.idx());
@@ -922,14 +963,14 @@ unsafe fn lidx(vm: Vm, jt: Jt, ip: Ip, args: Lidx, sp: Sp, lp: Lp) -> Control {
         return not_indexable_error(ip, vm);
     };
 
-    dispatch_next(vm, jt, ip, sp, lp)
+    dispatch_next(vm, ip, sp)
 }
 
 #[inline(always)]
-unsafe fn lidxn(vm: Vm, jt: Jt, ip: Ip, args: Lidxn, sp: Sp, lp: Lp) -> Control {
+unsafe fn lidxn(vm: Vm, ip: Ip, args: Lidxn, sp: Sp) -> Control {
     let dst = sp.at(args.dst());
     let list = *sp.at(args.target());
-    let idx = lp.int_unchecked(args.idx()) as usize;
+    let idx = vm.current_literals().int_unchecked(args.idx()) as usize;
 
     let Some(list) = list.into_object::<List>() else {
         return not_a_list_error(ip, vm);
@@ -942,11 +983,11 @@ unsafe fn lidxn(vm: Vm, jt: Jt, ip: Ip, args: Lidxn, sp: Sp, lp: Lp) -> Control 
 
     *dst = value.raw();
 
-    dispatch_next(vm, jt, ip, sp, lp)
+    dispatch_next(vm, ip, sp)
 }
 
 #[inline(always)]
-unsafe fn sidx(vm: Vm, jt: Jt, ip: Ip, args: Sidx, sp: Sp, lp: Lp) -> Control {
+unsafe fn sidx(vm: Vm, ip: Ip, args: Sidx, sp: Sp) -> Control {
     let target = *sp.at(args.target());
     let idx = *sp.at(args.idx());
     let src = *sp.at(args.src());
@@ -976,7 +1017,7 @@ unsafe fn sidx(vm: Vm, jt: Jt, ip: Ip, args: Sidx, sp: Sp, lp: Lp) -> Control {
         return not_indexable_error(ip, vm);
     };
 
-    dispatch_next(vm, jt, ip, sp, lp)
+    dispatch_next(vm, ip, sp)
 }
 
 #[cold]
@@ -990,9 +1031,9 @@ unsafe fn invalid_array_index_error(ip: Ip, vm: Vm) -> Control {
 }
 
 #[inline(always)]
-unsafe fn sidxn(vm: Vm, jt: Jt, ip: Ip, args: Sidxn, sp: Sp, lp: Lp) -> Control {
+unsafe fn sidxn(vm: Vm, ip: Ip, args: Sidxn, sp: Sp) -> Control {
     let list = *sp.at(args.target());
-    let idx = lp.int_unchecked(args.idx()) as usize;
+    let idx = vm.current_literals().int_unchecked(args.idx()) as usize;
     let src = *sp.at(args.src());
 
     let Some(list) = list.into_object::<List>() else {
@@ -1007,7 +1048,7 @@ unsafe fn sidxn(vm: Vm, jt: Jt, ip: Ip, args: Sidxn, sp: Sp, lp: Lp) -> Control 
 
     list.as_mut().set_raw_unchecked(idx, src);
 
-    dispatch_next(vm, jt, ip, sp, lp)
+    dispatch_next(vm, ip, sp)
 }
 
 #[cold]
@@ -1021,7 +1062,7 @@ unsafe fn index_out_of_bounds_error(ip: Ip, vm: Vm) -> Control {
 }
 
 #[inline(always)]
-unsafe fn lkey(vm: Vm, jt: Jt, ip: Ip, args: Lkey, sp: Sp, lp: Lp) -> Control {
+unsafe fn lkey(vm: Vm, ip: Ip, args: Lkey, sp: Sp) -> Control {
     let dst = sp.at(args.dst());
     let target = *sp.at(args.target());
     let key = *sp.at(args.key());
@@ -1042,14 +1083,14 @@ unsafe fn lkey(vm: Vm, jt: Jt, ip: Ip, args: Lkey, sp: Sp, lp: Lp) -> Control {
 
     *dst = value.raw();
 
-    dispatch_next(vm, jt, ip, sp, lp)
+    dispatch_next(vm, ip, sp)
 }
 
 #[inline(always)]
-unsafe fn lkeyc(vm: Vm, jt: Jt, ip: Ip, args: Lkeyc, sp: Sp, lp: Lp) -> Control {
+unsafe fn lkeyc(vm: Vm, ip: Ip, args: Lkeyc, sp: Sp) -> Control {
     let dst = sp.at(args.dst());
     let target = *sp.at(args.target());
-    let key = lp.str_unchecked(args.key());
+    let key = vm.current_literals().str_unchecked(args.key());
 
     let Some(table) = target.into_object::<Table>() else {
         return not_a_table_error(ip, vm);
@@ -1063,7 +1104,7 @@ unsafe fn lkeyc(vm: Vm, jt: Jt, ip: Ip, args: Lkeyc, sp: Sp, lp: Lp) -> Control 
 
     *dst = value;
 
-    dispatch_next(vm, jt, ip, sp, lp)
+    dispatch_next(vm, ip, sp)
 }
 
 #[cold]
@@ -1072,7 +1113,7 @@ unsafe fn missing_key_error(ip: Ip, vm: Vm) -> Control {
 }
 
 #[inline(always)]
-unsafe fn skey(vm: Vm, jt: Jt, ip: Ip, args: Skey, sp: Sp, lp: Lp) -> Control {
+unsafe fn skey(vm: Vm, ip: Ip, args: Skey, sp: Sp) -> Control {
     let target = *sp.at(args.target());
     let key = *sp.at(args.key());
     let src = *sp.at(args.src());
@@ -1089,7 +1130,7 @@ unsafe fn skey(vm: Vm, jt: Jt, ip: Ip, args: Skey, sp: Sp, lp: Lp) -> Control {
     // TODO: inline caching
     table.as_mut().insert_raw(key, src);
 
-    dispatch_next(vm, jt, ip, sp, lp)
+    dispatch_next(vm, ip, sp)
 }
 
 #[cold]
@@ -1103,9 +1144,9 @@ unsafe fn invalid_table_key_error(ip: Ip, vm: Vm) -> Control {
 }
 
 #[inline(always)]
-unsafe fn skeyc(vm: Vm, jt: Jt, ip: Ip, args: Skeyc, sp: Sp, lp: Lp) -> Control {
+unsafe fn skeyc(vm: Vm, ip: Ip, args: Skeyc, sp: Sp) -> Control {
     let target = *sp.at(args.target());
-    let key = lp.str_unchecked(args.key());
+    let key = vm.current_literals().str_unchecked(args.key());
     let src = *sp.at(args.src());
 
     let Some(table) = target.into_object::<Table>() else {
@@ -1116,64 +1157,64 @@ unsafe fn skeyc(vm: Vm, jt: Jt, ip: Ip, args: Skeyc, sp: Sp, lp: Lp) -> Control 
     // TODO: inline caching
     table.as_mut().insert_raw(key, src);
 
-    dispatch_next(vm, jt, ip, sp, lp)
+    dispatch_next(vm, ip, sp)
 }
 
 #[inline(always)]
-unsafe fn lnil(vm: Vm, jt: Jt, ip: Ip, args: Lnil, sp: Sp, lp: Lp) -> Control {
+unsafe fn lnil(vm: Vm, ip: Ip, args: Lnil, sp: Sp) -> Control {
     *sp.at(args.dst()) = ValueRaw::Nil;
 
-    dispatch_next(vm, jt, ip, sp, lp)
+    dispatch_next(vm, ip, sp)
 }
 
 #[inline(always)]
-unsafe fn lsmi(vm: Vm, jt: Jt, ip: Ip, args: Lsmi, sp: Sp, lp: Lp) -> Control {
+unsafe fn lsmi(vm: Vm, ip: Ip, args: Lsmi, sp: Sp) -> Control {
     *sp.at(args.dst()) = ValueRaw::Int(args.v().get() as i64);
 
-    dispatch_next(vm, jt, ip, sp, lp)
+    dispatch_next(vm, ip, sp)
 }
 
 #[inline(always)]
-unsafe fn lint(vm: Vm, jt: Jt, ip: Ip, args: Lint, sp: Sp, lp: Lp) -> Control {
-    *sp.at(args.dst()) = ValueRaw::Int(lp.int_unchecked(args.id()));
+unsafe fn lint(vm: Vm, ip: Ip, args: Lint, sp: Sp) -> Control {
+    *sp.at(args.dst()) = ValueRaw::Int(vm.current_literals().int_unchecked(args.id()));
 
-    dispatch_next(vm, jt, ip, sp, lp)
+    dispatch_next(vm, ip, sp)
 }
 
 #[inline(always)]
-unsafe fn lnum(vm: Vm, jt: Jt, ip: Ip, args: Lnum, sp: Sp, lp: Lp) -> Control {
-    *sp.at(args.dst()) = ValueRaw::Float(lp.float_unchecked(args.id()));
+unsafe fn lnum(vm: Vm, ip: Ip, args: Lnum, sp: Sp) -> Control {
+    *sp.at(args.dst()) = ValueRaw::Float(vm.current_literals().float_unchecked(args.id()));
 
-    dispatch_next(vm, jt, ip, sp, lp)
+    dispatch_next(vm, ip, sp)
 }
 
 #[inline(always)]
-unsafe fn lstr(vm: Vm, jt: Jt, ip: Ip, args: Lstr, sp: Sp, lp: Lp) -> Control {
-    *sp.at(args.dst()) = ValueRaw::Object(lp.str_unchecked(args.id()).as_any());
+unsafe fn lstr(vm: Vm, ip: Ip, args: Lstr, sp: Sp) -> Control {
+    *sp.at(args.dst()) = ValueRaw::Object(vm.current_literals().str_unchecked(args.id()).as_any());
 
-    dispatch_next(vm, jt, ip, sp, lp)
+    dispatch_next(vm, ip, sp)
 }
 
 #[inline(always)]
-unsafe fn ltrue(vm: Vm, jt: Jt, ip: Ip, args: Ltrue, sp: Sp, lp: Lp) -> Control {
+unsafe fn ltrue(vm: Vm, ip: Ip, args: Ltrue, sp: Sp) -> Control {
     *sp.at(args.dst()) = ValueRaw::Bool(true);
 
-    dispatch_next(vm, jt, ip, sp, lp)
+    dispatch_next(vm, ip, sp)
 }
 
 #[inline(always)]
-unsafe fn lfalse(vm: Vm, jt: Jt, ip: Ip, args: Lfalse, sp: Sp, lp: Lp) -> Control {
+unsafe fn lfalse(vm: Vm, ip: Ip, args: Lfalse, sp: Sp) -> Control {
     *sp.at(args.dst()) = ValueRaw::Bool(false);
 
-    dispatch_next(vm, jt, ip, sp, lp)
+    dispatch_next(vm, ip, sp)
 }
 
 #[inline(always)]
-unsafe fn lclosure(vm: Vm, jt: Jt, ip: Ip, args: Lclosure, sp: Sp, lp: Lp) -> Control {
+unsafe fn lclosure(vm: Vm, ip: Ip, args: Lclosure, sp: Sp) -> Control {
     vm.maybe_gc();
 
     let dst = sp.at(args.dst());
-    let proto = lp.closure_unchecked(args.id());
+    let proto = vm.current_literals().closure_unchecked(args.id());
 
     let heap = vm.heap();
     let closure = Closure::alloc(&*heap, proto);
@@ -1192,31 +1233,31 @@ unsafe fn lclosure(vm: Vm, jt: Jt, ip: Ip, args: Lclosure, sp: Sp, lp: Lp) -> Co
 
     *dst = ValueRaw::Object(closure.as_any());
 
-    dispatch_next(vm, jt, ip, sp, lp)
+    dispatch_next(vm, ip, sp)
 }
 
 #[inline(always)]
-unsafe fn lfunc(vm: Vm, jt: Jt, ip: Ip, args: Lfunc, sp: Sp, lp: Lp) -> Control {
+unsafe fn lfunc(vm: Vm, ip: Ip, args: Lfunc, sp: Sp) -> Control {
     let dst = sp.at(args.dst());
     let func = vm.get_function_in_current_module(args.id());
 
     *dst = ValueRaw::Object(func.as_any());
 
-    dispatch_next(vm, jt, ip, sp, lp)
+    dispatch_next(vm, ip, sp)
 }
 
 #[inline(always)]
-unsafe fn lhost(vm: Vm, jt: Jt, ip: Ip, args: Lhost, sp: Sp, lp: Lp) -> Control {
+unsafe fn lhost(vm: Vm, ip: Ip, args: Lhost, sp: Sp) -> Control {
     let dst = sp.at(args.dst());
     let func = vm.get_host_function(args.id());
 
     *dst = ValueRaw::Object(func.as_any());
 
-    dispatch_next(vm, jt, ip, sp, lp)
+    dispatch_next(vm, ip, sp)
 }
 
 #[inline(always)]
-unsafe fn llist(vm: Vm, jt: Jt, ip: Ip, args: Llist, sp: Sp, lp: Lp) -> Control {
+unsafe fn llist(vm: Vm, ip: Ip, args: Llist, sp: Sp) -> Control {
     vm.maybe_gc();
 
     let dst = sp.at(args.dst());
@@ -1228,11 +1269,11 @@ unsafe fn llist(vm: Vm, jt: Jt, ip: Ip, args: Llist, sp: Sp, lp: Lp) -> Control 
 
     *dst = ValueRaw::Object(list.as_any());
 
-    dispatch_next(vm, jt, ip, sp, lp)
+    dispatch_next(vm, ip, sp)
 }
 
 #[inline(always)]
-unsafe fn ltable(vm: Vm, jt: Jt, ip: Ip, args: Ltable, sp: Sp, lp: Lp) -> Control {
+unsafe fn ltable(vm: Vm, ip: Ip, args: Ltable, sp: Sp) -> Control {
     vm.maybe_gc();
 
     let dst = sp.at(args.dst());
@@ -1244,18 +1285,18 @@ unsafe fn ltable(vm: Vm, jt: Jt, ip: Ip, args: Ltable, sp: Sp, lp: Lp) -> Contro
 
     *dst = ValueRaw::Object(table.as_any());
 
-    dispatch_next(vm, jt, ip, sp, lp)
+    dispatch_next(vm, ip, sp)
 }
 
 #[inline(always)]
-unsafe fn jmp(vm: Vm, jt: Jt, ip: Ip, args: Jmp, sp: Sp, lp: Lp) -> Control {
+unsafe fn jmp(vm: Vm, ip: Ip, args: Jmp, sp: Sp) -> Control {
     let ip = ip.offset(args.rel().sz());
 
-    dispatch_current(vm, jt, ip, sp, lp)
+    dispatch_current(vm, ip, sp)
 }
 
 #[inline(always)]
-unsafe fn isnil(vm: Vm, jt: Jt, ip: Ip, args: Isnil, sp: Sp, lp: Lp) -> Control {
+unsafe fn isnil(vm: Vm, ip: Ip, args: Isnil, sp: Sp) -> Control {
     // isnil v
     // jmp offset
 
@@ -1263,16 +1304,16 @@ unsafe fn isnil(vm: Vm, jt: Jt, ip: Ip, args: Isnil, sp: Sp, lp: Lp) -> Control 
     if matches!(v, ValueRaw::Nil) {
         // skip `jmp`
         let ip = ip.offset(2);
-        dispatch_current(vm, jt, ip, sp, lp)
+        dispatch_current(vm, ip, sp)
     } else {
         // execute `jmp`
         let ip = ip.offset(1);
-        dispatch_current(vm, jt, ip, sp, lp)
+        dispatch_current(vm, ip, sp)
     }
 }
 
 #[inline(always)]
-unsafe fn isnotnil(vm: Vm, jt: Jt, ip: Ip, args: Isnotnil, sp: Sp, lp: Lp) -> Control {
+unsafe fn isnotnil(vm: Vm, ip: Ip, args: Isnotnil, sp: Sp) -> Control {
     // isnotnil v
     // jmp offset
 
@@ -1280,16 +1321,16 @@ unsafe fn isnotnil(vm: Vm, jt: Jt, ip: Ip, args: Isnotnil, sp: Sp, lp: Lp) -> Co
     if !matches!(v, ValueRaw::Nil) {
         // skip `jmp`
         let ip = ip.offset(2);
-        dispatch_current(vm, jt, ip, sp, lp)
+        dispatch_current(vm, ip, sp)
     } else {
         // execute `jmp`
         let ip = ip.offset(1);
-        dispatch_current(vm, jt, ip, sp, lp)
+        dispatch_current(vm, ip, sp)
     }
 }
 
 #[inline(always)]
-unsafe fn istrue(vm: Vm, jt: Jt, ip: Ip, args: Istrue, sp: Sp, lp: Lp) -> Control {
+unsafe fn istrue(vm: Vm, ip: Ip, args: Istrue, sp: Sp) -> Control {
     // istrue v
     // jmp offset
 
@@ -1297,16 +1338,16 @@ unsafe fn istrue(vm: Vm, jt: Jt, ip: Ip, args: Istrue, sp: Sp, lp: Lp) -> Contro
     if v.coerce_bool() {
         // skip `jmp`
         let ip = ip.offset(2);
-        dispatch_current(vm, jt, ip, sp, lp)
+        dispatch_current(vm, ip, sp)
     } else {
         // execute `jmp`
         let ip = ip.offset(1);
-        dispatch_current(vm, jt, ip, sp, lp)
+        dispatch_current(vm, ip, sp)
     }
 }
 
 #[inline(always)]
-unsafe fn isfalse(vm: Vm, jt: Jt, ip: Ip, args: Isfalse, sp: Sp, lp: Lp) -> Control {
+unsafe fn isfalse(vm: Vm, ip: Ip, args: Isfalse, sp: Sp) -> Control {
     // isfalse v
     // jmp offset
 
@@ -1314,27 +1355,27 @@ unsafe fn isfalse(vm: Vm, jt: Jt, ip: Ip, args: Isfalse, sp: Sp, lp: Lp) -> Cont
     if !v.coerce_bool() {
         // skip `jmp`
         let ip = ip.offset(2);
-        dispatch_current(vm, jt, ip, sp, lp)
+        dispatch_current(vm, ip, sp)
     } else {
         // execute `jmp`
         let ip = ip.offset(1);
-        dispatch_current(vm, jt, ip, sp, lp)
+        dispatch_current(vm, ip, sp)
     }
 }
 
 #[inline(always)]
-unsafe fn iseqs(vm: Vm, jt: Jt, ip: Ip, args: Iseqs, sp: Sp, lp: Lp) -> Control {
+unsafe fn iseqs(vm: Vm, ip: Ip, args: Iseqs, sp: Sp) -> Control {
     // iseqs v
     // jmp offset
 
     // TODO: string interning
     let lhs = *sp.at(args.lhs());
-    let rhs = lp.str_unchecked(args.rhs());
+    let rhs = vm.current_literals().str_unchecked(args.rhs());
 
     let Some(lhs) = lhs.into_object::<Str>() else {
         // execute `jmp`
         let ip = ip.offset(1);
-        return dispatch_current(vm, jt, ip, sp, lp);
+        return dispatch_current(vm, ip, sp);
     };
 
     let lhs = lhs.as_ref();
@@ -1346,27 +1387,27 @@ unsafe fn iseqs(vm: Vm, jt: Jt, ip: Ip, args: Iseqs, sp: Sp, lp: Lp) -> Control 
     if lhs == rhs {
         // skip `jmp`
         let ip = ip.offset(2);
-        dispatch_current(vm, jt, ip, sp, lp)
+        dispatch_current(vm, ip, sp)
     } else {
         // execute `jmp`
         let ip = ip.offset(1);
-        dispatch_current(vm, jt, ip, sp, lp)
+        dispatch_current(vm, ip, sp)
     }
 }
 
 #[inline(always)]
-unsafe fn isnes(vm: Vm, jt: Jt, ip: Ip, args: Isnes, sp: Sp, lp: Lp) -> Control {
+unsafe fn isnes(vm: Vm, ip: Ip, args: Isnes, sp: Sp) -> Control {
     // isnes v
     // jmp offset
 
     // TODO: string interning
     let lhs = *sp.at(args.lhs());
-    let rhs = lp.str_unchecked(args.rhs());
+    let rhs = vm.current_literals().str_unchecked(args.rhs());
 
     let Some(lhs) = lhs.into_object::<Str>() else {
         // skip `jmp`
         let ip = ip.offset(2);
-        return dispatch_current(vm, jt, ip, sp, lp);
+        return dispatch_current(vm, ip, sp);
     };
 
     let lhs = lhs.as_ref();
@@ -1378,21 +1419,21 @@ unsafe fn isnes(vm: Vm, jt: Jt, ip: Ip, args: Isnes, sp: Sp, lp: Lp) -> Control 
     if lhs != rhs {
         // skip `jmp`
         let ip = ip.offset(2);
-        dispatch_current(vm, jt, ip, sp, lp)
+        dispatch_current(vm, ip, sp)
     } else {
         // execute `jmp`
         let ip = ip.offset(1);
-        dispatch_current(vm, jt, ip, sp, lp)
+        dispatch_current(vm, ip, sp)
     }
 }
 
 #[inline(always)]
-unsafe fn iseqi(vm: Vm, jt: Jt, ip: Ip, args: Iseqi, sp: Sp, lp: Lp) -> Control {
+unsafe fn iseqi(vm: Vm, ip: Ip, args: Iseqi, sp: Sp) -> Control {
     // iseqi v
     // jmp offset
 
     let lhs = *sp.at(args.lhs());
-    let rhs = lp.int_unchecked(args.rhs());
+    let rhs = vm.current_literals().int_unchecked(args.rhs());
 
     let lhs = match lhs {
         ValueRaw::Int(v) => v,
@@ -1400,28 +1441,28 @@ unsafe fn iseqi(vm: Vm, jt: Jt, ip: Ip, args: Iseqi, sp: Sp, lp: Lp) -> Control 
         _ => {
             // execute `jmp`
             let ip = ip.offset(1);
-            return dispatch_current(vm, jt, ip, sp, lp);
+            return dispatch_current(vm, ip, sp);
         }
     };
 
     if lhs == rhs {
         // skip `jmp`
         let ip = ip.offset(2);
-        dispatch_current(vm, jt, ip, sp, lp)
+        dispatch_current(vm, ip, sp)
     } else {
         // execute `jmp`
         let ip = ip.offset(1);
-        dispatch_current(vm, jt, ip, sp, lp)
+        dispatch_current(vm, ip, sp)
     }
 }
 
 #[inline(always)]
-unsafe fn isnei(vm: Vm, jt: Jt, ip: Ip, args: Isnei, sp: Sp, lp: Lp) -> Control {
+unsafe fn isnei(vm: Vm, ip: Ip, args: Isnei, sp: Sp) -> Control {
     // isnei v
     // jmp offset
 
     let lhs = *sp.at(args.lhs());
-    let rhs = lp.int_unchecked(args.rhs());
+    let rhs = vm.current_literals().int_unchecked(args.rhs());
 
     let lhs = match lhs {
         ValueRaw::Int(v) => v,
@@ -1429,28 +1470,28 @@ unsafe fn isnei(vm: Vm, jt: Jt, ip: Ip, args: Isnei, sp: Sp, lp: Lp) -> Control 
         _ => {
             // skip `jmp`
             let ip = ip.offset(2);
-            return dispatch_current(vm, jt, ip, sp, lp);
+            return dispatch_current(vm, ip, sp);
         }
     };
 
     if lhs != rhs {
         // skip `jmp`
         let ip = ip.offset(2);
-        dispatch_current(vm, jt, ip, sp, lp)
+        dispatch_current(vm, ip, sp)
     } else {
         // execute `jmp`
         let ip = ip.offset(1);
-        dispatch_current(vm, jt, ip, sp, lp)
+        dispatch_current(vm, ip, sp)
     }
 }
 
 #[inline(always)]
-unsafe fn iseqf(vm: Vm, jt: Jt, ip: Ip, args: Iseqf, sp: Sp, lp: Lp) -> Control {
+unsafe fn iseqf(vm: Vm, ip: Ip, args: Iseqf, sp: Sp) -> Control {
     // iseqf v
     // jmp offset
 
     let lhs = *sp.at(args.lhs());
-    let rhs = lp.float_unchecked(args.rhs());
+    let rhs = vm.current_literals().float_unchecked(args.rhs());
 
     let lhs = match lhs {
         ValueRaw::Int(v) => v as f64,
@@ -1458,28 +1499,28 @@ unsafe fn iseqf(vm: Vm, jt: Jt, ip: Ip, args: Iseqf, sp: Sp, lp: Lp) -> Control 
         _ => {
             // execute `jmp`
             let ip = ip.offset(1);
-            return dispatch_current(vm, jt, ip, sp, lp);
+            return dispatch_current(vm, ip, sp);
         }
     };
 
     if lhs == rhs {
         // skip `jmp`
         let ip = ip.offset(2);
-        dispatch_current(vm, jt, ip, sp, lp)
+        dispatch_current(vm, ip, sp)
     } else {
         // execute `jmp`
         let ip = ip.offset(1);
-        dispatch_current(vm, jt, ip, sp, lp)
+        dispatch_current(vm, ip, sp)
     }
 }
 
 #[inline(always)]
-unsafe fn isnef(vm: Vm, jt: Jt, ip: Ip, args: Isnef, sp: Sp, lp: Lp) -> Control {
+unsafe fn isnef(vm: Vm, ip: Ip, args: Isnef, sp: Sp) -> Control {
     // isnef v
     // jmp offset
 
     let lhs = *sp.at(args.lhs());
-    let rhs = lp.float_unchecked(args.rhs());
+    let rhs = vm.current_literals().float_unchecked(args.rhs());
 
     let lhs = match lhs {
         ValueRaw::Int(v) => v as f64,
@@ -1487,18 +1528,18 @@ unsafe fn isnef(vm: Vm, jt: Jt, ip: Ip, args: Isnef, sp: Sp, lp: Lp) -> Control 
         _ => {
             // skip `jmp`
             let ip = ip.offset(2);
-            return dispatch_current(vm, jt, ip, sp, lp);
+            return dispatch_current(vm, ip, sp);
         }
     };
 
     if lhs != rhs {
         // skip `jmp`
         let ip = ip.offset(2);
-        dispatch_current(vm, jt, ip, sp, lp)
+        dispatch_current(vm, ip, sp)
     } else {
         // execute `jmp`
         let ip = ip.offset(1);
-        dispatch_current(vm, jt, ip, sp, lp)
+        dispatch_current(vm, ip, sp)
     }
 }
 
@@ -1535,91 +1576,91 @@ macro_rules! try_compare {
 }
 
 #[inline(always)]
-unsafe fn islt(vm: Vm, jt: Jt, ip: Ip, args: Islt, sp: Sp, lp: Lp) -> Control {
+unsafe fn islt(vm: Vm, ip: Ip, args: Islt, sp: Sp) -> Control {
     let lhs = *sp.at(args.lhs());
     let rhs = *sp.at(args.rhs());
 
     if try_compare!(lhs, rhs, vm, ip, <, fail:true) {
         let ip = ip.offset(2);
-        dispatch_current(vm, jt, ip, sp, lp)
+        dispatch_current(vm, ip, sp)
     } else {
         let ip = ip.offset(1);
-        dispatch_current(vm, jt, ip, sp, lp)
+        dispatch_current(vm, ip, sp)
     }
 }
 
 #[inline(always)]
-unsafe fn isle(vm: Vm, jt: Jt, ip: Ip, args: Isle, sp: Sp, lp: Lp) -> Control {
+unsafe fn isle(vm: Vm, ip: Ip, args: Isle, sp: Sp) -> Control {
     let lhs = *sp.at(args.lhs());
     let rhs = *sp.at(args.rhs());
 
     if try_compare!(lhs, rhs, vm, ip, <=, fail:true) {
         let ip = ip.offset(2);
-        dispatch_current(vm, jt, ip, sp, lp)
+        dispatch_current(vm, ip, sp)
     } else {
         let ip = ip.offset(1);
-        dispatch_current(vm, jt, ip, sp, lp)
+        dispatch_current(vm, ip, sp)
     }
 }
 
 #[inline(always)]
-unsafe fn isgt(vm: Vm, jt: Jt, ip: Ip, args: Isgt, sp: Sp, lp: Lp) -> Control {
+unsafe fn isgt(vm: Vm, ip: Ip, args: Isgt, sp: Sp) -> Control {
     let lhs = *sp.at(args.lhs());
     let rhs = *sp.at(args.rhs());
 
     if try_compare!(lhs, rhs, vm, ip, >, fail:true) {
         let ip = ip.offset(2);
-        dispatch_current(vm, jt, ip, sp, lp)
+        dispatch_current(vm, ip, sp)
     } else {
         let ip = ip.offset(1);
-        dispatch_current(vm, jt, ip, sp, lp)
+        dispatch_current(vm, ip, sp)
     }
 }
 
 #[inline(always)]
-unsafe fn isge(vm: Vm, jt: Jt, ip: Ip, args: Isge, sp: Sp, lp: Lp) -> Control {
+unsafe fn isge(vm: Vm, ip: Ip, args: Isge, sp: Sp) -> Control {
     let lhs = *sp.at(args.lhs());
     let rhs = *sp.at(args.rhs());
 
     if try_compare!(lhs, rhs, vm, ip, >=, fail:true) {
         let ip = ip.offset(2);
-        dispatch_current(vm, jt, ip, sp, lp)
+        dispatch_current(vm, ip, sp)
     } else {
         let ip = ip.offset(1);
-        dispatch_current(vm, jt, ip, sp, lp)
+        dispatch_current(vm, ip, sp)
     }
 }
 
 #[inline(always)]
-unsafe fn iseq(vm: Vm, jt: Jt, ip: Ip, args: Iseq, sp: Sp, lp: Lp) -> Control {
+unsafe fn iseq(vm: Vm, ip: Ip, args: Iseq, sp: Sp) -> Control {
     let lhs = *sp.at(args.lhs());
     let rhs = *sp.at(args.rhs());
 
     if try_compare!(lhs, rhs, vm, ip, ==, fail:false) {
         let ip = ip.offset(2);
-        dispatch_current(vm, jt, ip, sp, lp)
+        dispatch_current(vm, ip, sp)
     } else {
         let ip = ip.offset(1);
-        dispatch_current(vm, jt, ip, sp, lp)
+        dispatch_current(vm, ip, sp)
     }
 }
 
 #[inline(always)]
-unsafe fn isne(vm: Vm, jt: Jt, ip: Ip, args: Isne, sp: Sp, lp: Lp) -> Control {
+unsafe fn isne(vm: Vm, ip: Ip, args: Isne, sp: Sp) -> Control {
     let lhs = *sp.at(args.lhs());
     let rhs = *sp.at(args.rhs());
 
     if try_compare!(lhs, rhs, vm, ip, !=, fail:false) {
         let ip = ip.offset(2);
-        dispatch_current(vm, jt, ip, sp, lp)
+        dispatch_current(vm, ip, sp)
     } else {
         let ip = ip.offset(1);
-        dispatch_current(vm, jt, ip, sp, lp)
+        dispatch_current(vm, ip, sp)
     }
 }
 
 #[inline(always)]
-unsafe fn isltv(vm: Vm, jt: Jt, ip: Ip, args: Isltv, sp: Sp, lp: Lp) -> Control {
+unsafe fn isltv(vm: Vm, ip: Ip, args: Isltv, sp: Sp) -> Control {
     let dst = sp.at(args.dst());
     let lhs = *sp.at(args.lhs());
     let rhs = *sp.at(args.rhs());
@@ -1628,11 +1669,11 @@ unsafe fn isltv(vm: Vm, jt: Jt, ip: Ip, args: Isltv, sp: Sp, lp: Lp) -> Control 
 
     *dst = ValueRaw::Bool(result);
 
-    dispatch_next(vm, jt, ip, sp, lp)
+    dispatch_next(vm, ip, sp)
 }
 
 #[inline(always)]
-unsafe fn islev(vm: Vm, jt: Jt, ip: Ip, args: Islev, sp: Sp, lp: Lp) -> Control {
+unsafe fn islev(vm: Vm, ip: Ip, args: Islev, sp: Sp) -> Control {
     let dst = sp.at(args.dst());
     let lhs = *sp.at(args.lhs());
     let rhs = *sp.at(args.rhs());
@@ -1641,11 +1682,11 @@ unsafe fn islev(vm: Vm, jt: Jt, ip: Ip, args: Islev, sp: Sp, lp: Lp) -> Control 
 
     *dst = ValueRaw::Bool(result);
 
-    dispatch_next(vm, jt, ip, sp, lp)
+    dispatch_next(vm, ip, sp)
 }
 
 #[inline(always)]
-unsafe fn isgtv(vm: Vm, jt: Jt, ip: Ip, args: Isgtv, sp: Sp, lp: Lp) -> Control {
+unsafe fn isgtv(vm: Vm, ip: Ip, args: Isgtv, sp: Sp) -> Control {
     let dst = sp.at(args.dst());
     let lhs = *sp.at(args.lhs());
     let rhs = *sp.at(args.rhs());
@@ -1654,11 +1695,11 @@ unsafe fn isgtv(vm: Vm, jt: Jt, ip: Ip, args: Isgtv, sp: Sp, lp: Lp) -> Control 
 
     *dst = ValueRaw::Bool(result);
 
-    dispatch_next(vm, jt, ip, sp, lp)
+    dispatch_next(vm, ip, sp)
 }
 
 #[inline(always)]
-unsafe fn isgev(vm: Vm, jt: Jt, ip: Ip, args: Isgev, sp: Sp, lp: Lp) -> Control {
+unsafe fn isgev(vm: Vm, ip: Ip, args: Isgev, sp: Sp) -> Control {
     let dst = sp.at(args.dst());
     let lhs = *sp.at(args.lhs());
     let rhs = *sp.at(args.rhs());
@@ -1667,11 +1708,11 @@ unsafe fn isgev(vm: Vm, jt: Jt, ip: Ip, args: Isgev, sp: Sp, lp: Lp) -> Control 
 
     *dst = ValueRaw::Bool(result);
 
-    dispatch_next(vm, jt, ip, sp, lp)
+    dispatch_next(vm, ip, sp)
 }
 
 #[inline(always)]
-unsafe fn iseqv(vm: Vm, jt: Jt, ip: Ip, args: Iseqv, sp: Sp, lp: Lp) -> Control {
+unsafe fn iseqv(vm: Vm, ip: Ip, args: Iseqv, sp: Sp) -> Control {
     let dst = sp.at(args.dst());
     let lhs = *sp.at(args.lhs());
     let rhs = *sp.at(args.rhs());
@@ -1680,11 +1721,11 @@ unsafe fn iseqv(vm: Vm, jt: Jt, ip: Ip, args: Iseqv, sp: Sp, lp: Lp) -> Control 
 
     *dst = ValueRaw::Bool(result);
 
-    dispatch_next(vm, jt, ip, sp, lp)
+    dispatch_next(vm, ip, sp)
 }
 
 #[inline(always)]
-unsafe fn isnev(vm: Vm, jt: Jt, ip: Ip, args: Isnev, sp: Sp, lp: Lp) -> Control {
+unsafe fn isnev(vm: Vm, ip: Ip, args: Isnev, sp: Sp) -> Control {
     let dst = sp.at(args.dst());
     let lhs = *sp.at(args.lhs());
     let rhs = *sp.at(args.rhs());
@@ -1693,7 +1734,7 @@ unsafe fn isnev(vm: Vm, jt: Jt, ip: Ip, args: Isnev, sp: Sp, lp: Lp) -> Control 
 
     *dst = ValueRaw::Bool(result);
 
-    dispatch_next(vm, jt, ip, sp, lp)
+    dispatch_next(vm, ip, sp)
 }
 
 macro_rules! try_arith_eval {
@@ -1720,102 +1761,102 @@ macro_rules! try_arith_eval {
 }
 
 #[inline(always)]
-unsafe fn addvv(vm: Vm, jt: Jt, ip: Ip, args: Addvv, sp: Sp, lp: Lp) -> Control {
+unsafe fn addvv(vm: Vm, ip: Ip, args: Addvv, sp: Sp) -> Control {
     let dst = sp.at(args.dst());
     let lhs = *sp.at(args.lhs());
     let rhs = *sp.at(args.rhs());
 
     try_arith_eval!(dst, lhs, rhs, vm, ip, +);
 
-    dispatch_next(vm, jt, ip, sp, lp)
+    dispatch_next(vm, ip, sp)
 }
 
 #[inline(always)]
-unsafe fn addvn(vm: Vm, jt: Jt, ip: Ip, args: Addvn, sp: Sp, lp: Lp) -> Control {
+unsafe fn addvn(vm: Vm, ip: Ip, args: Addvn, sp: Sp) -> Control {
     let dst = sp.at(args.dst());
     let lhs = *sp.at(args.lhs());
-    let rhs = lp.int_or_float_unchecked(args.rhs());
+    let rhs = vm.current_literals().int_or_float_unchecked(args.rhs());
 
     try_arith_eval!(dst, lhs, rhs, vm, ip, +);
 
-    dispatch_next(vm, jt, ip, sp, lp)
+    dispatch_next(vm, ip, sp)
 }
 
 #[inline(always)]
-unsafe fn addnv(vm: Vm, jt: Jt, ip: Ip, args: Addnv, sp: Sp, lp: Lp) -> Control {
+unsafe fn addnv(vm: Vm, ip: Ip, args: Addnv, sp: Sp) -> Control {
     let dst = sp.at(args.dst());
-    let lhs = lp.int_or_float_unchecked(args.lhs());
+    let lhs = vm.current_literals().int_or_float_unchecked(args.lhs());
     let rhs = *sp.at(args.rhs());
 
     try_arith_eval!(dst, lhs, rhs, vm, ip, +);
 
-    dispatch_next(vm, jt, ip, sp, lp)
+    dispatch_next(vm, ip, sp)
 }
 
 #[inline(always)]
-unsafe fn subvv(vm: Vm, jt: Jt, ip: Ip, args: Subvv, sp: Sp, lp: Lp) -> Control {
+unsafe fn subvv(vm: Vm, ip: Ip, args: Subvv, sp: Sp) -> Control {
     let dst = sp.at(args.dst());
     let lhs = *sp.at(args.lhs());
     let rhs = *sp.at(args.rhs());
 
     try_arith_eval!(dst, lhs, rhs, vm, ip, -);
 
-    dispatch_next(vm, jt, ip, sp, lp)
+    dispatch_next(vm, ip, sp)
 }
 
 #[inline(always)]
-unsafe fn subvn(vm: Vm, jt: Jt, ip: Ip, args: Subvn, sp: Sp, lp: Lp) -> Control {
+unsafe fn subvn(vm: Vm, ip: Ip, args: Subvn, sp: Sp) -> Control {
     let dst = sp.at(args.dst());
     let lhs = *sp.at(args.lhs());
-    let rhs = lp.int_or_float_unchecked(args.rhs());
+    let rhs = vm.current_literals().int_or_float_unchecked(args.rhs());
 
     try_arith_eval!(dst, lhs, rhs, vm, ip, -);
 
-    dispatch_next(vm, jt, ip, sp, lp)
+    dispatch_next(vm, ip, sp)
 }
 
 #[inline(always)]
-unsafe fn subnv(vm: Vm, jt: Jt, ip: Ip, args: Subnv, sp: Sp, lp: Lp) -> Control {
+unsafe fn subnv(vm: Vm, ip: Ip, args: Subnv, sp: Sp) -> Control {
     let dst = sp.at(args.dst());
-    let lhs = lp.int_or_float_unchecked(args.lhs());
+    let lhs = vm.current_literals().int_or_float_unchecked(args.lhs());
     let rhs = *sp.at(args.rhs());
 
     try_arith_eval!(dst, lhs, rhs, vm, ip, -);
 
-    dispatch_next(vm, jt, ip, sp, lp)
+    dispatch_next(vm, ip, sp)
 }
 
 #[inline(always)]
-unsafe fn mulvv(vm: Vm, jt: Jt, ip: Ip, args: Mulvv, sp: Sp, lp: Lp) -> Control {
+unsafe fn mulvv(vm: Vm, ip: Ip, args: Mulvv, sp: Sp) -> Control {
     let dst = sp.at(args.dst());
     let lhs = *sp.at(args.lhs());
     let rhs = *sp.at(args.rhs());
 
     try_arith_eval!(dst, lhs, rhs, vm, ip, *);
 
-    dispatch_next(vm, jt, ip, sp, lp)
+    dispatch_next(vm, ip, sp)
 }
 
 #[inline(always)]
-unsafe fn mulvn(vm: Vm, jt: Jt, ip: Ip, args: Mulvn, sp: Sp, lp: Lp) -> Control {
+unsafe fn mulvn(vm: Vm, ip: Ip, args: Mulvn, sp: Sp) -> Control {
     let dst = sp.at(args.dst());
     let lhs = *sp.at(args.lhs());
-    let rhs = lp.int_or_float_unchecked(args.rhs());
+    let rhs = vm.current_literals().int_or_float_unchecked(args.rhs());
 
     try_arith_eval!(dst, lhs, rhs, vm, ip, *);
 
-    dispatch_next(vm, jt, ip, sp, lp)
+    dispatch_next(vm, ip, sp)
 }
 
 #[inline(always)]
-unsafe fn mulnv(vm: Vm, jt: Jt, ip: Ip, args: Mulnv, sp: Sp, lp: Lp) -> Control {
+unsafe fn mulnv(vm: Vm, ip: Ip, args: Mulnv, sp: Sp) -> Control {
     let dst = sp.at(args.dst());
-    let lhs = lp.int_or_float_unchecked(args.lhs());
+    let lhs = vm.current_literals().int_or_float_unchecked(args.lhs());
     let rhs = *sp.at(args.rhs());
 
     try_arith_eval!(dst, lhs, rhs, vm, ip, *);
 
-    dispatch_next(vm, jt, ip, sp, lp)
+    dispatch_next(vm, ip, sp)
 }
 
 macro_rules! try_div_eval {
@@ -1847,36 +1888,36 @@ macro_rules! try_div_eval {
 }
 
 #[inline(always)]
-unsafe fn divvv(vm: Vm, jt: Jt, ip: Ip, args: Divvv, sp: Sp, lp: Lp) -> Control {
+unsafe fn divvv(vm: Vm, ip: Ip, args: Divvv, sp: Sp) -> Control {
     let dst = sp.at(args.dst());
     let lhs = *sp.at(args.lhs());
     let rhs = *sp.at(args.rhs());
 
     try_div_eval!(dst, lhs, rhs, vm, ip);
 
-    dispatch_next(vm, jt, ip, sp, lp)
+    dispatch_next(vm, ip, sp)
 }
 
 #[inline(always)]
-unsafe fn divvn(vm: Vm, jt: Jt, ip: Ip, args: Divvn, sp: Sp, lp: Lp) -> Control {
+unsafe fn divvn(vm: Vm, ip: Ip, args: Divvn, sp: Sp) -> Control {
     let dst = sp.at(args.dst());
     let lhs = *sp.at(args.lhs());
-    let rhs = lp.int_or_float_unchecked(args.rhs());
+    let rhs = vm.current_literals().int_or_float_unchecked(args.rhs());
 
     try_div_eval!(dst, lhs, rhs, vm, ip);
 
-    dispatch_next(vm, jt, ip, sp, lp)
+    dispatch_next(vm, ip, sp)
 }
 
 #[inline(always)]
-unsafe fn divnv(vm: Vm, jt: Jt, ip: Ip, args: Divnv, sp: Sp, lp: Lp) -> Control {
+unsafe fn divnv(vm: Vm, ip: Ip, args: Divnv, sp: Sp) -> Control {
     let dst = sp.at(args.dst());
-    let lhs = lp.int_or_float_unchecked(args.lhs());
+    let lhs = vm.current_literals().int_or_float_unchecked(args.lhs());
     let rhs = *sp.at(args.rhs());
 
     try_div_eval!(dst, lhs, rhs, vm, ip);
 
-    dispatch_next(vm, jt, ip, sp, lp)
+    dispatch_next(vm, ip, sp)
 }
 
 macro_rules! try_rem_eval {
@@ -1908,40 +1949,40 @@ macro_rules! try_rem_eval {
 }
 
 #[inline(always)]
-unsafe fn remvv(vm: Vm, jt: Jt, ip: Ip, args: Remvv, sp: Sp, lp: Lp) -> Control {
+unsafe fn remvv(vm: Vm, ip: Ip, args: Remvv, sp: Sp) -> Control {
     let dst = sp.at(args.dst());
     let lhs = *sp.at(args.lhs());
     let rhs = *sp.at(args.rhs());
 
     try_rem_eval!(dst, lhs, rhs, vm, ip);
 
-    dispatch_next(vm, jt, ip, sp, lp)
+    dispatch_next(vm, ip, sp)
 }
 
 #[inline(always)]
-unsafe fn remvn(vm: Vm, jt: Jt, ip: Ip, args: Remvn, sp: Sp, lp: Lp) -> Control {
+unsafe fn remvn(vm: Vm, ip: Ip, args: Remvn, sp: Sp) -> Control {
     let dst = sp.at(args.dst());
     let lhs = *sp.at(args.lhs());
-    let rhs = lp.int_or_float_unchecked(args.rhs());
+    let rhs = vm.current_literals().int_or_float_unchecked(args.rhs());
 
     try_rem_eval!(dst, lhs, rhs, vm, ip);
 
-    dispatch_next(vm, jt, ip, sp, lp)
+    dispatch_next(vm, ip, sp)
 }
 
 #[inline(always)]
-unsafe fn remnv(vm: Vm, jt: Jt, ip: Ip, args: Remnv, sp: Sp, lp: Lp) -> Control {
+unsafe fn remnv(vm: Vm, ip: Ip, args: Remnv, sp: Sp) -> Control {
     let dst = sp.at(args.dst());
-    let lhs = lp.int_or_float_unchecked(args.lhs());
+    let lhs = vm.current_literals().int_or_float_unchecked(args.lhs());
     let rhs = *sp.at(args.rhs());
 
     try_rem_eval!(dst, lhs, rhs, vm, ip);
 
-    dispatch_next(vm, jt, ip, sp, lp)
+    dispatch_next(vm, ip, sp)
 }
 
 #[inline(always)]
-unsafe fn unm(vm: Vm, jt: Jt, ip: Ip, args: Unm, sp: Sp, lp: Lp) -> Control {
+unsafe fn unm(vm: Vm, ip: Ip, args: Unm, sp: Sp) -> Control {
     let dst = sp.at(args.dst());
     let rhs = *sp.at(args.rhs());
 
@@ -1958,26 +1999,26 @@ unsafe fn unm(vm: Vm, jt: Jt, ip: Ip, args: Unm, sp: Sp, lp: Lp) -> Control {
         }
     }
 
-    dispatch_next(vm, jt, ip, sp, lp)
+    dispatch_next(vm, ip, sp)
 }
 
 #[inline(always)]
-unsafe fn not(vm: Vm, jt: Jt, ip: Ip, args: Not, sp: Sp, lp: Lp) -> Control {
+unsafe fn not(vm: Vm, ip: Ip, args: Not, sp: Sp) -> Control {
     let dst = sp.at(args.dst());
     let rhs = *sp.at(args.rhs());
 
     *dst = ValueRaw::Bool(!rhs.coerce_bool());
 
-    dispatch_next(vm, jt, ip, sp, lp)
+    dispatch_next(vm, ip, sp)
 }
 
 #[inline(always)]
-unsafe fn call(vm: Vm, jt: Jt, ip: Ip, args: Call, sp: Sp, lp: Lp) -> Control {
+unsafe fn call(vm: Vm, ip: Ip, args: Call, sp: Sp) -> Control {
     let ret = args.dst();
     let callee = *sp.at(args.callee());
     let nargs = args.args().get();
 
-    do_generic_call(callee, ret, nargs, vm, jt, sp, lp, ip)
+    do_generic_call(callee, ret, nargs, vm, sp, ip)
 }
 
 #[cold]
@@ -1991,7 +2032,7 @@ unsafe fn not_callable_error(ip: Ip, vm: Vm) -> Control {
 }
 
 #[inline(always)]
-unsafe fn fastcall(vm: Vm, jt: Jt, ip: Ip, args: Fastcall, sp: Sp, lp: Lp) -> Control {
+unsafe fn fastcall(vm: Vm, ip: Ip, args: Fastcall, sp: Sp) -> Control {
     let ret = args.dst();
     let callee = vm.get_function_in_current_module(args.id());
 
@@ -2002,13 +2043,13 @@ unsafe fn fastcall(vm: Vm, jt: Jt, ip: Ip, args: Fastcall, sp: Sp, lp: Lp) -> Co
     // Return addr points to the next instruction after the call instruction.
     let return_addr = 1 + ip.offset_from_unsigned(current_function_start) as u32;
 
-    let (sp, lp, ip) = prepare_call(callee, ret, vm, return_addr);
+    let (sp, ip) = prepare_call(callee, ret, vm, return_addr);
 
-    dispatch_current(vm, jt, ip, sp, lp)
+    dispatch_current(vm, ip, sp)
 }
 
 #[inline(always)]
-unsafe fn hostcall(vm: Vm, jt: Jt, ip: Ip, args: Hostcall, sp: Sp, lp: Lp) -> Control {
+unsafe fn hostcall(vm: Vm, ip: Ip, args: Hostcall, sp: Sp) -> Control {
     let ret = args.dst();
     let callee = vm.get_host_function(args.id());
 
@@ -2021,11 +2062,11 @@ unsafe fn hostcall(vm: Vm, jt: Jt, ip: Ip, args: Hostcall, sp: Sp, lp: Lp) -> Co
     // Return addr points to the next instruction after the call instruction.
     let return_addr = 1 + ip.offset_from_unsigned(current_function_start) as u32;
 
-    do_host_call(callee, vm, jt, sp, lp, ip, ret, nargs, return_addr)
+    do_host_call(callee, vm, sp, ip, ret, nargs, return_addr)
 }
 
-unsafe fn import(vm: Vm, jt: Jt, ip: Ip, args: Import, sp: Sp, lp: Lp) -> Control {
-    let info = lp.import_proto_unchecked(args.id());
+unsafe fn import(vm: Vm, ip: Ip, args: Import, sp: Sp) -> Control {
+    let info = vm.current_literals().import_proto_unchecked(args.id());
 
     let spec = info.as_ref().spec();
     let Some(module) = (*vm.0.as_ptr()).registry.get(spec.as_ptr()) else {
@@ -2056,7 +2097,7 @@ unsafe fn import(vm: Vm, jt: Jt, ip: Ip, args: Import, sp: Sp, lp: Lp) -> Contro
         }
     }
 
-    dispatch_next(vm, jt, ip, sp, lp)
+    dispatch_next(vm, ip, sp)
 }
 
 #[cold]
@@ -2070,29 +2111,29 @@ unsafe fn module_item_not_found_error(ip: Ip, vm: Vm) -> Control {
 }
 
 #[inline(always)]
-unsafe fn ret(vm: Vm, jt: Jt, ip: Ip, args: Ret, sp: Sp, lp: Lp) -> Control {
-    let (sp, lp, ip) = match return_from_call(vm) {
+unsafe fn ret(vm: Vm, ip: Ip, args: Ret, sp: Sp) -> Control {
+    let (sp, ip) = match return_from_call(vm) {
         Some(v) => v,
         None => return Control::stop(),
     };
 
-    dispatch_current(vm, jt, ip, sp, lp)
+    dispatch_current(vm, ip, sp)
 }
 
 #[inline(always)]
-unsafe fn retv(vm: Vm, jt: Jt, ip: Ip, args: Retv, sp: Sp, lp: Lp) -> Control {
+unsafe fn retv(vm: Vm, ip: Ip, args: Retv, sp: Sp) -> Control {
     *sp.ret() = *sp.at(args.src());
 
-    let (sp, lp, ip) = match return_from_call(vm) {
+    let (sp, ip) = match return_from_call(vm) {
         Some(v) => v,
         None => return Control::stop(),
     };
 
-    dispatch_current(vm, jt, ip, sp, lp)
+    dispatch_current(vm, ip, sp)
 }
 
 #[inline(always)]
-unsafe fn stop(vm: Vm, jt: Jt, ip: Ip, args: Stop, sp: Sp, lp: Lp) -> Control {
+unsafe fn stop(vm: Vm, ip: Ip, args: Stop, sp: Sp) -> Control {
     Control::stop()
 }
 
@@ -2102,9 +2143,7 @@ unsafe fn do_generic_call(
     ret: Reg,
     nargs: u8,
     vm: Vm,
-    jt: Jt,
     sp: Sp,
-    lp: Lp,
     ip: Ip,
 ) -> Control {
     // SAFETY: We're in the middle of executing bytecode, so current call frame is guaranteed
@@ -2120,24 +2159,24 @@ unsafe fn do_generic_call(
         }
 
         let jt = JT.as_ptr();
-        let (sp, lp, ip) = prepare_call(callee, ret, vm, return_addr);
+        let (sp, ip) = prepare_call(callee, ret, vm, return_addr);
 
-        dispatch_current(vm, jt, ip, sp, lp)
+        dispatch_current(vm, ip, sp)
     } else if let Some(callee) = callee.into_object::<Closure>() {
         if callee.as_ref().func.as_ref().nparams != nargs {
             return arity_mismatch_error(ip, vm);
         }
 
         let jt = JT.as_ptr();
-        let (sp, lp, ip) = prepare_closure_call(callee, ret, vm, return_addr);
+        let (sp, ip) = prepare_closure_call(callee, ret, vm, return_addr);
 
-        dispatch_current(vm, jt, ip, sp, lp)
+        dispatch_current(vm, ip, sp)
     } else if let Some(callee) = callee.into_object::<HostFunction>() {
         if callee.as_ref().arity != nargs {
             return arity_mismatch_error(ip, vm);
         }
 
-        do_host_call(callee, vm, jt, sp, lp, ip, ret, nargs, return_addr)
+        do_host_call(callee, vm, sp, ip, ret, nargs, return_addr)
     } else {
         not_callable_error(ip, vm)
     }
@@ -2158,26 +2197,21 @@ unsafe fn do_generic_call(
 ///   frame N+1:             [ 6 7 8 9 ... ]
 ///                         ret^ ^args
 /// ```
-/// `r0` in the new frame will be in the same location as `r6`
-/// in the previous frame.
+///
+/// Therefore `frame[N][6] == frame[N+1][0]`.
 #[inline(always)]
-unsafe fn prepare_call(
-    callee: GcPtr<Function>,
-    ret: Reg,
-    vm: Vm,
-    return_addr: u32,
-) -> (Sp, Lp, Ip) {
+unsafe fn prepare_call(callee: GcPtr<Function>, ret: Reg, vm: Vm, return_addr: u32) -> (Sp, Ip) {
     // See doc comment.
     let stack_base = vm.current_frame().stack_base() + (ret.get() as u32);
     let frame_size = callee.as_ref().stack_size();
 
     let sp: Sp = maybe_grow_stack(vm, stack_base as usize, frame_size);
-    let lp: Lp = Function::literals_raw(callee);
     let ip: Ip = Function::code_raw(callee);
     vm.set_current_module_for(callee);
+    vm.set_current_literals_for(callee);
     vm.push_frame(CallFrame::script(callee, stack_base, return_addr));
 
-    (sp, lp, ip)
+    (sp, ip)
 }
 
 /// Exactly like `do_call`, but also sets upvalue ptr.
@@ -2187,7 +2221,7 @@ unsafe fn prepare_closure_call(
     ret: Reg,
     vm: Vm,
     return_addr: u32,
-) -> (Sp, Lp, Ip) {
+) -> (Sp, Ip) {
     vm.set_current_upvalues_for(callee);
 
     prepare_call(callee.as_ref().func, ret, vm, return_addr)
@@ -2201,9 +2235,7 @@ unsafe fn do_host_call(
     callee: GcPtr<HostFunction>,
 
     vm: Vm,
-    jt: Jt,
     sp: Sp,
-    lp: Lp,
     ip: Ip,
     ret: Reg,
     nargs: u8,
@@ -2233,7 +2265,12 @@ unsafe fn do_host_call(
             );
             vm.pop_frame_unchecked();
 
-            dispatch_next(vm, jt, ip, sp, lp)
+            if let Some(callee) = vm.current_frame().callee().into_script() {
+                vm.set_current_module_for(callee);
+                vm.set_current_literals_for(callee);
+            }
+
+            dispatch_next(vm, ip, sp)
         }
         Err(err) => {
             vm.set_saved_ip(ip);
@@ -2274,7 +2311,7 @@ unsafe fn grow_stack(vm: Vm, frame_size: usize) {
 }
 
 #[inline(always)]
-unsafe fn return_from_call(vm: Vm) -> Option<(Sp, Lp, Ip)> {
+unsafe fn return_from_call(vm: Vm) -> Option<(Sp, Ip)> {
     // Only called from `ret`, meaning we are guaranteed to have
     // at least the one call frame which is currently being executed.
 
@@ -2291,11 +2328,11 @@ unsafe fn return_from_call(vm: Vm) -> Option<(Sp, Lp, Ip)> {
     let return_addr = returning_from.return_addr as usize;
 
     let sp: Sp = vm.stack_at(stack_base);
-    let lp: Lp = Function::literals_raw(callee);
     let ip: Ip = Function::code_raw(callee).offset(return_addr as isize);
     vm.set_current_module_for(callee);
+    vm.set_current_literals_for(callee);
 
-    Some((sp, lp, ip))
+    Some((sp, ip))
 }
 
 pub trait StdioWrite: std::io::Write + std::any::Any + 'static {
@@ -2358,6 +2395,7 @@ pub(crate) struct VmState {
     current_module: Option<GcPtr<ModuleProto>>,
 
     current_upvalues: Option<Upvalues>,
+    current_literals: Option<Lp>,
 
     entrypoint: GcPtr<HostFunction>,
 
@@ -2375,9 +2413,18 @@ pub(crate) struct VmState {
 
 impl Hebi {
     pub fn new() -> Self {
-        // 1 MiB
-        const INITIAL_STACK_SIZE: usize = (1 * 1024) / std::mem::size_of::<ValueRaw>();
-        const STACK_DEPTH: usize = INITIAL_STACK_SIZE / 16;
+        const INITIAL_STACK_SIZE: usize = //if cfg!(debug_assertions) {
+            1;
+        // } else {
+        //     // 1 MiB
+        //     (1024 * 1024) / std::mem::size_of::<ValueRaw>()
+        // };
+
+        const STACK_DEPTH: usize = //if cfg!(debug_assertions) {
+            1;
+        // } else {
+        //     INITIAL_STACK_SIZE / 16
+        // };
 
         let heap = gc::Heap::new();
 
@@ -2396,6 +2443,7 @@ impl Hebi {
 
                 current_module: None,
                 current_upvalues: None,
+                current_literals: None,
 
                 entrypoint,
 
@@ -2461,6 +2509,7 @@ impl gc::ExternalRoots for VmRoots {
                 frames,
                 current_module,
                 current_upvalues,
+                current_literals,
                 entrypoint,
                 error,
                 saved_ip,
@@ -2611,14 +2660,14 @@ impl<'vm> Runtime<'vm> {
 
         let main = unsafe { m.inner.as_ref().main().as_ptr() };
         let value = unsafe {
-            let (sp, lp, ip) = prepare_call(
+            let (sp, ip) = prepare_call(
                 main,
                 Reg::new_unchecked(0),
                 vm,
                 0, // return to host
             );
 
-            dispatch_loop(vm, jt, ip, sp, lp)
+            dispatch_loop(vm, ip, 0)
         };
 
         let result = match value {
@@ -2653,29 +2702,27 @@ impl<'vm> Runtime<'vm> {
 }
 
 #[inline]
-unsafe fn dispatch_loop(vm: Vm, jt: Jt, ip: Ip, sp: Sp, lp: Lp) -> Result<ValueRaw, VmError> {
+unsafe fn dispatch_loop(vm: Vm, ip: Ip, stack_base: usize) -> Result<ValueRaw, VmError> {
     // In debug mode and Wasm, fall back to loop+match.
     //
     // Each instruction will return `Control::Continue`
     // instead of tail-calling the next handler.
     #[cfg(any(debug_assertions, target_arch = "wasm32"))]
     {
-        let mut sp: Sp = sp;
-        let mut lp: Lp = lp;
+        let mut sp: Sp = vm.stack_at(stack_base);
         let mut ip: Ip = ip;
 
         loop {
             let insn = ip.get();
-            let op = jt.at(insn);
+            let op = JT.as_ptr().at(insn);
             debug_print!("===== {}", insn.into_enum());
-            match op(vm, jt, ip, insn, sp, lp) {
+            match op(vm, ip, insn, sp) {
                 Control::Stop => return Ok(*sp.ret()),
                 Control::Error(err) => return Err(err),
 
                 #[cfg(any(debug_assertions, target_arch = "wasm32"))]
-                Control::Continue(new_sp, new_lp, new_ip) => {
+                Control::Continue(new_sp, new_ip) => {
                     sp = new_sp;
-                    lp = new_lp;
                     ip = new_ip;
                     continue;
                 }
@@ -2685,14 +2732,15 @@ unsafe fn dispatch_loop(vm: Vm, jt: Jt, ip: Ip, sp: Sp, lp: Lp) -> Result<ValueR
 
     #[cfg(not(any(debug_assertions, target_arch = "wasm32")))]
     {
-        let ctrl = dispatch_current(vm, jt, ip, sp, lp);
+        let ctrl = dispatch_current(vm, ip, vm.stack_at(stack_base));
 
         if ctrl.is_error() {
             let err = ctrl.error_code();
             return Err(err);
         }
 
-        return Ok(*sp.ret());
+        // NOTE: stack may be reallocated; need to read it from `vm` again.
+        return Ok(*vm.stack_at(stack_base).ret());
     }
 }
 

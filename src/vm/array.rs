@@ -232,7 +232,7 @@ impl<T: Sized + Copy> DynArray<T> {
     /// it must be initialized by the user before being read!
     #[inline]
     pub unsafe fn offset(&self, offset: usize) -> *mut T {
-        debug_assert!(offset < self.capacity);
+        debug_assert!(offset < self.capacity, "{} < {}", offset, self.capacity);
         self.base.add(offset)
     }
 
@@ -287,6 +287,9 @@ impl<T: Sized + Copy> DynArray<T> {
     #[inline]
     pub unsafe fn drain_to_end(&mut self, keep: usize) {
         let count = self.capacity - keep;
+        if count == 0 {
+            return;
+        }
         self.offset(keep).write_bytes(0, count);
     }
 

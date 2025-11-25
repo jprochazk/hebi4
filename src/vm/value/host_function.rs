@@ -11,7 +11,7 @@ use crate::{
     span::Span,
     value::{Closure, Function},
     vm::{
-        CallFrame, Invariant, JT, Stdio, dispatch_loop,
+        CallFrame, Invariant, Stdio, dispatch_loop,
         gc::{GcPtr, GcRef, Heap, Trace},
         maybe_grow_stack, prepare_call, prepare_closure_call,
         value::{Str, ValueRaw},
@@ -119,13 +119,13 @@ impl<'a> Context<'a> {
                     .into();
                 }
 
-                let jt = JT.as_ptr();
-                let (sp, lp, ip) = prepare_call(callee, ret_reg, vm, 0);
+                let (sp, ip) = prepare_call(callee, ret_reg, vm, 0);
+                let stack_base = sp.ret().offset_from_unsigned(vm.stack_at(0).ret());
 
                 let mut cx = Context::new(self.vm, sp, nargs);
                 args.try_into_hebi_args(&mut cx)?;
 
-                match dispatch_loop(vm, jt, ip, sp, lp) {
+                match dispatch_loop(vm, ip, stack_base) {
                     Ok(value) => Ok(value.root(&mut *vm.heap(), ret)),
                     Err(err) => {
                         let err = vm.take_error(err);
@@ -150,13 +150,13 @@ impl<'a> Context<'a> {
                     .into();
                 }
 
-                let jt = JT.as_ptr();
-                let (sp, lp, ip) = prepare_closure_call(callee, ret_reg, vm, 0);
+                let (sp, ip) = prepare_closure_call(callee, ret_reg, vm, 0);
+                let stack_base = sp.ret().offset_from_unsigned(vm.stack_at(0).ret());
 
                 let mut cx = Context::new(self.vm, sp, nargs);
                 args.try_into_hebi_args(&mut cx)?;
 
-                match dispatch_loop(vm, jt, ip, sp, lp) {
+                match dispatch_loop(vm, ip, stack_base) {
                     Ok(value) => Ok(value.root(&mut *vm.heap(), ret)),
                     Err(err) => {
                         let err = vm.take_error(err);

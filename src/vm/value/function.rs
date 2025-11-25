@@ -78,7 +78,7 @@ impl Function {
 
     #[inline]
     pub(crate) unsafe fn literals_raw(ptr: GcPtr<Function>) -> Lp {
-        let ptr = &raw mut *(*ptr.into_raw().as_ptr()).literals;
+        let ptr: *mut [ValueRaw] = &raw mut *(*ptr.into_raw().as_ptr()).literals;
         let ptr = ptr as *mut ValueRaw;
         Lp(NonNull::new_unchecked(ptr))
     }

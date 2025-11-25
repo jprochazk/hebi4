@@ -245,42 +245,6 @@ impl From<i24> for u24 {
     }
 }
 
-#[cfg(not(windows))]
-macro_rules! Handler {
-    (
-        fn ($($ty:ty),* $(,)?) -> $ret:ty
-    ) => {
-        unsafe extern "C" fn($($ty),*) -> $ret
-    };
-}
-
-#[cfg(windows)]
-macro_rules! Handler {
-    (
-        fn ($($ty:ty),* $(,)?) -> $ret:ty
-    ) => {
-        unsafe extern "sysv64" fn($($ty),*) -> $ret
-    };
-}
-
-#[cfg(not(windows))]
-macro_rules! handler {
-    (
-        unsafe extern "?" fn $name:ident($($i:ident : $ty:ty),* $(,)?) -> $ret:ty $body:block
-    ) => {
-        unsafe extern "C" fn $name($($i:$ty),*) -> $ret $body
-    };
-}
-
-#[cfg(windows)]
-macro_rules! handler {
-    (
-        unsafe extern "?" fn $name:ident($($i:ident : $ty:ty),* $(,)?) -> $ret:ty $body:block
-    ) => {
-        unsafe extern "sysv64" fn $name($($i:$ty),*) -> $ret $body
-    };
-}
-
 macro_rules! jump_table {
     {
         $($op:ident),* $(,)?
@@ -288,14 +252,12 @@ macro_rules! jump_table {
         JumpTable {
             $($op: {
                 type __Operands = $crate::codegen::opcodes::__operands::$op;
-                const __OP: unsafe fn(Vm, Jt, Ip, __Operands, Sp, Lp) -> Control = $op;
+                const __OP: unsafe fn(Vm, Ip, __Operands, Sp) -> Control = $op;
 
                 {
-                    handler! {
-                        unsafe extern "?" fn $op(vm: Vm, jt: Jt, ip: Ip, args: Insn, sp: Sp, lp: Lp) -> Control {
-                            let args: __Operands = core::mem::transmute(args);
-                            __OP(vm, jt, ip, args, sp, lp)
-                        }
+                    unsafe fn $op(vm: Vm, ip: Ip, args: Insn, sp: Sp) -> Control {
+                        let args: __Operands = core::mem::transmute(args);
+                        __OP(vm, ip, args, sp)
                     }
 
                     $op
@@ -323,6 +285,9 @@ x86-64 SysV: 6 registers, and their monikers:
   4 R8   R8D  R8W  N/A   R8B
   5 R9   R9D  R9W  N/A   R9B
 
+Windows x64: uses only 2-5 but `rcx` and `rdx` are flipped!
+Well, too bad, Windows gets worse performance.
+
 So the only suitable ones are `RDX` and `RCX`, because:
 - The full instruction is in `EDX`/`ECX`,
 - `op` is `movzx <dst>,DL/CL`
@@ -338,9 +303,9 @@ If we used any other registers, `a` couldn't be decoded with just a `mov`.
   though i'm pretty sure things are less fucked up over there
 */
 
-pub(crate) type Handler<Operands> = Handler!(fn(Vm, Jt, Ip, Operands, Sp, Lp) -> Control);
+pub(crate) type Handler<Operands> = unsafe fn(Vm, Ip, Operands, Sp) -> Control;
 
-pub(crate) type OpaqueHandler = Handler!(fn(Vm, Jt, Ip, Insn, Sp, Lp) -> Control);
+pub(crate) type OpaqueHandler = unsafe fn(Vm, Ip, Insn, Sp) -> Control;
 
 macro_rules! declare_operand_type {
     ($name:ident, $ty:ident, $fmt:literal) => {
