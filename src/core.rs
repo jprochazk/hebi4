@@ -104,6 +104,13 @@ pub(crate) struct RuntimeCoreLib {
 
 impl RuntimeCoreLib {
     pub(crate) fn init(heap: &Heap) -> Self {
+        #[cfg(debug_assertions)]
+        if option_env!("NO_CORE").is_some() {
+            return Self {
+                functions: Box::new([]),
+            };
+        }
+
         let functions = CoreLib::get()
             .functions
             .iter()

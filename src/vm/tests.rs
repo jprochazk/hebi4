@@ -89,10 +89,15 @@ fn snapshot<'vm>(
     }
 }
 
-fn native_modules() -> impl IntoIterator<Item = NativeModule> {
+fn native_modules() -> Vec<NativeModule> {
     use crate::prelude::*;
 
-    [
+    #[cfg(debug_assertions)]
+    if option_env!("NO_CORE").is_some() {
+        return vec![];
+    }
+
+    vec![
         {
             fn foo(cx: Context<'_>) -> &'static str {
                 "hello"
@@ -253,16 +258,19 @@ fn run(path: &Path) {
         &module,
         &loaded_module,
     );
-    let (snapshot2, failure2) = snapshot(
-        input,
-        vm.run(&loaded_module),
-        &mut vm,
-        &module,
-        &loaded_module,
-    );
 
-    assert_eq!(snapshot1, snapshot2);
-    assert_eq!(failure1, failure2);
+    if option_env!("NO_RUN_TWICE").is_none() {
+        let (snapshot2, failure2) = snapshot(
+            input,
+            vm.run(&loaded_module),
+            &mut vm,
+            &module,
+            &loaded_module,
+        );
+
+        assert_eq!(snapshot1, snapshot2);
+        assert_eq!(failure1, failure2);
+    }
 
     #[cfg(not(miri))]
     {

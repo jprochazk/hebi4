@@ -483,7 +483,7 @@ impl Vm {
         }
 
         #[cfg(debug_assertions)]
-        if std::env::var("PRINT_STACK_TRACE").is_ok() {
+        if option_env!("PRINT_STACK_TRACE").is_some() {
             eprintln!("===== begin trace ======");
             for frame in self.call_frames().rev() {
                 let frame = CallFramePtr(frame);
@@ -2376,7 +2376,7 @@ pub(crate) struct VmState {
 impl Hebi {
     pub fn new() -> Self {
         // 1 MiB
-        const INITIAL_STACK_SIZE: usize = (1024 * 1024) / std::mem::size_of::<ValueRaw>();
+        const INITIAL_STACK_SIZE: usize = (1 * 1024) / std::mem::size_of::<ValueRaw>();
         const STACK_DEPTH: usize = INITIAL_STACK_SIZE / 16;
 
         let heap = gc::Heap::new();
@@ -2509,7 +2509,8 @@ impl gc::ExternalRoots for VmRoots {
                 let nstack = callee.as_ref().stack_size();
                 let stack_len = base + nstack;
 
-                debug_print!("stack len: {stack_len}");
+                debug_print!("frame {}", callee.as_ref().name.as_ref().as_str());
+                debug_print!("base={base} nstack={nstack} len={stack_len}");
                 for i in 0..stack_len {
                     debug_print!("stack[{i}]");
                     tracer.visit_value(sp.add(i).read());
@@ -2528,6 +2529,26 @@ impl gc::ExternalRoots for VmRoots {
 
         // core lib
         this!().core.trace(tracer);
+    }
+
+    unsafe fn clear_dead_roots(&mut self) {
+        macro_rules! this {
+            () => {
+                *self.state.as_ptr()
+            };
+        }
+
+        let frames = &mut this!().frames;
+        let sp = this!().stack.offset(0);
+        if let Some(frame) = frames.top() {
+            if let Some(callee) = (*frame).callee.into_script() {
+                let base = (*frame).stack_base as usize;
+                let nstack = callee.as_ref().stack_size();
+                let stack_len = base + nstack;
+
+                this!().stack.drain_to_end(stack_len);
+            }
+        }
     }
 }
 
@@ -2646,6 +2667,7 @@ unsafe fn dispatch_loop(vm: Vm, jt: Jt, ip: Ip, sp: Sp, lp: Lp) -> Result<ValueR
         loop {
             let insn = ip.get();
             let op = jt.at(insn);
+            debug_print!("===== {}", insn.into_enum());
             match op(vm, jt, ip, insn, sp, lp) {
                 Control::Stop => return Ok(*sp.ret()),
                 Control::Error(err) => return Err(err),

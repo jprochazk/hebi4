@@ -1,12 +1,12 @@
 use super::*;
 
 // Stop-the-world, mark and sweep GC.
-pub(crate) unsafe fn collect(heap: *mut Heap, external_roots: impl ExternalRoots) {
+pub(crate) unsafe fn collect(heap: *mut Heap, mut external_roots: impl ExternalRoots) {
     debug_print!("start");
 
     (*heap).stats.on_collect();
-    mark(heap, external_roots);
-    sweep(heap);
+    mark(heap, &external_roots);
+    sweep(heap, &mut external_roots);
 }
 
 // Mark:
@@ -18,7 +18,7 @@ pub(crate) unsafe fn collect(heap: *mut Heap, external_roots: impl ExternalRoots
 //
 // Note that we do not actually use a worklist.
 // Instead, we use depth-first recursive traversal.
-unsafe fn mark(heap: *mut Heap, external_roots: impl ExternalRoots) {
+unsafe fn mark(heap: *mut Heap, external_roots: &impl ExternalRoots) {
     debug_print!("start mark");
 
     let tracer = Tracer {
@@ -58,7 +58,7 @@ unsafe fn mark(heap: *mut Heap, external_roots: impl ExternalRoots) {
 //
 // - Store the last marked object `M`.
 // - Whenever an object is freed `F`, update the header of `M` to point to `F.next`
-unsafe fn sweep(heap: *mut Heap) {
+unsafe fn sweep(heap: *mut Heap, external_roots: &mut impl ExternalRoots) {
     debug_print!("start sweep");
 
     let mut iter = (*heap).head.get();
@@ -91,11 +91,14 @@ unsafe fn sweep(heap: *mut Heap) {
         iter = next;
     }
 
+    external_roots.clear_dead_roots();
+
     (*heap).stats.on_free(freed_bytes);
 
     debug_print!("end sweep");
 }
 
+// NOTE: This is called in `drop`, so we don't need to clear dead roots. They are inaccessible after this.
 pub(crate) unsafe fn free_all(heap: *mut Heap) {
     debug_print!("drop");
 

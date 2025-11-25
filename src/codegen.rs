@@ -376,7 +376,7 @@ struct FunctionDebug<'a> {
 struct RegAlloc {
     nvars: u8,
     next: u8,
-    num: u8,
+    max_size: u8,
 }
 
 impl RegAlloc {
@@ -384,7 +384,7 @@ impl RegAlloc {
         Self {
             nvars: 0,
             next: 0,
-            num: 0,
+            max_size: 0,
         }
     }
 
@@ -396,8 +396,8 @@ impl RegAlloc {
         let r = unsafe { Reg::new_unchecked(self.next) };
 
         self.next += 1;
-        if self.next > self.num {
-            self.num = self.next;
+        if self.next > self.max_size {
+            self.max_size = self.next;
         }
 
         Ok(r)
@@ -421,8 +421,8 @@ impl RegAlloc {
         let start = unsafe { Reg::new_unchecked(self.next) };
 
         self.next += n;
-        if self.next > self.num {
-            self.num = self.next;
+        if self.next > self.max_size {
+            self.max_size = self.next;
         }
 
         Ok(RegRange { start, n })
@@ -550,7 +550,7 @@ fn is_at_top<'a>(m: &mut State<'a>, reg: Reg) -> bool {
 #[cfg_attr(debug_assertions, track_caller)]
 fn maybe_reuse_reg<'a>(m: &mut State<'a>, span: Span, reg: Option<Reg>) -> Result<Reg> {
     #[cfg(debug_assertions)]
-    if std::env::var("PRINT_REGALLOC").ok().is_some() {
+    if option_env!("PRINT_REGALLOC").is_some() {
         eprintln!("reuse {span} {}: {reg:?}", std::panic::Location::caller());
     }
 
@@ -568,7 +568,7 @@ fn fresh_reg<'a>(m: &mut State<'a>, span: Span) -> Result<Reg> {
     let r = f!(m).ra.alloc(span);
 
     #[cfg(debug_assertions)]
-    if std::env::var("PRINT_REGALLOC").ok().is_some() {
+    if option_env!("PRINT_REGALLOC").is_some() {
         eprintln!("alloc {span} {}: {r:?}", std::panic::Location::caller());
     }
 
@@ -581,7 +581,7 @@ fn fresh_reg_range<'a>(m: &mut State<'a>, span: Span, n: u8) -> Result<RegRange>
     let range = f!(m).ra.alloc_n(span, n);
 
     #[cfg(debug_assertions)]
-    if std::env::var("PRINT_REGALLOC").ok().is_some() {
+    if option_env!("PRINT_REGALLOC").is_some() {
         eprintln!(
             "alloc range {span} {}: {range:?}",
             std::panic::Location::caller()
@@ -600,7 +600,7 @@ fn fresh_var<'a>(m: &mut State<'a>, span: Span) -> Result<Reg> {
     let r = f!(m).ra.alloc_var(span);
 
     #[cfg(debug_assertions)]
-    if std::env::var("PRINT_REGALLOC").ok().is_some() {
+    if option_env!("PRINT_REGALLOC").is_some() {
         eprintln!("alloc var {span} {}: {r:?}", std::panic::Location::caller());
     }
 
@@ -611,7 +611,7 @@ fn fresh_var<'a>(m: &mut State<'a>, span: Span) -> Result<Reg> {
 #[cfg_attr(debug_assertions, track_caller)]
 fn free_reg<'a>(m: &mut State<'a>, reg: Reg) {
     #[cfg(debug_assertions)]
-    if std::env::var("PRINT_REGALLOC").ok().is_some() {
+    if option_env!("PRINT_REGALLOC").is_some() {
         eprintln!(
             "free reg {}: {reg:?} (variable={})",
             std::panic::Location::caller(),
@@ -626,7 +626,7 @@ fn free_reg<'a>(m: &mut State<'a>, reg: Reg) {
 #[cfg_attr(debug_assertions, track_caller)]
 fn free_reg_range<'a>(m: &mut State<'a>, range: RegRange) {
     #[cfg(debug_assertions)]
-    if std::env::var("PRINT_REGALLOC").ok().is_some() {
+    if option_env!("PRINT_REGALLOC").is_some() {
         eprintln!("free range {}: {range:?}", std::panic::Location::caller());
     }
 
@@ -637,7 +637,7 @@ fn free_reg_range<'a>(m: &mut State<'a>, range: RegRange) {
 #[cfg_attr(debug_assertions, track_caller)]
 fn free_value<'a>(m: &mut State<'a>, value: Value<'a>) {
     #[cfg(debug_assertions)]
-    if std::env::var("PRINT_REGALLOC").ok().is_some() {
+    if option_env!("PRINT_REGALLOC").is_some() {
         eprintln!(
             "free value {} {}: {:?}",
             value.span,
@@ -655,7 +655,7 @@ fn free_value<'a>(m: &mut State<'a>, value: Value<'a>) {
 #[cfg_attr(debug_assertions, track_caller)]
 fn free_operand<'a>(m: &mut State<'a>, operand: Operand) {
     #[cfg(debug_assertions)]
-    if std::env::var("PRINT_REGALLOC").ok().is_some() {
+    if option_env!("PRINT_REGALLOC").is_some() {
         eprintln!(
             "free operand {}: {operand:?}",
             std::panic::Location::caller(),
@@ -1276,7 +1276,7 @@ fn emit_closure<'a>(
     let func = FuncInfo::new(
         f.name.into_owned(),
         params.len() as u8,
-        f.ra.num,
+        f.ra.max_size,
         f.code.into_iter().collect(),
         f.literals.flat.into_iter().collect(),
         FuncDebugInfo {
@@ -1304,7 +1304,7 @@ fn emit_func<'a>(
     Ok(FuncInfo::new(
         f.name.into_owned(),
         params.len() as u8,
-        f.ra.num,
+        f.ra.max_size,
         f.code.into_iter().collect(),
         f.literals.flat.into_iter().collect(),
         FuncDebugInfo {

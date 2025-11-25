@@ -81,6 +81,8 @@ unsafe impl Trace for ModuleProto {
     vtable!(ModuleProto);
 
     unsafe fn trace(&self, tracer: &crate::vm::gc::Tracer) {
+        tracer.visit(self.name);
+
         for function in self.functions.iter().copied() {
             tracer.visit(function);
         }

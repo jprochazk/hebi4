@@ -3,8 +3,8 @@
 macro_rules! debug_print {
     ($($tt:tt)*) => {{
         #[cfg(debug_assertions)]
-        if std::env::var("PRINT_GC").is_ok() {
-            eprint!("GC: ");
+        if option_env!("DEBUG_VM").is_some() {
+            eprint!("VM: ");
             eprintln!($($tt)*);
         }
     }};
@@ -96,8 +96,9 @@ impl Heap {
             "alloc {} bytes at {:016x} ({})",
             core::mem::size_of::<T>(),
             ptr.addr(),
-            T::vtable().type_name
+            T::vtable().type_name,
         );
+        // debug_print!("TRACE: {}", std::backtrace::Backtrace::capture());
 
         self.stats.on_alloc(core::mem::size_of::<T>());
 
@@ -112,6 +113,7 @@ impl Heap {
         struct NoExternalRoots;
         impl ExternalRoots for NoExternalRoots {
             unsafe fn trace(&self, _: &Tracer) {}
+            unsafe fn clear_dead_roots(&mut self) {}
         }
 
         unsafe { Self::collect_with_external_roots(self, NoExternalRoots) };
@@ -670,7 +672,11 @@ impl Copy for GcAnyPtr {}
 /// An example of this is the VM's stack, which holds live
 /// values up to the top-most call frame.
 pub(crate) trait ExternalRoots: 'static {
+    /// Trace through external roots.
     unsafe fn trace(&self, tracer: &Tracer);
+
+    /// Clear any dead roots which would not have been traced in `trace`.
+    unsafe fn clear_dead_roots(&mut self);
 }
 
 /// The GC must know how to traverse types in order to manage them.

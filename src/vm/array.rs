@@ -29,14 +29,6 @@ impl<T: Sized + Copy> DynStack<T> {
         }
     }
 
-    /// Clear the stack.
-    ///
-    /// This only sets the length to `0`.
-    #[inline]
-    pub fn clear(&mut self) {
-        self.length = 0;
-    }
-
     /// Set length to `new_len`.
     ///
     /// `new_len` must be less than or equal to current length.
@@ -259,7 +251,7 @@ impl<T: Sized + Copy> DynArray<T> {
         (self.capacity as isize) - (offset as isize)
     }
 
-    /// Grow the stack.
+    /// Grow the array.
     ///
     /// Calling this invalidates any pointers to the array created by
     /// [`Self::offset`] before the call.
@@ -272,7 +264,7 @@ impl<T: Sized + Copy> DynArray<T> {
         let new_capacity = (old_capacity + additional).next_power_of_two();
         let new_layout = Self::layout(new_capacity);
         // NOTE: `alloc_zeroed` is load-bearing:
-        // `0` is a valid `ValueRaw`, and we need the stack to
+        // `0` is a valid `ValueRaw`, and we need the array to
         // not contain any uninitialized memory, otherwise the
         // GC isn't allowed to trace it.
         let new_base = alloc_zeroed(new_layout).cast::<T>();
@@ -285,6 +277,17 @@ impl<T: Sized + Copy> DynArray<T> {
 
         self.base = new_base;
         self.capacity = new_capacity;
+    }
+
+    /// Sets all values in the range `keep..self.capacity` to zero.
+    ///
+    /// This does not reallocate the array. It is equivalent to a memset.
+    ///
+    /// To use this safely, `T` must have a valid bit pattern of `0`.
+    #[inline]
+    pub unsafe fn drain_to_end(&mut self, keep: usize) {
+        let count = self.capacity - keep;
+        self.offset(keep).write_bytes(0, count);
     }
 
     #[inline]
