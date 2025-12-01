@@ -440,6 +440,18 @@ impl TryIntoHebiValueRaw for String {
     }
 }
 
+impl<T: TryIntoHebiValueRaw> TryIntoHebiValueRaw for Vec<T> {
+    #[inline]
+    unsafe fn try_into_hebi_value_raw(self, cx: &mut Context<'_>) -> Result<ValueRaw> {
+        let ptr = crate::value::List::alloc_zeroed(cx.heap_mut(), self.len());
+        for (index, value) in self.into_iter().enumerate() {
+            let value = T::try_into_hebi_value_raw(value, cx)?;
+            ptr.as_mut().set_raw_unchecked(index, value);
+        }
+        Ok(ValueRaw::Object(ptr.as_any()))
+    }
+}
+
 impl TryIntoHebiValueRaw for ValueRoot<'_> {
     #[inline]
     unsafe fn try_into_hebi_value_raw(self, cx: &mut Context<'_>) -> Result<ValueRaw> {
@@ -649,6 +661,12 @@ impl<'a> Any<'a> {
             _lifetime: PhantomData,
         }
     }
+
+    #[inline]
+    pub fn type_name(&self) -> &'static str {
+        // SAFETY: rooted by stack
+        unsafe { self.ptr.type_name() }
+    }
 }
 
 #[derive(Default)]
@@ -847,5 +865,22 @@ impl<'a> TryFromHebiValueRaw<'a> for String {
         };
 
         Ok(value.as_ref().as_str().to_owned())
+    }
+}
+
+impl<'a, T: TryFromHebiValueRaw<'a>> TryFromHebiValueRaw<'a> for Vec<T> {
+    #[inline]
+    unsafe fn try_from_hebi_value_raw(cx: &Context<'a>, value: ValueRaw) -> Result<Self> {
+        let Some(list) = value.into_object::<crate::value::List>() else {
+            return Err(mismatched_type_error("List", &value));
+        };
+
+        let len = list.as_ref().len();
+        let mut out = Vec::with_capacity(len);
+        for (index, value) in list.as_ref().iter().enumerate() {
+            out.spare_capacity_mut()[index].write(T::try_from_hebi_value_raw(cx, value.raw())?);
+        }
+        out.set_len(len);
+        Ok(out)
     }
 }

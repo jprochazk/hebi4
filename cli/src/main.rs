@@ -133,10 +133,9 @@ fn eval_string(code: &str, opts: EmitOptions) {
     let module = compile_string(code, opts);
 
     let mut vm = Hebi::new();
-    let mut vm = vm.enter();
 
     let loaded_module = vm.load(&module);
-    match vm.run(&loaded_module) {
+    match vm.run(loaded_module) {
         Ok(v) => BufferedStdout::with(|o| {
             writeln!(o, "{:?}", unsafe { v.as_ref() }).unwrap();
         }),

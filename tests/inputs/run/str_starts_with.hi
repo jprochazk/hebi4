@@ -1,0 +1,6 @@
+
+assert(starts_with("asdf", "a"))
+assert(not starts_with("asdf", "b"))
+
+assert(starts_with("😂 lol", "😂"))
+assert(not starts_with("hi 😂 lol", "😂"))

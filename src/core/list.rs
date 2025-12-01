@@ -52,3 +52,7 @@ pub fn append<'a>(
 
     cx.ret(list)
 }
+
+pub fn list_len(cx: Context, list: Param<List>) -> i64 {
+    list.as_ref(&cx).len() as i64
+}

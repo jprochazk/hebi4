@@ -72,6 +72,7 @@ use crate::{
             host_function::{Context, HostFunction},
             module::{ImportProto, ModuleRegistry},
         },
+        vm_guard::VmGuard,
     },
 };
 
@@ -2459,15 +2460,6 @@ impl Hebi {
         self.inner.stdio = stdio;
         self
     }
-
-    #[inline(always)]
-    pub fn enter<'gc>(&'gc mut self) -> Runtime<'gc> {
-        Runtime {
-            vm: NonNull::from_mut(&mut *self.inner),
-            _guard: vm_guard::VmGuard::new(),
-            _lifetime: PhantomData,
-        }
-    }
 }
 
 mod vm_guard {
@@ -2601,25 +2593,12 @@ impl gc::ExternalRoots for VmRoots {
     }
 }
 
-#[repr(transparent)]
-pub struct Module<'vm> {
-    inner: GcPtr<ModuleProto>,
-    _lifetime: PhantomData<fn(&'vm ()) -> &'vm ()>,
-}
-
-pub struct Runtime<'vm> {
-    vm: NonNull<VmState>,
-
-    _guard: vm_guard::VmGuard,
-    _lifetime: Invariant<'vm>,
-}
-
-// TODO: none of the public APIs should return `ValueRaw`.
+// TODO: none of the public APIs should return raw pointers.
 // Currently they are kept alive by the fact that we only
 // run gc during allocating instructions (`larr` and friends).
-impl<'vm> Runtime<'vm> {
+impl Hebi {
     pub fn stdio(&mut self) -> &mut Stdio {
-        unsafe { &mut self.vm.as_mut().stdio }
+        &mut self.inner.stdio
     }
 
     /// Load a module into the VM's module registry.
@@ -2627,21 +2606,21 @@ impl<'vm> Runtime<'vm> {
     /// If you want to load a _native_ module, use [`Self::register`] instead.
     ///
     /// NOTE: Currently, only native modules may be imported by scripts.
-    pub fn load(&mut self, m: &module::Module) -> Module<'vm> {
-        let vm = unsafe { self.vm.as_mut() };
+    pub fn load(&mut self, m: &module::Module) -> GcPtr<ModuleProto> {
+        let _guard = VmGuard::new();
+
+        let vm = &mut self.inner;
         let heap = &mut vm.heap;
         let registry = &mut vm.registry;
-        let m = registry.add(heap, m);
-        Module {
-            inner: m,
-            _lifetime: PhantomData,
-        }
+        registry.add(heap, m)
     }
 
     /// Register a native module in the VM's module registry,
     /// allowing it to be imported by scripts.
     pub fn register(&mut self, m: &module::NativeModule) {
-        let vm = unsafe { self.vm.as_mut() };
+        let _guard = VmGuard::new();
+
+        let vm = &mut self.inner;
         let heap = &mut vm.heap;
         let registry = &mut vm.registry;
         registry.add_native(heap, m);
@@ -2650,15 +2629,17 @@ impl<'vm> Runtime<'vm> {
     /// Execute the main entrypoint of the module to completion.
     ///
     /// Note that modules must go through [`Runtime::load`] first.
-    pub fn run(&mut self, m: &Module<'vm>) -> Result<ValueRaw> {
-        let vm = Vm(self.vm);
+    pub fn run(&mut self, m: GcPtr<ModuleProto>) -> Result<ValueRaw> {
+        let _guard = VmGuard::new();
+
+        let vm = Vm(NonNull::from_mut(&mut self.inner));
         let jt = JT.as_ptr();
 
         unsafe {
             vm.push_frame(CallFrame::host(vm.entrypoint(), 0, 0));
         }
 
-        let main = unsafe { m.inner.as_ref().main().as_ptr() };
+        let main = unsafe { m.as_ref().main().as_ptr() };
         let value = unsafe {
             let (sp, ip) = prepare_call(
                 main,
@@ -2680,13 +2661,14 @@ impl<'vm> Runtime<'vm> {
         };
 
         unsafe {
-            debug_assert!((*self.vm.as_ptr()).frames.len() == 1);
+            debug_assert!((*vm.0.as_ptr()).frames.len() == 1);
             debug_assert!(
-                (*self.vm.as_ptr())
-                    .frames
-                    .top()
-                    .is_some_and(|frame| (*frame).callee.into_host().unwrap().into_raw()
-                        == (*self.vm.as_ptr()).entrypoint.into_raw())
+                (*vm.0.as_ptr()).frames.top().is_some_and(|frame| (*frame)
+                    .callee
+                    .into_host()
+                    .unwrap()
+                    .into_raw()
+                    == (*vm.0.as_ptr()).entrypoint.into_raw())
             );
 
             vm.pop_frame_unchecked();
@@ -2696,7 +2678,7 @@ impl<'vm> Runtime<'vm> {
     }
 
     #[cfg(feature = "async")]
-    pub async fn run_async(&mut self, m: &Module<'vm>) -> Result<ValueRaw> {
+    pub async fn run_async(&mut self, m: GcPtr<ModuleProto>) -> Result<ValueRaw> {
         stackful::stackful(|| self.run(m)).await
     }
 }

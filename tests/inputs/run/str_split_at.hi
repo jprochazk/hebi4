@@ -1,0 +1,21 @@
+fn assert_eq_list(a, b) {
+  let len_a = list_len(a)
+  let len_b = list_len(b)
+  assert_eq(len_a, len_b)
+
+  let i = 0
+  loop {
+    if i == len_a {
+      break
+    }
+
+    assert_eq(a[i], b[i])
+    i+=1
+  }
+}
+
+assert_eq_list(split_at("abcd", 0), ["", "abcd"])
+assert_eq_list(split_at("abcd", 1), ["a", "bcd"])
+assert_eq_list(split_at("abcd", 2), ["ab", "cd"])
+assert_eq_list(split_at("abcd", 3), ["abc", "d"])
+assert_eq_list(split_at("abcd", 4), ["abcd", ""])

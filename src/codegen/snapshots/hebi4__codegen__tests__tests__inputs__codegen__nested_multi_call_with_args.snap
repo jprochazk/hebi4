@@ -1,0 +1,47 @@
+---
+source: src/codegen/tests.rs
+expression: snapshot
+---
+SOURCE
+do {
+fn a(_0,_1) {}
+fn f(v) {}
+
+a(f(0), f(1))
+}
+
+OK
+.fn @main
+  params 0
+  stack 7
+  .locals
+    a = r1
+    f = r2
+  .code
+  0  lclosure r1, l0   ; a, uv=0
+  1  lclosure r2, l1   ; f, uv=0
+  2  lsmi r5, 0
+  3  call r4, r2, 1   ; dyn
+  4  lsmi r6, 1
+  5  call r5, r2, 1   ; dyn
+  6  call r3, r1, 2   ; dyn
+  7  retv r3
+
+.fn a
+  params 2
+  stack 3
+  .locals
+    _0 = r1
+    _1 = r2
+  .code
+  0  lnil r0
+  1  ret
+
+.fn f
+  params 1
+  stack 2
+  .locals
+    v = r1
+  .code
+  0  lnil r0
+  1  ret

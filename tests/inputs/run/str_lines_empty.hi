@@ -1,0 +1,9 @@
+let text = ""
+let lines = lines(text)
+let expected = []
+
+print(lines)
+print(expected)
+
+assert_eq(list_len(lines), list_len(expected))
+

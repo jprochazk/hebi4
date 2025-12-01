@@ -440,7 +440,11 @@ impl RegAlloc {
         }
 
         if self.next != r.get() + 1 {
-            unreachable!("ICE: registers freed out of order");
+            unreachable!(
+                "ICE: registers freed out of order (next={}, r={})",
+                self.next,
+                r.get()
+            );
         }
         self.next = r.get();
     }
@@ -459,27 +463,41 @@ impl RegAlloc {
 
         if self.next != range.end().get() + 1 {
             unreachable!(
-                "ICE: registers freed out of order ({} != {})",
-                self.next,
-                range.end().get() + 1,
+                "ICE: registers freed out of order ({range:?}, next={next})",
+                next = self.next,
             );
         }
         self.next = range.start.get();
     }
 
+    #[cfg_attr(debug_assertions, track_caller)]
     fn snapshot(&self) -> RegAllocSnapshot {
-        RegAllocSnapshot {
+        let snapshot = RegAllocSnapshot {
             nvars: self.nvars,
             next: self.next,
+        };
+
+        #[cfg(debug_assertions)]
+        if option_env!("PRINT_REGALLOC").is_some() {
+            eprintln!("snapshot {snapshot:?}");
         }
+
+        snapshot
     }
 
+    #[cfg_attr(debug_assertions, track_caller)]
     fn restore(&mut self, snapshot: RegAllocSnapshot) {
         self.nvars = snapshot.nvars;
         self.next = snapshot.next;
+
+        #[cfg(debug_assertions)]
+        if option_env!("PRINT_REGALLOC").is_some() {
+            eprintln!("restore {snapshot:?}");
+        }
     }
 }
 
+#[derive(Debug)]
 struct RegAllocSnapshot {
     nvars: u8,
     next: u8,
@@ -540,6 +558,61 @@ impl Iterator for RegRangeIter {
     }
 }
 
+#[derive(Debug)]
+struct ReservedRegRange {
+    span: Span,
+    start: Reg,
+    n: u8,
+    next: u8,
+}
+
+impl ReservedRegRange {
+    fn empty() -> Self {
+        Self {
+            span: Span::empty(),
+            start: R0,
+            n: 0,
+            next: 0,
+        }
+    }
+
+    #[cfg_attr(debug_assertions, track_caller)]
+    fn get(&mut self, m: &mut State, index: usize) -> Result<Reg> {
+        if self.next >= self.n {
+            unreachable!("ICE: reserved reg range exceeded");
+        }
+        if index != self.next as usize {
+            unreachable!("ICE: reserved reg range used out of order");
+        }
+
+        let reg = f!(m).ra.alloc(self.span)?;
+
+        #[cfg(debug_assertions)]
+        if option_env!("PRINT_REGALLOC").is_some() {
+            eprintln!("use reserved {reg:?} at {}", std::panic::Location::caller());
+        }
+
+        self.next += 1;
+
+        if self.next == 0 && self.start.get() != reg.get() {
+            unreachable!("ICE: reserved reg range must be used before next reg alloc");
+        }
+
+        Ok(reg)
+    }
+
+    #[cfg_attr(debug_assertions, track_caller)]
+    fn free(self, m: &mut State) {
+        free_reg_range(
+            m,
+            RegRange {
+                start: self.start,
+                n: self.n,
+            },
+        )
+    }
+}
+
 /// Returns true if `reg` is at the top of the stack,
 /// meaning the next allocated register would be `reg + 1`.
 fn is_at_top<'a>(m: &mut State<'a>, reg: Reg) -> bool {
@@ -551,7 +624,7 @@ fn is_at_top<'a>(m: &mut State<'a>, reg: Reg) -> bool {
 fn maybe_reuse_reg<'a>(m: &mut State<'a>, span: Span, reg: Option<Reg>) -> Result<Reg> {
     #[cfg(debug_assertions)]
     if option_env!("PRINT_REGALLOC").is_some() {
-        eprintln!("reuse {span} {}: {reg:?}", std::panic::Location::caller());
+        eprintln!("reuse {reg:?} at {}", std::panic::Location::caller());
     }
 
     let r = match reg {
@@ -569,7 +642,7 @@ fn fresh_reg<'a>(m: &mut State<'a>, span: Span) -> Result<Reg> {
 
     #[cfg(debug_assertions)]
     if option_env!("PRINT_REGALLOC").is_some() {
-        eprintln!("alloc {span} {}: {r:?}", std::panic::Location::caller());
+        eprintln!("alloc {r:?} at {}", std::panic::Location::caller());
     }
 
     r
@@ -583,10 +656,43 @@ fn fresh_reg_range<'a>(m: &mut State<'a>, span: Span, n: u8) -> Result<RegRange>
     #[cfg(debug_assertions)]
     if option_env!("PRINT_REGALLOC").is_some() {
         eprintln!(
-            "alloc range {span} {}: {range:?}",
+            "alloc range {range:?} at {}",
             std::panic::Location::caller()
         );
     }
+
+    range
+}
+
+/// Reserve a contiguous range of registers.
+///
+/// These are _ephemeral_, which means they are not actually allocated,
+/// but the maximum stack space is bumped as if they were.
+///
+/// As each register is used, it must be allocated first.
+///
+/// All the registers in this range can then be freed with a `free_reg_range`.
+#[cfg_attr(debug_assertions, track_caller)]
+fn reserve_reg_range<'a>(m: &mut State<'a>, span: Span, n: u8) -> Result<ReservedRegRange> {
+    let range = f!(m).ra.alloc_n(span, n);
+
+    #[cfg(debug_assertions)]
+    if option_env!("PRINT_REGALLOC").is_some() {
+        eprintln!(
+            "reserve range {range:?} at {}",
+            std::panic::Location::caller()
+        );
+    }
+
+    let range = range?;
+    f!(m).ra.free_n(range);
+
+    let range = Ok(ReservedRegRange {
+        span,
+        start: range.start,
+        n: range.n,
+        next: 0,
+    });
 
     range
 }
@@ -601,7 +707,7 @@ fn fresh_var<'a>(m: &mut State<'a>, span: Span) -> Result<Reg> {
 
     #[cfg(debug_assertions)]
     if option_env!("PRINT_REGALLOC").is_some() {
-        eprintln!("alloc var {span} {}: {r:?}", std::panic::Location::caller());
+        eprintln!("alloc var {r:?} at {}", std::panic::Location::caller());
     }
 
     r
@@ -613,9 +719,9 @@ fn free_reg<'a>(m: &mut State<'a>, reg: Reg) {
     #[cfg(debug_assertions)]
     if option_env!("PRINT_REGALLOC").is_some() {
         eprintln!(
-            "free reg {}: {reg:?} (variable={})",
-            std::panic::Location::caller(),
+            "free reg {reg:?} (variable={}) at {}",
             reg.get() < f!(m).ra.nvars,
+            std::panic::Location::caller(),
         );
     }
 
@@ -627,7 +733,7 @@ fn free_reg<'a>(m: &mut State<'a>, reg: Reg) {
 fn free_reg_range<'a>(m: &mut State<'a>, range: RegRange) {
     #[cfg(debug_assertions)]
     if option_env!("PRINT_REGALLOC").is_some() {
-        eprintln!("free range {}: {range:?}", std::panic::Location::caller());
+        eprintln!("free range {range:?} at {}", std::panic::Location::caller());
     }
 
     f!(m).ra.free_n(range);
@@ -636,18 +742,29 @@ fn free_reg_range<'a>(m: &mut State<'a>, range: RegRange) {
 /// If `value` is dynamic, free its register.
 #[cfg_attr(debug_assertions, track_caller)]
 fn free_value<'a>(m: &mut State<'a>, value: Value<'a>) {
-    #[cfg(debug_assertions)]
-    if option_env!("PRINT_REGALLOC").is_some() {
-        eprintln!(
-            "free value {} {}: {:?}",
-            value.span,
-            std::panic::Location::caller(),
-            value.kind,
-        );
-    }
-
     if let ValueKind::Dynamic(reg) = value.kind {
+        #[cfg(debug_assertions)]
+        if option_env!("PRINT_REGALLOC").is_some() {
+            eprintln!(
+                "free value {span} {:?} (variable={}, nvars={nvars}) at {}",
+                value.kind,
+                reg.get() < f!(m).ra.nvars,
+                std::panic::Location::caller(),
+                span = value.span,
+                nvars = f!(m).ra.nvars
+            );
+        }
+
         f!(m).ra.free(reg);
+    } else {
+        #[cfg(debug_assertions)]
+        if option_env!("PRINT_REGALLOC").is_some() {
+            eprintln!(
+                "free value {:?} at {}",
+                value.kind,
+                std::panic::Location::caller(),
+            );
+        }
     }
 }
 
@@ -657,7 +774,7 @@ fn free_operand<'a>(m: &mut State<'a>, operand: Operand) {
     #[cfg(debug_assertions)]
     if option_env!("PRINT_REGALLOC").is_some() {
         eprintln!(
-            "free operand {}: {operand:?}",
+            "free operand {operand:?} at {}",
             std::panic::Location::caller(),
         );
     }
@@ -1331,6 +1448,11 @@ fn emit_func_inner<'a>(
         .into();
     }
 
+    #[cfg(debug_assertions)]
+    if option_env!("PRINT_REGALLOC").is_some() {
+        eprintln!("new func {name}");
+    }
+
     let top_level = m.is_top_level();
     let f = FunctionState::new(m.options.clone(), name, top_level, m.buf);
     m.func_stack.push(f);
@@ -1356,7 +1478,14 @@ fn emit_func_inner<'a>(
         m.end_scope();
     }
 
-    Ok(m.func_stack.pop().expect("function stack is empty"))
+    let f = m.func_stack.pop().expect("function stack is empty");
+
+    #[cfg(debug_assertions)]
+    if option_env!("PRINT_REGALLOC").is_some() {
+        eprintln!("pop func {}", f.name);
+    }
+
+    Ok(f)
 }
 
 /// A compile-time value.
@@ -1612,16 +1741,23 @@ fn emit_stmt_list<'a>(m: &mut State<'a>, list: NodeList<'a, Stmt>) -> Result<()>
 }
 
 fn emit_stmt<'a>(m: &mut State<'a>, stmt: Node<'a, Stmt>, span: Span) -> Result<()> {
+    #[cfg(debug_assertions)]
+    if option_env!("PRINT_REGALLOC").is_some() {
+        eprintln!("== emit stmt {stmt:?}");
+    }
+
     match stmt.kind() {
         ast::StmtKind::Var(node) => emit_stmt_var(m, node)?,
         ast::StmtKind::Loop(node) => emit_stmt_loop(m, node)?,
         ast::StmtKind::FuncDecl(node) => emit_stmt_func(m, node)?,
-        ast::StmtKind::StmtExpr(node) => {
-            let value = eval_expr(m, node.inner(), node.inner_span())?;
-            free_value(m, value);
-        }
+        ast::StmtKind::StmtExpr(node) => emit_stmt_expr(m, node, span)?,
         ast::StmtKind::Import(node) => emit_stmt_import(m, Import::Named(node), span)?,
         ast::StmtKind::ImportBare(node) => emit_stmt_import(m, Import::Bare(node), span)?,
+    }
+
+    #[cfg(debug_assertions)]
+    if option_env!("PRINT_REGALLOC").is_some() {
+        eprintln!("== end stmt {stmt:?}");
     }
 
     Ok(())
@@ -1734,6 +1870,16 @@ fn emit_stmt_func<'a>(m: &mut State<'a>, func: Node<'a, ast::FuncDecl>) -> Resul
     }
 }
 
+// conceptually evaluated in its own scope, with the result being assigned to a temporary variable:
+//   { let _v = { <expr> } }
+fn emit_stmt_expr<'a>(m: &mut State<'a>, node: Node<'a, ast::StmtExpr>, span: Span) -> Result<()> {
+    let snapshot = f!(m).ra.snapshot();
+    let _ = eval_expr(m, node.inner(), node.inner_span())?;
+    f!(m).ra.restore(snapshot);
+
+    Ok(())
+}
+
 enum Import<'a> {
     Named(Node<'a, ast::Import>),
     Bare(Node<'a, ast::ImportBare>),
@@ -1793,7 +1939,12 @@ fn eval_expr_maybe_reuse<'a>(
     span: Span,
     dst: Option<Reg>,
 ) -> Result<Value<'a>> {
-    match expr.kind() {
+    #[cfg(debug_assertions)]
+    if option_env!("PRINT_REGALLOC").is_some() {
+        eprintln!("== eval expr {expr:?}");
+    }
+
+    let result = match expr.kind() {
         ast::ExprKind::Return(node) => eval_expr_return(m, node, span, dst),
         ast::ExprKind::Break(node) => eval_expr_break(m, node, span, dst),
         ast::ExprKind::Continue(node) => eval_expr_continue(m, node, span, dst),
@@ -1819,7 +1970,14 @@ fn eval_expr_maybe_reuse<'a>(
         ast::ExprKind::Bool(node) => Ok(eval_expr_bool(m, node, span)),
         ast::ExprKind::Str(node) => Ok(eval_expr_str(m, node, span)),
         ast::ExprKind::Nil(node) => Ok(eval_expr_nil(m, node, span)),
+    };
+
+    #[cfg(debug_assertions)]
+    if option_env!("PRINT_REGALLOC").is_some() {
+        eprintln!("== end expr {expr:?}");
     }
+
+    result
 }
 
 fn eval_expr<'a>(m: &mut State<'a>, expr: Node<'a, ast::Expr>, span: Span) -> Result<Value<'a>> {
@@ -2594,25 +2752,25 @@ fn prepare_fast_call<'a>(
     dst: Option<Reg>,
     span: Span,
     arity: u8,
-) -> Result<(Reg, RegRange)> {
+) -> Result<(Reg, ReservedRegRange)> {
     // Fastcall optimization: If the symbol is syntactically a function, then
     // - check arity now, and
     // - call the function by ID, avoiding arity/type checking
 
     let nargs = call.args().len() as u8;
-    let (dst, args) = match dst {
+    let (dst, mut args) = match dst {
         // We can use `dst` directly:
         // - If `dst` is top of stack, meaning argument registers can be
         //   allocated contiguously after `dst`
         Some(dst) if is_at_top(m, dst) => {
             // Yes; allocate registers for args right above `dst`, if there are any.
-            let args = fresh_reg_range(m, span, nargs)?;
+            let args = reserve_reg_range(m, span, nargs)?;
             (dst, args)
         }
         _ => {
             // No; allocate our own `dst` and args contiguously
             let dst = fresh_reg(m, span)?;
-            let args = fresh_reg_range(m, span, nargs)?;
+            let args = reserve_reg_range(m, span, nargs)?;
             (dst, args)
         }
     };
@@ -2624,9 +2782,13 @@ fn prepare_fast_call<'a>(
         .into();
     }
 
-    for ((reg, value), &span) in args.into_iter().zip(call.args()).zip(call.args_spans()) {
+    for (i, (value, &span)) in call.args().into_iter().zip(call.args_spans()).enumerate() {
+        let reg = args.get(m, i)?;
         let value = eval_expr_reuse(m, value, span, reg)?;
         value_force_reg(m, value, reg)?;
+        if !value.is_in(reg) {
+            free_value(m, value);
+        }
     }
 
     Ok((dst, args))
@@ -2650,7 +2812,7 @@ fn eval_expr_call<'a>(
 
         m.emit(asm::fastcall(dst, id), span);
 
-        free_reg_range(m, args);
+        args.free(m);
 
         dst
     } else if let ast::ExprKind::GetVar(node) = call.callee().kind()
@@ -2661,14 +2823,21 @@ fn eval_expr_call<'a>(
 
         m.emit(asm::hostcall(dst, id), span);
 
-        free_reg_range(m, args);
+        args.free(m);
 
         dst
     } else {
         // this is `maybe_reuse_reg` with additional condition of
         // the reused register being at the top of the stack
         let dst = match dst {
-            Some(dst) if is_at_top(m, dst) => dst,
+            Some(dst) if is_at_top(m, dst) => {
+                #[cfg(debug_assertions)]
+                if option_env!("PRINT_REGALLOC").is_some() {
+                    eprintln!("reuse (call) {dst:?} at {}", std::panic::Location::caller());
+                }
+
+                dst
+            }
             _ => fresh_reg(m, span)?,
         };
 
@@ -2677,7 +2846,9 @@ fn eval_expr_call<'a>(
             start: call.args_spans().first().unwrap_or(&span).start,
             end: call.args_spans().last().unwrap_or(&span).end,
         };
-        let args = fresh_reg_range(m, span, nargs)?;
+        let mut args = reserve_reg_range(m, span, nargs)?;
+
+        eprintln!("call expr dst={dst:?} args={args:?}");
 
         // the reuse here is sound, because if the callee expr is another call,
         // it will check for itself if the `dst` is at top or not.
@@ -2685,9 +2856,13 @@ fn eval_expr_call<'a>(
         let callee = eval_expr_reuse(m, call.callee(), call.callee_span(), dst)?;
         let callee = value_to_reg_reuse(m, callee, dst)?;
 
-        for ((reg, value), &span) in args.into_iter().zip(call.args()).zip(call.args_spans()) {
+        for (i, (value, &span)) in call.args().into_iter().zip(call.args_spans()).enumerate() {
+            let reg = args.get(m, i)?;
             let value = eval_expr_reuse(m, value, span, reg)?;
             value_force_reg(m, value, reg)?;
+            if !value.is_in(reg) {
+                free_value(m, value);
+            }
         }
 
         m.emit(
@@ -2695,10 +2870,10 @@ fn eval_expr_call<'a>(
             span,
         );
 
+        args.free(m);
         if callee != dst {
             free_reg(m, callee);
         }
-        free_reg_range(m, args);
 
         dst
     };

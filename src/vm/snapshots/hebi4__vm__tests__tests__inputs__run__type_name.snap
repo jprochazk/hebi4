@@ -20,13 +20,13 @@ OK
 Nil
 
 STDOUT
-"Nil"
-"Bool"
-"Int"
-"Float"
-"Str"
-"Table"
-"List"
-"Function"
-"Closure"
-"HostFunction"
+Nil
+Bool
+Int
+Float
+Str
+Table
+List
+Function
+Closure
+HostFunction

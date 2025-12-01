@@ -7,7 +7,13 @@ pub fn print(mut cx: Context, v: Value) -> HebiResult<()> {
         ValueRef::Bool(v) => format!("{v}"),
         ValueRef::Int(v) => format!("{v}"),
         ValueRef::Float(v) => format!("{v:?}"),
-        ValueRef::Object(v) => format!("{v:?}"),
+        ValueRef::Object(v) => {
+            if let Some(v) = v.cast::<Str>() {
+                format!("{v}")
+            } else {
+                format!("{v:?}")
+            }
+        }
     };
 
     let o = &mut cx.stdio().stdout;

@@ -1,3 +1,5 @@
+use std::ops::Deref;
+
 use rustc_hash::FxBuildHasher;
 
 use crate::vm::gc::{GcPtr, GcRef, GcRoot, GcUninitRoot, Heap, Trace, Tracer};
@@ -36,6 +38,26 @@ impl GcRef<'_, Str> {
     #[inline]
     pub fn as_str(&self) -> &str {
         self.inner.as_str()
+    }
+}
+
+impl AsRef<str> for GcRef<'_, Str> {
+    fn as_ref(&self) -> &str {
+        self.as_str()
+    }
+}
+
+impl AsRef<std::path::Path> for GcRef<'_, Str> {
+    fn as_ref(&self) -> &std::path::Path {
+        self.as_str().as_ref()
+    }
+}
+
+impl Deref for Str {
+    type Target = str;
+
+    fn deref(&self) -> &Self::Target {
+        &self.inner
     }
 }
 

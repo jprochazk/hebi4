@@ -175,9 +175,8 @@ pub fn run(code: &str, enable_dce: bool, output_callback: js_sys::Function) -> R
             };
 
             let mut vm = Hebi::new().with_stdio(stdio);
-            let mut vm = vm.enter();
             let loaded_module = vm.load(&module);
-            match vm.run(&loaded_module) {
+            match vm.run(loaded_module) {
                 Ok(v) => {
                     result.success = true;
                     result.output = format!("{:?}", unsafe { v.as_ref() });

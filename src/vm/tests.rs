@@ -3,9 +3,10 @@ use std::{fmt::Write as _, fs::read_to_string, path::Path};
 use super::Hebi;
 use crate::{
     error::Result,
+    gc::GcPtr,
     module::{NativeModule, f},
-    value::ValueRaw,
-    vm::{self, Runtime, Stdio},
+    value::{ModuleProto, ValueRaw},
+    vm::Stdio,
 };
 
 fn module(input: &str) -> crate::module::Module {
@@ -24,7 +25,7 @@ fn module(input: &str) -> crate::module::Module {
     module
 }
 
-fn take_stdio(r: &mut Runtime<'_>) -> (String, String) {
+fn take_stdio(r: &mut Hebi) -> (String, String) {
     let stdout = r
         .stdio()
         .stdout
@@ -48,9 +49,9 @@ fn take_stdio(r: &mut Runtime<'_>) -> (String, String) {
 fn snapshot<'vm>(
     input: &str,
     result: Result<ValueRaw>,
-    r: &mut Runtime<'vm>,
+    r: &mut Hebi,
     module: &crate::module::Module,
-    loaded_module: &vm::Module<'vm>,
+    loaded_module: GcPtr<ModuleProto>,
 ) -> (String, bool) {
     match result {
         Ok(value) => {
@@ -242,7 +243,6 @@ fn run(path: &Path) {
     let native_modules = native_modules();
 
     let mut vm = vm();
-    let mut vm = vm.enter();
     for module in native_modules {
         vm.register(&module);
     }
@@ -253,19 +253,19 @@ fn run(path: &Path) {
     // ensuring it has the same result.
     let (snapshot1, failure1) = snapshot(
         input,
-        vm.run(&loaded_module),
+        vm.run(loaded_module),
         &mut vm,
         &module,
-        &loaded_module,
+        loaded_module,
     );
 
     if option_env!("NO_RUN_TWICE").is_none() {
         let (snapshot2, failure2) = snapshot(
             input,
-            vm.run(&loaded_module),
+            vm.run(loaded_module),
             &mut vm,
             &module,
-            &loaded_module,
+            loaded_module,
         );
 
         assert_eq!(snapshot1, snapshot2);
@@ -293,13 +293,12 @@ fn separate_modules() {
     let b = module(r#"100 + 200"#);
 
     let mut vm = vm();
-    let mut vm = vm.enter();
     let a = vm.load(&a);
-    let a = vm.run(&a).unwrap();
+    let a = vm.run(a).unwrap();
     let a = unsafe { a.as_ref() };
     let a = format!("{a:?}");
     let b = vm.load(&b);
-    let b = vm.run(&b).unwrap();
+    let b = vm.run(b).unwrap();
     let b = unsafe { b.as_ref() };
     let b = format!("{b:?}");
 
@@ -313,26 +312,37 @@ fn stack_unwinding() {
     let m = module(src);
 
     let mut vm = vm();
-    let mut vm = vm.enter();
     let l = vm.load(&m);
-    let (s0, f0) = snapshot(src, vm.run(&l), &mut vm, &m, &l);
-    let (s1, f1) = snapshot(src, vm.run(&l), &mut vm, &m, &l);
+    let (s0, f0) = snapshot(src, vm.run(l), &mut vm, &m, l);
+    let (s1, f1) = snapshot(src, vm.run(l), &mut vm, &m, l);
 
     assert_eq!(s0, s1);
     assert_eq!(f0, f1);
-
-    unsafe {
-        assert!(vm.vm.as_mut().frames.is_empty());
-    }
+    assert!(vm.inner.frames.is_empty());
 }
 
 #[test]
 fn nested_enter() {
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        let mut a = vm();
-        let a = a.enter();
-        let mut b = vm();
-        let b = b.enter();
+        fn bad() {
+            let mut vm = vm();
+            // shouldn't even get here
+            let m = vm.load(&module("panic()"));
+            vm.run(m).ok();
+        }
+
+        let m = NativeModule::builder("bad")
+            .function(self::f!(bad))
+            .finish();
+        let mut vm = vm();
+        vm.register(&m);
+        let m = vm.load(&module(
+            "
+            import {bad} from bad
+            bad()
+        ",
+        ));
+        vm.run(m)
     }));
 
     assert!(result.is_err());
@@ -358,13 +368,12 @@ print("after")
         .finish();
 
     let mut vm = vm();
-    let mut vm = vm.enter();
     vm.register(&n);
     let l = vm.load(&m);
 
-    let result = smol::block_on(async { vm.run_async(&l).await });
+    let result = smol::block_on(async { vm.run_async(l).await });
 
-    let (s, _) = snapshot(src, result, &mut vm, &m, &l);
+    let (s, _) = snapshot(src, result, &mut vm, &m, l);
 
     #[cfg(not(miri))]
     {

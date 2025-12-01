@@ -136,6 +136,7 @@ mod convert;
 mod fmt;
 mod list;
 mod panic;
+mod str;
 
 static CORE_LIB: CoreLibData = functions! {
     fmt::print,
@@ -143,6 +144,7 @@ static CORE_LIB: CoreLibData = functions! {
     fmt::format,
     list::map,
     list::append,
+    list::list_len,
     convert::to_str,
     convert::to_int,
     convert::to_float,
@@ -150,4 +152,10 @@ static CORE_LIB: CoreLibData = functions! {
     convert::parse_float,
     convert::type_name,
     panic::panic,
+    panic::assert,
+    panic::assert_eq,
+    str::strip_prefix,
+    str::starts_with,
+    str::split_at,
+    str::lines,
 };

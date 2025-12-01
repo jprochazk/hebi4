@@ -1,0 +1,34 @@
+---
+source: src/vm/tests.rs
+expression: snapshot
+---
+SOURCE
+do {
+let text = "foo\r\nbar\n\nbaz\r"
+let lines = lines(text)
+let expected = ["foo", "bar", "", "baz\r"]
+
+print(lines)
+print(expected)
+
+let len = list_len(lines)
+assert_eq(len, list_len(expected))
+
+let i = 0
+loop {
+  if i == len {
+    break
+  }
+
+  assert_eq(lines[i], expected[i])
+
+  i += 1
+}
+}
+
+OK
+Nil
+
+STDOUT
+["foo", "bar", "", "baz\r"]
+["foo", "bar", "", "baz\r"]

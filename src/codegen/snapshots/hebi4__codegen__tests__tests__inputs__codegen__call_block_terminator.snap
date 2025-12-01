@@ -3,11 +3,14 @@ source: src/codegen/tests.rs
 expression: snapshot
 ---
 SOURCE
+//module
 do {
-let v = 0
+  let v = nil
 
-v(0)(0)
+  v(v)
 }
+
+nil
 
 OK
 .fn @main
@@ -16,9 +19,8 @@ OK
   .locals
     v = r1
   .code
-  0  lsmi r1, 0
-  1  lsmi r3, 0
+  0  lnil r1
+  1  mov r3, r1
   2  call r2, r1, 1   ; dyn
-  3  lsmi r3, 0
-  4  call r2, r2, 1   ; dyn
-  5  retv r2
+  3  lnil r0
+  4  ret

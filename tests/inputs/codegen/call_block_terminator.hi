@@ -1,0 +1,8 @@
+//module
+do {
+  let v = nil
+
+  v(v)
+}
+
+nil
