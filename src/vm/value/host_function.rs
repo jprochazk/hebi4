@@ -20,17 +20,17 @@ use crate::{
 
 pub struct Context<'a> {
     vm: Vm,
-    sp: Sp,
+    stack_base: usize,
     nargs: u8,
     // _lifetime: PhantomData<&'a ()>,
     _lifetime: Invariant<'a>,
 }
 
 impl<'a> Context<'a> {
-    pub(crate) fn new(vm: Vm, sp: Sp, nargs: u8) -> Self {
+    pub(crate) fn new(vm: Vm, stack_base: usize, nargs: u8) -> Self {
         Self {
             vm,
-            sp,
+            stack_base,
             nargs,
             _lifetime: PhantomData,
         }
@@ -63,14 +63,14 @@ impl<'a> Context<'a> {
 
     #[inline]
     pub(crate) unsafe fn arg_unchecked(&self, i: u8) -> ValueRaw {
-        self.sp.at(Reg::new_unchecked(i + 1)).read()
+        self.sp().at(Reg::new_unchecked(i + 1)).read()
     }
 
     #[inline]
     pub(crate) fn private_clone(&self) -> Self {
         Self {
             vm: self.vm,
-            sp: self.sp,
+            stack_base: self.stack_base,
             nargs: self.nargs,
             _lifetime: PhantomData,
         }
@@ -78,7 +78,7 @@ impl<'a> Context<'a> {
 
     #[inline]
     pub(crate) fn sp(&self) -> Sp {
-        self.sp
+        unsafe { self.vm.stack_at(self.stack_base) }
     }
 
     #[inline]
@@ -122,11 +122,20 @@ impl<'a> Context<'a> {
                 let (sp, ip) = prepare_call(callee, ret_reg, vm, 0);
                 let stack_base = sp.ret().offset_from_unsigned(vm.stack_at(0).ret());
 
-                let mut cx = Context::new(self.vm, sp, nargs);
+                let mut cx = Context::new(self.vm, stack_base, nargs);
                 args.try_into_hebi_args(&mut cx)?;
 
                 match dispatch_loop(vm, ip, stack_base) {
-                    Ok(value) => Ok(value.root(&mut *vm.heap(), ret)),
+                    Ok(value) => {
+                        debug_assert!(
+                            vm.current_frame()
+                                .callee()
+                                .into_host()
+                                .is_some_and(|c| { c.into_raw() == current_callee.into_raw() })
+                        );
+
+                        Ok(value.root(&mut *vm.heap(), ret))
+                    }
                     Err(err) => {
                         let err = vm.take_error(err);
                         vm.unwind();
@@ -153,11 +162,20 @@ impl<'a> Context<'a> {
                 let (sp, ip) = prepare_closure_call(callee, ret_reg, vm, 0);
                 let stack_base = sp.ret().offset_from_unsigned(vm.stack_at(0).ret());
 
-                let mut cx = Context::new(self.vm, sp, nargs);
+                let mut cx = Context::new(self.vm, stack_base, nargs);
                 args.try_into_hebi_args(&mut cx)?;
 
                 match dispatch_loop(vm, ip, stack_base) {
-                    Ok(value) => Ok(value.root(&mut *vm.heap(), ret)),
+                    Ok(value) => {
+                        debug_assert!(
+                            vm.current_frame()
+                                .callee()
+                                .into_host()
+                                .is_some_and(|c| { c.into_raw() == current_callee.into_raw() })
+                        );
+
+                        Ok(value.root(&mut *vm.heap(), ret))
+                    }
                     Err(err) => {
                         let err = vm.take_error(err);
                         vm.unwind();
@@ -181,8 +199,7 @@ impl<'a> Context<'a> {
                     .into();
                 }
 
-                let return_addr = 0; // return to host
-                let sp = maybe_grow_stack(
+                maybe_grow_stack(
                     vm,
                     vm.current_frame().stack_base() as usize + ret_reg.zx(),
                     1 + nargs as usize,
@@ -190,13 +207,13 @@ impl<'a> Context<'a> {
 
                 let mut cx = {
                     let stack_base = vm.current_frame().stack_base() + (ret_reg.get() as u32);
+                    let return_addr = 0; // return to host
                     debug_assert!(vm.has_enough_stack_space(
                         stack_base as usize,
                         1 + callee.as_ref().arity as usize
                     ));
                     vm.push_frame(CallFrame::host(callee, stack_base, return_addr));
-                    let sp: Sp = vm.stack_at(stack_base as usize);
-                    Context::new(vm, sp, nargs)
+                    Context::new(vm, stack_base as usize, nargs)
                 };
 
                 args.try_into_hebi_args(&mut cx)?;
@@ -211,6 +228,12 @@ impl<'a> Context<'a> {
                                 .is_some_and(|c| { c.into_raw() == callee.into_raw() })
                         );
                         vm.pop_frame_unchecked();
+                        debug_assert!(
+                            vm.current_frame()
+                                .callee()
+                                .into_host()
+                                .is_some_and(|c| { c.into_raw() == current_callee.into_raw() })
+                        );
 
                         Ok(value.root(&mut *vm.heap(), ret))
                     }
@@ -226,6 +249,12 @@ impl<'a> Context<'a> {
                             vm.current_frame().name().as_ref().as_str(),
                         );
                         vm.pop_frame_unchecked();
+                        debug_assert!(
+                            vm.current_frame()
+                                .callee()
+                                .into_host()
+                                .is_some_and(|c| { c.into_raw() == current_callee.into_raw() })
+                        );
 
                         return Err(err);
                     }
@@ -249,7 +278,7 @@ impl<'a> Context<'a> {
         // and by stack afterwards.
         unsafe {
             let v = v.try_into_hebi_value_raw(&mut self)?;
-            *self.sp.ret() = v;
+            *self.sp().ret() = v;
             Ok(Ret::new())
         }
     }
