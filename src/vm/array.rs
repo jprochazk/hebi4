@@ -49,7 +49,6 @@ impl<T: Sized + Copy> DynStack<T> {
             let old_cap = self.inner.capacity;
             unsafe { self.inner.grow(1) }
             let new_cap = self.inner.capacity;
-            debug_print!("grow cstack {old_cap} -> {new_cap}");
         }
 
         unsafe { self.inner.offset(self.length).write(value) };

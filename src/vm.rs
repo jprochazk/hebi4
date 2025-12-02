@@ -366,13 +366,7 @@ impl Vm {
 
     #[cfg_attr(debug_assertions, track_caller)]
     #[inline]
-    unsafe fn push_frame(self, mut frame: CallFrame) {
-        debug_print!(
-            "push frame {:?} (total={}) at {}",
-            CallFramePtr(&mut frame).name().as_ref(),
-            (*self.0.as_ptr()).frames.len() + 1,
-            std::panic::Location::caller(),
-        );
+    unsafe fn push_frame(self, frame: CallFrame) {
         let frames = &mut (*self.0.as_ptr()).frames;
         frames.push(frame);
     }
@@ -381,14 +375,7 @@ impl Vm {
     #[inline]
     unsafe fn pop_frame_unchecked(self) -> CallFrame {
         let frames = &mut (*self.0.as_ptr()).frames;
-        let mut frame = frames.pop_unchecked();
-        debug_print!(
-            "pop frame unchecked {:?} (total={}) at {}",
-            CallFramePtr(&mut frame).name().as_ref(),
-            (*self.0.as_ptr()).frames.len(),
-            std::panic::Location::caller(),
-        );
-        frame
+        frames.pop_unchecked()
     }
 
     #[inline]
@@ -474,32 +461,17 @@ impl Vm {
     #[inline]
     unsafe fn set_current_module_for(self, f: GcPtr<Function>) {
         let module = f.as_ref().module().as_ptr();
-        debug_print!(
-            "enter module for {} (nvars={})",
-            module.as_ref().name.as_ref(),
-            module.as_ref().module_vars.len(),
-        );
         (*self.0.as_ptr()).current_module = Some(module);
     }
 
     #[inline]
     unsafe fn set_current_upvalues_for(self, f: GcPtr<Closure>) {
-        debug_print!(
-            "set upvalues for {} (nuv={})",
-            f.as_ref().func.as_ref().name.as_ref(),
-            f.as_ref().upvalues.len()
-        );
         let upvalues = NonNull::new_unchecked(f.as_mut().upvalues.as_mut_ptr());
         (*self.0.as_ptr()).current_upvalues = Some(Upvalues(upvalues));
     }
 
     #[inline]
     unsafe fn set_current_literals_for(self, f: GcPtr<Function>) {
-        debug_print!(
-            "set literals for {} (nlit={})",
-            f.as_ref().name.as_ref(),
-            f.as_ref().literals.len()
-        );
         let literals = Function::literals_raw(f);
         (*self.0.as_ptr()).current_literals = Some(literals);
     }
@@ -2258,7 +2230,6 @@ unsafe fn do_host_call(
     nargs: u8,
     return_addr: u32,
 ) -> Control {
-    debug_print!("return addr {return_addr}");
     let stack_base = vm.current_frame().stack_base() + (ret.get() as u32);
     // NOTE: we don't need extra stack space for this call
     debug_assert!(
@@ -2275,17 +2246,13 @@ unsafe fn do_host_call(
                 vm.current_frame()
                     .callee()
                     .into_host()
-                    .is_some_and(|c| { c.into_raw() == callee.into_raw() })
+                    .is_some_and(|c| { c.into_raw() == callee.into_raw() }),
+                "expected frame {} but got {}",
+                callee.as_ref().name.as_ref().as_str(),
+                vm.current_frame().name().as_ref().as_str(),
             );
 
             let (sp, new_ip) = return_from_call(vm).unwrap_unchecked();
-            debug_print!(
-                "returned to {:?} at {}",
-                new_ip.get().op(),
-                new_ip.offset_from_unsigned(Function::code_raw(
-                    vm.current_frame().callee().into_script().unwrap_unchecked()
-                ))
-            );
 
             *sp.at(ret) = value;
 
@@ -2350,7 +2317,6 @@ unsafe fn return_from_call(vm: Vm) -> Option<(Sp, Ip)> {
 
     let stack_base = returning_to.stack_base() as usize;
     let return_addr = returning_from.return_addr as usize;
-    debug_print!("returning to: {return_addr}");
 
     let sp: Sp = vm.stack_at(stack_base);
     let ip: Ip = Function::code_raw(callee).offset(return_addr as isize);
