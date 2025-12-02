@@ -186,3 +186,7 @@ pub fn lines<'a>(mut cx: Context<'a>, str: Param<'a, Str>) -> HebiResult<Ret<'a>
 
     cx.ret(out)
 }
+
+pub fn str_len(cx: Context, str: Param<Str>) -> i64 {
+    str.as_ref(&cx).len() as i64
+}
