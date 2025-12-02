@@ -1,0 +1,25 @@
+---
+source: src/vm/tests.rs
+expression: snapshot
+---
+SOURCE
+//module
+
+fn _3() { "ok" }
+
+fn _2() {
+  try(_3)
+}
+
+fn _1() {
+  try(_2)
+}
+
+fn _0() {
+  try(_1)
+}
+
+assert_eq(_0(), "ok")
+
+OK
+Nil
