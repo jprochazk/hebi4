@@ -1,0 +1,20 @@
+
+// Split with empty separator (returns original string)
+let text = "hello"
+let result = split(text, "")
+let expected = ["hello"]
+
+print(result)
+print(expected)
+
+let len = list_len(result)
+assert_eq(len, list_len(expected))
+
+let i = 0
+loop {
+  if i == len {
+    break
+  }
+  assert_eq(result[i], expected[i])
+  i += 1
+}

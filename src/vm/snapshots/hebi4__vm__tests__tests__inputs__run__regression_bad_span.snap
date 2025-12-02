@@ -1,0 +1,108 @@
+---
+source: src/vm/tests.rs
+expression: snapshot
+---
+SOURCE
+//module
+fn fold(list, init, f) {
+  let acc = init
+  let i = 0
+  loop {
+    if i == list_len(list) {
+      break
+    }
+    acc = f(acc, list[i])
+    i += 1
+  }
+  acc
+}
+
+fn f(input) {
+  fold(input, {x:0}, fn(s, line) {
+    let parts = split_at(line, 1)
+    s.x += parse_int(parts[1])
+  }).x
+}
+
+f(["L1", "R1", "L1"])
+
+ERROR
+not a table
+18 |      s.x += parse_int(parts[1])
+   |      ^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+
+DISASM:
+
+.fn @main
+  params 0
+  stack 3
+  .code
+  0  llist r1, 3
+  1  lstr r2, "L1"
+  2  sidxn r1, 0, r2
+  3  lstr r2, "R1"
+  4  sidxn r1, 1, r2
+  5  lstr r2, "L1"
+  6  sidxn r1, 2, r2
+  7  call r0, fn1   ; fn1=f
+  8  ret
+
+.fn f
+  params 1
+  stack 6
+  .locals
+    input = r1
+  .code
+  0  mov r3, r1
+  1  ltable r4, 1
+  2  lsmi r5, 0
+  3  skeyc r4, "x", r5
+  4  lclosure r5, l1   ; closure{@216..286}, uv=0
+  5  call r2, fn2   ; fn2=fold
+  6  lkeyc r0, r2, "x"
+  7  ret
+
+.fn fold
+  params 3
+  stack 9
+  .locals
+    list = r1
+    init = r2
+    f = r3
+    acc = r4
+    i = r5
+  .code
+   0  mov r4, r2
+   1  lsmi r5, 0
+   2  mov r8, r1
+   3  call r7, list_len
+   4  iseq r5, r7
+   5  jmp 2   ; to 7
+   6  jmp 7   ; to 13
+   7  mov r7, r4
+   8  lidx r8, r1, r5
+   9  call r6, r3, 2   ; dyn
+  10  mov r4, r6
+  11  add r5, r5, 1
+  12  jmp -10   ; to 2
+  13  retv r4
+
+.fn closure{@216..286}
+  params 2
+  stack 7
+  .locals
+    s = r1
+    line = r2
+    parts = r3
+  .code
+   0  mov r4, r2
+   1  lsmi r5, 1
+   2  call r3, split_at
+   3  lkeyc r4, r1, "x"
+   4  lidxn r6, r3, 1
+   5  call r5, parse_int
+   6  add r4, r4, r5
+   7  skeyc r1, "x", r4
+   8  lnil r0
+   9  ret

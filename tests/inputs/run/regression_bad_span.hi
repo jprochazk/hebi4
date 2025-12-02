@@ -1,0 +1,23 @@
+//module
+fn fold(list, init, f) {
+  let acc = init
+  let i = 0
+  loop {
+    if i == list_len(list) {
+      break
+    }
+    acc = f(acc, list[i])
+    i += 1
+  }
+  acc
+}
+
+fn f(input) {
+  fold(input, {x:0}, fn(s, line) {
+    let parts = split_at(line, 1)
+    s.x += parse_int(parts[1])
+  }).x
+}
+
+f(["L1", "R1", "L1"])
+

@@ -135,6 +135,7 @@ impl RuntimeCoreLib {
 mod convert;
 mod fmt;
 mod list;
+mod math;
 mod panic;
 mod str;
 
@@ -145,6 +146,8 @@ static CORE_LIB: CoreLibData = functions! {
     list::map,
     list::append,
     list::list_len,
+    // math::powi,
+    // math::powf,
     convert::to_str,
     convert::to_int,
     convert::to_float,
@@ -157,5 +160,6 @@ static CORE_LIB: CoreLibData = functions! {
     str::strip_prefix,
     str::starts_with,
     str::split_at,
+    str::split,
     str::lines,
 };

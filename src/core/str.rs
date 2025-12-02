@@ -62,6 +62,66 @@ pub fn split_at<'a>(mut cx: Context<'a>, str: Param<'a, Str>, at: i64) -> HebiRe
 //     todo!()
 // }
 
+pub fn split<'a>(
+    mut cx: Context<'a>,
+    str: Param<'a, Str>,
+    by: Param<'a, Str>,
+) -> HebiResult<Ret<'a>> {
+    let_root!(in &cx; out);
+    let out = List::new(&cx, out, 0);
+
+    let len = str.as_ref(&cx).len();
+    let by_len = by.as_ref(&cx).len();
+
+    if by_len == 0 {
+        unsafe {
+            out.as_mut(&mut cx)
+                .push_raw(ValueRaw::Object(str.as_ptr().as_any()));
+        }
+        return cx.ret(out);
+    }
+
+    let mut start = 0;
+    let mut i = 0;
+
+    while i < len {
+        let mut matches = true;
+        if i + by_len > len {
+            matches = false;
+        } else {
+            for j in 0..by_len {
+                if str.as_ref(&cx).as_str().as_bytes()[i + j]
+                    != by.as_ref(&cx).as_str().as_bytes()[j]
+                {
+                    matches = false;
+                    break;
+                }
+            }
+        }
+
+        if matches {
+            let segment = str.as_ref(&cx);
+            let segment = &segment.as_str()[start..i];
+            let_root!(in &cx; seg);
+            let seg = Str::new(&cx, seg, segment);
+            out.as_mut(&mut cx).push(ValueRoot::Object(seg.as_any()));
+
+            start = i + by_len;
+            i = start;
+        } else {
+            i += 1;
+        }
+    }
+
+    let segment = str.as_ref(&cx);
+    let segment = &segment.as_str()[start..len];
+    let_root!(in &cx; seg);
+    let seg = Str::new(&cx, seg, segment);
+    out.as_mut(&mut cx).push(ValueRoot::Object(seg.as_any()));
+
+    cx.ret(out)
+}
+
 pub fn lines<'a>(mut cx: Context<'a>, str: Param<'a, Str>) -> HebiResult<Ret<'a>> {
     let_root!(in &cx; out);
     let out = List::new(&cx, out, 0);

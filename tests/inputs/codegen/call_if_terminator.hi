@@ -1,0 +1,9 @@
+//module
+if true {
+  let v = nil
+
+  v(v)
+}
+
+nil
+

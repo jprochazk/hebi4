@@ -1,0 +1,33 @@
+---
+source: src/vm/tests.rs
+expression: snapshot
+---
+SOURCE
+do {
+// Split with no matches (returns whole string)
+let text = "foobar"
+let result = split(text, ",")
+let expected = ["foobar"]
+
+print(result)
+print(expected)
+
+let len = list_len(result)
+assert_eq(len, list_len(expected))
+
+let i = 0
+loop {
+  if i == len {
+    break
+  }
+  assert_eq(result[i], expected[i])
+  i += 1
+}
+}
+
+OK
+Nil
+
+STDOUT
+["foobar"]
+["foobar"]

@@ -1,0 +1,30 @@
+---
+source: src/codegen/tests.rs
+expression: snapshot
+---
+SOURCE
+//module
+if true {
+  let v = nil
+
+  v(v)
+}
+
+nil
+
+OK
+.fn @main
+  params 0
+  stack 5
+  .locals
+    v = r2
+  .code
+  0  ltrue r1
+  1  istrue r1
+  2  jmp 5   ; to 7
+  3  lnil r2
+  4  mov r4, r2
+  5  call r3, r2, 1   ; dyn
+  6  mov r1, r3
+  7  lnil r0
+  8  ret

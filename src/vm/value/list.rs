@@ -146,6 +146,16 @@ impl<'a> GcRefMut<'a, List> {
         self.items.push(value.raw());
     }
 
+    /// Append `value` to the list.
+    ///
+    /// ## Safety
+    ///
+    /// - `value` must still be alive.
+    #[inline]
+    pub unsafe fn push_raw(&mut self, value: ValueRaw) {
+        self.items.push(value)
+    }
+
     /// Set `self[index]` to `value`.
     #[inline]
     pub fn set(&mut self, index: usize, value: ValueRoot<'_>) -> Result<(), IndexOutOfBounds> {

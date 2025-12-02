@@ -309,7 +309,7 @@ struct Upvalue<'a> {
 }
 
 struct Scope<'a> {
-    regalloc_snapshot: RegAllocSnapshot,
+    reg_scope: RegScope,
     variables: Vec<'a, Variable<'a>>,
     undefined_functions: Vec<'a, FnId>,
 }
@@ -374,7 +374,8 @@ struct FunctionDebug<'a> {
 }
 
 struct RegAlloc {
-    nvars: u8,
+    scope_start: u8,
+    vars_in_scope: u8,
     next: u8,
     max_size: u8,
 }
@@ -382,7 +383,8 @@ struct RegAlloc {
 impl RegAlloc {
     fn new() -> Self {
         Self {
-            nvars: 0,
+            scope_start: 0,
+            vars_in_scope: 0,
             next: 0,
             max_size: 0,
         }
@@ -405,7 +407,7 @@ impl RegAlloc {
 
     fn alloc_var(&mut self, span: Span) -> Result<Reg> {
         let r = self.alloc(span)?;
-        self.nvars += 1;
+        self.vars_in_scope += 1;
         Ok(r)
     }
 
@@ -433,17 +435,17 @@ impl RegAlloc {
     }
 
     fn free(&mut self, r: Reg) {
-        // Do not free variables. They are freed by `end_scope`,
-        // which snapshots the current scope depth.
-        if r.get() < self.nvars {
+        // Do not free variables.
+        if r.get() < self.scope_start + self.vars_in_scope {
             return;
         }
 
         if self.next != r.get() + 1 {
             unreachable!(
-                "ICE: registers freed out of order (next={}, r={})",
+                "ICE: registers freed out of order (next={}, r={}, scope_start={})",
                 self.next,
-                r.get()
+                r.get(),
+                self.scope_start
             );
         }
         self.next = r.get();
@@ -455,12 +457,6 @@ impl RegAlloc {
             return;
         }
 
-        // note: we never allocate use `alloc_n` for variables
-        assert!(
-            range.start.get() >= self.nvars,
-            "ICE: alloc_n range intersects with variables"
-        );
-
         if self.next != range.end().get() + 1 {
             unreachable!(
                 "ICE: registers freed out of order ({range:?}, next={next})",
@@ -471,36 +467,41 @@ impl RegAlloc {
     }
 
     #[cfg_attr(debug_assertions, track_caller)]
-    fn snapshot(&self) -> RegAllocSnapshot {
-        let snapshot = RegAllocSnapshot {
-            nvars: self.nvars,
-            next: self.next,
+    fn begin_scope(&mut self) -> RegScope {
+        let snapshot = RegScope {
+            prev_scope_start: self.scope_start,
+            prev_scope_next: self.next,
+            prev_scope_nvars: self.vars_in_scope,
         };
+        self.scope_start = self.next;
+        self.vars_in_scope = 0;
 
         #[cfg(debug_assertions)]
         if option_env!("PRINT_REGALLOC").is_some() {
-            eprintln!("snapshot {snapshot:?}");
+            eprintln!("new reg scope {snapshot:?}");
         }
 
         snapshot
     }
 
     #[cfg_attr(debug_assertions, track_caller)]
-    fn restore(&mut self, snapshot: RegAllocSnapshot) {
-        self.nvars = snapshot.nvars;
-        self.next = snapshot.next;
+    fn end_scope(&mut self, snapshot: RegScope) {
+        self.scope_start = snapshot.prev_scope_start;
+        self.next = snapshot.prev_scope_next;
+        self.vars_in_scope = snapshot.prev_scope_nvars;
 
         #[cfg(debug_assertions)]
         if option_env!("PRINT_REGALLOC").is_some() {
-            eprintln!("restore {snapshot:?}");
+            eprintln!("end reg scope {snapshot:?}");
         }
     }
 }
 
 #[derive(Debug)]
-struct RegAllocSnapshot {
-    nvars: u8,
-    next: u8,
+struct RegScope {
+    prev_scope_start: u8,
+    prev_scope_next: u8,
+    prev_scope_nvars: u8,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -720,7 +721,7 @@ fn free_reg<'a>(m: &mut State<'a>, reg: Reg) {
     if option_env!("PRINT_REGALLOC").is_some() {
         eprintln!(
             "free reg {reg:?} (variable={}) at {}",
-            reg.get() < f!(m).ra.nvars,
+            reg.get() < f!(m).ra.scope_start + f!(m).ra.vars_in_scope,
             std::panic::Location::caller(),
         );
     }
@@ -746,12 +747,10 @@ fn free_value<'a>(m: &mut State<'a>, value: Value<'a>) {
         #[cfg(debug_assertions)]
         if option_env!("PRINT_REGALLOC").is_some() {
             eprintln!(
-                "free value {span} {:?} (variable={}, nvars={nvars}) at {}",
+                "free value {:?} (variable={}) at {}",
                 value.kind,
-                reg.get() < f!(m).ra.nvars,
+                reg.get() < f!(m).ra.scope_start + f!(m).ra.vars_in_scope,
                 std::panic::Location::caller(),
-                span = value.span,
-                nvars = f!(m).ra.nvars
             );
         }
 
@@ -1018,8 +1017,9 @@ impl<'a> FunctionState<'a> {
     }
 
     fn begin_scope(&mut self, buf: &'a Bump) {
+        let reg_scope = self.ra.begin_scope();
         self.scopes.push(Scope {
-            regalloc_snapshot: self.ra.snapshot(),
+            reg_scope,
             variables: vec![in buf],
             undefined_functions: vec![in buf],
         });
@@ -1030,7 +1030,7 @@ impl<'a> FunctionState<'a> {
             .scopes
             .pop()
             .expect("`end_scope` called without any scopes");
-        self.ra.restore(scope.regalloc_snapshot);
+        self.ra.end_scope(scope.reg_scope);
     }
 
     fn begin_loop(&mut self, buf: &'a Bump) -> Option<Loop<'a>> {
@@ -1870,12 +1870,10 @@ fn emit_stmt_func<'a>(m: &mut State<'a>, func: Node<'a, ast::FuncDecl>) -> Resul
     }
 }
 
-// conceptually evaluated in its own scope, with the result being assigned to a temporary variable:
-//   { let _v = { <expr> } }
 fn emit_stmt_expr<'a>(m: &mut State<'a>, node: Node<'a, ast::StmtExpr>, span: Span) -> Result<()> {
-    let snapshot = f!(m).ra.snapshot();
+    m.begin_scope();
     let _ = eval_expr(m, node.inner(), node.inner_span())?;
-    f!(m).ra.restore(snapshot);
+    m.end_scope();
 
     Ok(())
 }
@@ -2847,8 +2845,6 @@ fn eval_expr_call<'a>(
             end: call.args_spans().last().unwrap_or(&span).end,
         };
         let mut args = reserve_reg_range(m, span, nargs)?;
-
-        eprintln!("call expr dst={dst:?} args={args:?}");
 
         // the reuse here is sound, because if the callee expr is another call,
         // it will check for itself if the `dst` is at top or not.

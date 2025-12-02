@@ -564,7 +564,7 @@ impl Vm {
     unsafe fn get_span(self, ip: Ip) -> Option<Span> {
         let callee = {
             let mut first_non_host_callee = None;
-            for frame in self.call_frames() {
+            for frame in self.call_frames().rev() {
                 let frame = CallFramePtr(frame);
                 if let Some(callee) = frame.callee().into_script() {
                     first_non_host_callee = Some(callee);
