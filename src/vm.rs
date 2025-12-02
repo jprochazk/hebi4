@@ -42,11 +42,10 @@
 //!
 //! That's as low-overhead as it gets, which is the ultimate goal here.
 
-mod array;
-
 #[macro_use]
 pub mod gc;
 
+mod array;
 pub mod value;
 
 use std::{marker::PhantomData, ptr::NonNull};
@@ -62,7 +61,6 @@ use crate::{
     gc::GcAnyPtr,
     module::{self, ImportBinding},
     span::Span,
-    tag::TaggedPtr,
     value::module::ImportBindings,
     vm::{
         array::DynStackIterRaw,
@@ -244,6 +242,7 @@ use tagged_callee_ptr::TaggedCalleePtr;
 mod tagged_callee_ptr {
     use super::*;
     use crate::gc::GcBox;
+    use crate::tag::TaggedPtr;
 
     #[derive(Clone, Copy)]
     #[repr(transparent)]
@@ -301,6 +300,14 @@ mod tagged_callee_ptr {
             self.0.tag() == Self::SCRIPT_TAG
         }
     }
+
+    impl std::fmt::Debug for TaggedCalleePtr {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.debug_tuple("TaggedCalleePtr")
+                .field(&self.0.tag())
+                .finish()
+        }
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -352,29 +359,36 @@ impl CallFramePtr {
 
 impl Vm {
     #[inline]
-    unsafe fn previous_frame(self) -> CallFramePtr {
-        let frames = &raw mut (*self.0.as_ptr()).frames;
-        let n = (*frames).len() - 2;
-        let ptr = (*frames).at_unchecked(n);
-        CallFramePtr(ptr)
-    }
-
-    #[inline]
     unsafe fn current_frame(self) -> CallFramePtr {
-        let ptr = (*self.0.as_ptr()).frames.top_unchecked();
-        CallFramePtr(ptr)
+        let frames = &mut (*self.0.as_ptr()).frames;
+        CallFramePtr(frames.top_unchecked())
     }
 
+    #[cfg_attr(debug_assertions, track_caller)]
     #[inline]
-    unsafe fn push_frame(self, frame: CallFrame) {
+    unsafe fn push_frame(self, mut frame: CallFrame) {
+        debug_print!(
+            "push frame {:?} (total={}) at {}",
+            CallFramePtr(&mut frame).name().as_ref(),
+            (*self.0.as_ptr()).frames.len() + 1,
+            std::panic::Location::caller(),
+        );
         let frames = &mut (*self.0.as_ptr()).frames;
         frames.push(frame);
     }
 
+    #[cfg_attr(debug_assertions, track_caller)]
     #[inline]
     unsafe fn pop_frame_unchecked(self) -> CallFrame {
         let frames = &mut (*self.0.as_ptr()).frames;
-        frames.pop_unchecked()
+        let mut frame = frames.pop_unchecked();
+        debug_print!(
+            "pop frame unchecked {:?} (total={}) at {}",
+            CallFramePtr(&mut frame).name().as_ref(),
+            (*self.0.as_ptr()).frames.len(),
+            std::panic::Location::caller(),
+        );
+        frame
     }
 
     #[inline]
@@ -471,7 +485,7 @@ impl Vm {
     #[inline]
     unsafe fn set_current_upvalues_for(self, f: GcPtr<Closure>) {
         debug_print!(
-            "set literals for {} (nuv={})",
+            "set upvalues for {} (nuv={})",
             f.as_ref().func.as_ref().name.as_ref(),
             f.as_ref().upvalues.len()
         );
@@ -2039,8 +2053,9 @@ unsafe fn fastcall(vm: Vm, ip: Ip, args: Fastcall, sp: Sp) -> Control {
 
     // SAFETY: We're in the middle of executing bytecode, so current call frame is guaranteed
     // to have a script callee.
+    let current_function = vm.current_frame().callee();
     let current_function_start =
-        Function::code_raw(vm.current_frame().callee().into_script().unwrap_unchecked());
+        Function::code_raw(current_function.into_script().unwrap_unchecked());
     // Return addr points to the next instruction after the call instruction.
     let return_addr = 1 + ip.offset_from_unsigned(current_function_start) as u32;
 
@@ -2058,8 +2073,9 @@ unsafe fn hostcall(vm: Vm, ip: Ip, args: Hostcall, sp: Sp) -> Control {
 
     // SAFETY: We're in the middle of executing bytecode, so current call frame is guaranteed
     // to have a script callee.
+    let current_function = vm.current_frame().callee();
     let current_function_start =
-        Function::code_raw(vm.current_frame().callee().into_script().unwrap_unchecked());
+        Function::code_raw(current_function.into_script().unwrap_unchecked());
     // Return addr points to the next instruction after the call instruction.
     let return_addr = 1 + ip.offset_from_unsigned(current_function_start) as u32;
 
@@ -2236,42 +2252,49 @@ unsafe fn do_host_call(
     callee: GcPtr<HostFunction>,
 
     vm: Vm,
-    sp: Sp,
+    _sp: Sp,
     ip: Ip,
     ret: Reg,
     nargs: u8,
     return_addr: u32,
 ) -> Control {
-    let context = {
-        let stack_base = vm.current_frame().stack_base() + (ret.get() as u32);
-        debug_assert!(
-            vm.has_enough_stack_space(stack_base as usize, 1 + callee.as_ref().arity as usize)
-        );
-        vm.push_frame(CallFrame::host(callee, stack_base, return_addr));
-        let sp: Sp = vm.stack_at(stack_base as usize);
-        Context::new(vm, sp, nargs)
-    };
+    debug_print!("return addr {return_addr}");
+    let stack_base = vm.current_frame().stack_base() + (ret.get() as u32);
+    // NOTE: we don't need extra stack space for this call
+    debug_assert!(
+        vm.has_enough_stack_space(stack_base as usize, 1 + callee.as_ref().arity as usize)
+    );
+    vm.push_frame(CallFrame::host(callee, stack_base, return_addr));
+    let context = Context::new(vm, stack_base as usize, nargs);
 
     let result = (callee.as_ref().f)(context);
 
     match result {
         Ok(value) => {
-            *sp.at(ret) = value;
-
             debug_assert!(
                 vm.current_frame()
                     .callee()
                     .into_host()
                     .is_some_and(|c| { c.into_raw() == callee.into_raw() })
             );
-            vm.pop_frame_unchecked();
 
-            if let Some(callee) = vm.current_frame().callee().into_script() {
-                vm.set_current_module_for(callee);
-                vm.set_current_literals_for(callee);
-            }
+            let (sp, new_ip) = return_from_call(vm).unwrap_unchecked();
+            debug_print!(
+                "returned to {:?} at {}",
+                new_ip.get().op(),
+                new_ip.offset_from_unsigned(Function::code_raw(
+                    vm.current_frame().callee().into_script().unwrap_unchecked()
+                ))
+            );
 
-            dispatch_next(vm, ip, sp)
+            *sp.at(ret) = value;
+
+            // we should be returning to _something_:
+            debug_assert!(!(*vm.0.as_ptr()).frames.is_empty());
+            // that something should be a script function:
+            debug_assert!(vm.current_frame().callee().is_script());
+
+            dispatch_current(vm, new_ip, sp)
         }
         Err(err) => {
             vm.set_saved_ip(ip);
@@ -2327,6 +2350,7 @@ unsafe fn return_from_call(vm: Vm) -> Option<(Sp, Ip)> {
 
     let stack_base = returning_to.stack_base() as usize;
     let return_addr = returning_from.return_addr as usize;
+    debug_print!("returning to: {return_addr}");
 
     let sp: Sp = vm.stack_at(stack_base);
     let ip: Ip = Function::code_raw(callee).offset(return_addr as isize);
@@ -2414,18 +2438,18 @@ pub(crate) struct VmState {
 
 impl Hebi {
     pub fn new() -> Self {
-        const INITIAL_STACK_SIZE: usize = //if cfg!(debug_assertions) {
-            1;
-        // } else {
-        //     // 1 MiB
-        //     (1024 * 1024) / std::mem::size_of::<ValueRaw>()
-        // };
+        const INITIAL_STACK_SIZE: usize = if cfg!(debug_assertions) {
+            1
+        } else {
+            // 1 MiB
+            (1024 * 1024) / std::mem::size_of::<ValueRaw>()
+        };
 
-        const STACK_DEPTH: usize = //if cfg!(debug_assertions) {
-            1;
-        // } else {
-        //     INITIAL_STACK_SIZE / 16
-        // };
+        const STACK_DEPTH: usize = if cfg!(debug_assertions) {
+            1
+        } else {
+            INITIAL_STACK_SIZE / 16
+        };
 
         let heap = gc::Heap::new();
 
@@ -2515,6 +2539,7 @@ impl gc::ExternalRoots for VmRoots {
         }
 
         debug_print!(
+            GC,
             "trace vm roots (nframes={}, nstack={})",
             this!().frames.len(),
             this!()
@@ -2550,13 +2575,13 @@ impl gc::ExternalRoots for VmRoots {
                 let nstack = callee.as_ref().stack_size();
                 let stack_len = base + nstack;
 
-                debug_print!("frame {}", callee.as_ref().name.as_ref().as_str());
-                debug_print!("base={base} nstack={nstack} len={stack_len}");
+                debug_print!(GC, "frame {}", callee.as_ref().name.as_ref().as_str());
+                debug_print!(GC, "base={base} nstack={nstack} len={stack_len}");
                 for i in 0..stack_len {
-                    debug_print!("stack[{i}]");
+                    debug_print!(GC, "stack[{i}]");
                     tracer.visit_value(sp.add(i).read());
                 }
-                debug_print!("stack end");
+                debug_print!(GC, "stack end");
             }
         }
 
@@ -2661,7 +2686,11 @@ impl Hebi {
         };
 
         unsafe {
-            debug_assert!((*vm.0.as_ptr()).frames.len() == 1);
+            debug_assert!(
+                (*vm.0.as_ptr()).frames.len() == 1,
+                "len: {}",
+                (*vm.0.as_ptr()).frames.len(),
+            );
             debug_assert!(
                 (*vm.0.as_ptr()).frames.top().is_some_and(|frame| (*frame)
                     .callee
@@ -2691,13 +2720,18 @@ unsafe fn dispatch_loop(vm: Vm, ip: Ip, stack_base: usize) -> Result<ValueRaw, V
     // instead of tail-calling the next handler.
     #[cfg(any(debug_assertions, target_arch = "wasm32"))]
     {
+        let start_ip = ip;
         let mut sp: Sp = vm.stack_at(stack_base);
         let mut ip: Ip = ip;
 
         loop {
             let insn = ip.get();
             let op = JT.as_ptr().at(insn);
-            debug_print!("===== {}", insn.into_enum());
+            debug_print!(
+                "{} ; {}",
+                ip.offset_from_unsigned(start_ip),
+                insn.into_enum()
+            );
             match op(vm, ip, insn, sp) {
                 Control::Stop => return Ok(*sp.ret()),
                 Control::Error(err) => return Err(err),
