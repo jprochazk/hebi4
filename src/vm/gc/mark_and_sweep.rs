@@ -2,7 +2,7 @@ use super::*;
 
 // Stop-the-world, mark and sweep GC.
 pub(crate) unsafe fn collect(heap: *mut Heap, mut external_roots: impl ExternalRoots) {
-    debug_print!("start");
+    debug_print!(GC, "start");
 
     (*heap).stats.on_collect();
     mark(heap, &external_roots);
@@ -19,23 +19,23 @@ pub(crate) unsafe fn collect(heap: *mut Heap, mut external_roots: impl ExternalR
 // Note that we do not actually use a worklist.
 // Instead, we use depth-first recursive traversal.
 unsafe fn mark(heap: *mut Heap, external_roots: &impl ExternalRoots) {
-    debug_print!("start mark");
+    debug_print!(GC, "start mark");
 
     let tracer = Tracer {
         _marker: PhantomData,
     };
 
-    debug_print!("trace external roots");
+    debug_print!(GC, "trace external roots");
     external_roots.trace(&tracer);
 
-    debug_print!("trace stack roots");
+    debug_print!(GC, "trace stack roots");
     RootList::iter((*heap).roots(), |root| {
         let ptr = (*root).ptr;
-        debug_print!("visit {:016x} ({})", ptr.into_raw().addr(), unsafe {
+        debug_print!(GC, "visit {:016x} ({})", ptr.into_raw().addr(), unsafe {
             ptr.vt().type_name
         });
         if ptr.is_marked() {
-            debug_print!("cycle");
+            debug_print!(GC, "cycle");
             return;
         }
         ptr.set_mark(true);
@@ -45,7 +45,7 @@ unsafe fn mark(heap: *mut Heap, external_roots: &impl ExternalRoots) {
         }
     });
 
-    debug_print!("end mark");
+    debug_print!(GC, "end mark");
 }
 
 // Sweep:
@@ -59,7 +59,7 @@ unsafe fn mark(heap: *mut Heap, external_roots: &impl ExternalRoots) {
 // - Store the last marked object `M`.
 // - Whenever an object is freed `F`, update the header of `M` to point to `F.next`
 unsafe fn sweep(heap: *mut Heap, external_roots: &mut impl ExternalRoots) {
-    debug_print!("start sweep");
+    debug_print!(GC, "start sweep");
 
     let mut iter = (*heap).head.get();
     let mut last_marked: Option<NonNull<GcHeader>> = None;
@@ -73,7 +73,12 @@ unsafe fn sweep(heap: *mut Heap, external_roots: &mut impl ExternalRoots) {
             GcHeader::set_mark(object, false);
             last_marked = Some(object);
 
-            debug_print!("live {:016x} ({})", object.as_ptr().addr(), vt.type_name);
+            debug_print!(
+                GC,
+                "live {:016x} ({})",
+                object.as_ptr().addr(),
+                vt.type_name
+            );
         } else {
             // unlink
             match last_marked {
@@ -81,7 +86,12 @@ unsafe fn sweep(heap: *mut Heap, external_roots: &mut impl ExternalRoots) {
                 None => (*heap).head.set(next),
             }
 
-            debug_print!("dead {:016x} ({})", object.as_ptr().addr(), vt.type_name);
+            debug_print!(
+                GC,
+                "dead {:016x} ({})",
+                object.as_ptr().addr(),
+                vt.type_name
+            );
 
             unsafe {
                 freed_bytes += (vt.free)(object.as_ptr().cast::<()>());
@@ -95,12 +105,12 @@ unsafe fn sweep(heap: *mut Heap, external_roots: &mut impl ExternalRoots) {
 
     (*heap).stats.on_free(freed_bytes);
 
-    debug_print!("end sweep");
+    debug_print!(GC, "end sweep");
 }
 
 // NOTE: This is called in `drop`, so we don't need to clear dead roots. They are inaccessible after this.
 pub(crate) unsafe fn free_all(heap: *mut Heap) {
-    debug_print!("drop");
+    debug_print!(GC, "drop");
 
     let mut iter = (*heap).head.get();
     let mut freed_bytes = 0usize;
@@ -108,7 +118,12 @@ pub(crate) unsafe fn free_all(heap: *mut Heap) {
     while let Some(object) = iter {
         let (next, vt, marked) = (*object.as_ptr()).into_parts();
 
-        debug_print!("free {:016x} ({})", object.as_ptr().addr(), vt.type_name);
+        debug_print!(
+            GC,
+            "free {:016x} ({})",
+            object.as_ptr().addr(),
+            vt.type_name
+        );
 
         unsafe {
             freed_bytes += (vt.free)(object.as_ptr().cast::<()>());

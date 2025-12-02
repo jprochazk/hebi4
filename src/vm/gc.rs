@@ -1,6 +1,13 @@
 //! Garbage collector
 
 macro_rules! debug_print {
+    (GC, $($tt:tt)*) => {{
+        #[cfg(debug_assertions)]
+        if option_env!("DEBUG_GC").is_some() {
+            eprint!("GC: ");
+            eprintln!($($tt)*);
+        }
+    }};
     ($($tt:tt)*) => {{
         #[cfg(debug_assertions)]
         if option_env!("DEBUG_VM").is_some() {
@@ -93,12 +100,13 @@ impl Heap {
         self.head.set(Some(ptr.cast::<GcHeader>()));
 
         debug_print!(
+            GC,
             "alloc {} bytes at {:016x} ({})",
             core::mem::size_of::<T>(),
             ptr.addr(),
             T::vtable().type_name,
         );
-        // debug_print!("TRACE: {}", std::backtrace::Backtrace::capture());
+        // debug_print!(GC, "TRACE: {}", std::backtrace::Backtrace::capture());
 
         self.stats.on_alloc(core::mem::size_of::<T>());
 
@@ -130,6 +138,7 @@ impl Heap {
         external_roots: impl ExternalRoots,
     ) {
         debug_print!(
+            GC,
             "collect with external roots at {}",
             std::panic::Location::caller()
         );
@@ -722,6 +731,7 @@ impl Tracer {
     #[inline]
     pub(crate) fn visit<T: Trace>(&self, ptr: GcPtr<T>) {
         debug_print!(
+            GC,
             "visit {:016x} ({})",
             unsafe { ptr.into_raw().as_ptr().addr() },
             T::vtable().type_name
@@ -729,7 +739,7 @@ impl Tracer {
 
         unsafe {
             if ptr.is_marked() {
-                debug_print!("cycle");
+                debug_print!(GC, "cycle");
                 return; // cycle
             }
             ptr.set_mark(true);
@@ -740,6 +750,7 @@ impl Tracer {
     #[inline]
     pub(crate) fn visit_any(&self, ptr: GcAnyPtr) {
         debug_print!(
+            GC,
             "visit {:016x} ({} as any)",
             unsafe { ptr.into_raw().as_ptr().addr() },
             unsafe { ptr.type_name() }
@@ -747,7 +758,7 @@ impl Tracer {
 
         unsafe {
             if ptr.is_marked() {
-                debug_print!("cycle");
+                debug_print!(GC, "cycle");
                 return; // cycle
             }
             ptr.set_mark(true);
@@ -761,7 +772,7 @@ impl Tracer {
         match value {
             ValueRaw::Object(ptr) => self.visit_any(ptr),
             ValueRaw::Nil | ValueRaw::Bool(_) | ValueRaw::Int(_) | ValueRaw::Float(_) => {
-                debug_print!("visit value ({})", unsafe { value.type_name() });
+                debug_print!(GC, "visit value ({})", unsafe { value.type_name() });
             }
         }
     }

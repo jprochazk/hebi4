@@ -19,16 +19,25 @@ struct CoreLibData {
     by_name: &'static LazyLock<HashMap<&'static str, HostId, FxBuildHasher>>,
 }
 
+macro_rules! _optional_name {
+    ($module:ident :: $name:ident as $_as:literal) => {
+        $_as
+    };
+    ($module:ident :: $name:ident) => {
+        stringify!($name)
+    };
+}
+
 macro_rules! functions {
-    ($($module:ident :: $name:ident),* $(,)?) => {{
+    ($($module:ident :: $name:ident $(as $_as:literal)?),* $(,)?) => {{
 
         static FUNCTIONS: LazyLock<Box<[CoreFunction]>> = LazyLock::new(|| {
             [$(
                 CoreFunction {
-                    name: stringify!($name),
+                    name: _optional_name!($module :: $name $(as $_as)?),
                     arity: $crate::module::native::arity_of(&$crate::core::$module::$name),
                     f: {
-                        fn _shim(
+                        fn $name(
                             cx: $crate::vm::value::host_function::Context<'_>,
                         ) -> $crate::error::Result<$crate::vm::value::ValueRaw> {
                             let f = $module::$name;
@@ -37,7 +46,7 @@ macro_rules! functions {
                             }
                         }
 
-                        _shim
+                        $name
                     },
                 },
             )*].into_iter().collect()
@@ -48,7 +57,10 @@ macro_rules! functions {
 
             let mut id = 0u16;
             $(
-                map.insert(stringify!($name), unsafe { HostId::new_unchecked(id) });
+                map.insert(
+                    _optional_name!($module :: $name $(as $_as)?),
+                    unsafe { HostId::new_unchecked(id) },
+                );
                 id += 1;
             )*
 
@@ -157,9 +169,11 @@ static CORE_LIB: CoreLibData = functions! {
     panic::panic,
     panic::assert,
     panic::assert_eq,
+    panic::r#try as "try",
     str::strip_prefix,
     str::starts_with,
     str::split_at,
     str::split,
     str::lines,
+    str::str_len,
 };
