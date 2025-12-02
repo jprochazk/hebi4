@@ -53,3 +53,19 @@ pub fn assert_eq(cx: Context, a: Value, b: Value) -> HebiResult<()> {
         _ => Err(error("assertion failed: type mismatch")),
     }
 }
+
+// TODO: return an actual Error object
+pub fn r#try<'a>(mut cx: Context<'a>, f: Value<'a>) -> HebiResult<Ret<'a>> {
+    let_root!(in &cx; callee);
+    let callee = f.root(&mut cx, callee);
+
+    let_root!(in &cx; ret);
+    match cx.call(&callee, (), ret) {
+        Ok(v) => cx.ret(v),
+        Err(err) => {
+            let_root!(in &cx; error_msg);
+            let error_msg = Str::new(&cx, error_msg, &err.to_string());
+            cx.ret(error_msg)
+        }
+    }
+}
