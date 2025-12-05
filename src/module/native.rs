@@ -85,10 +85,23 @@ macro_rules! __f {
                 $crate::module::native::__function_name($name),
                 $crate::module::native::arity_of_async(&$name),
                 ::std::rc::Rc::new({
-                    move |cx: $crate::value::host_function::Context| -> $crate::error::Result<$crate::value::ValueRaw> {
-                        ::stackful::wait(
-                            $crate::module::native::NativeAsyncFunctionCallback::call(&$name, cx)
-                        )
+                    move |cx: $crate::value::host_function::Context|
+                        -> $crate::error::Result<$crate::value::ValueRaw, ()>
+                    {
+                        let result = {
+                            let cx = cx.__unsafe_clone();
+                            ::stackful::wait(
+                                $crate::module::native::NativeAsyncFunctionCallback::call(&$name, cx)
+                            )
+                        };
+
+                        match result {
+                            Ok(value) => Ok(value),
+                            Err(err) => {
+                                cx.__write_error(err);
+                                Err($crate::vm::VmError::Host)
+                            }
+                        }
                     }
                 }),
             )
@@ -102,10 +115,23 @@ macro_rules! __f {
                 $name,
                 $crate::module::native::arity_of_async(&callback),
                 ::std::rc::Rc::new({
-                    move |cx: $crate::value::host_function::Context| -> $crate::error::Result<$crate::value::ValueRaw> {
-                        ::stackful::wait(
-                            $crate::module::native::NativeAsyncFunctionCallback::call(&callback, cx)
-                        )
+                    move |mut cx: $crate::value::host_function::Context|
+                        -> $crate::error::Result<$crate::value::ValueRaw, ()>
+                    {
+                        let result = {
+                            let cx = cx.__unsafe_clone();
+                            ::stackful::wait(
+                                $crate::module::native::NativeAsyncFunctionCallback::call(&callback, cx)
+                            )
+                        };
+
+                        match result {
+                            Ok(value) => Ok(value),
+                            Err(err) => {
+                                cx.__write_error(err);
+                                Err(())
+                            }
+                        }
                     }
                 }),
             )
@@ -118,8 +144,21 @@ macro_rules! __f {
                 $crate::module::native::__function_name($name),
                 $crate::module::native::arity_of(&$name),
                 ::std::rc::Rc::new({
-                    move |cx: $crate::value::host_function::Context| -> $crate::error::Result<$crate::value::ValueRaw> {
-                        $crate::module::native::NativeFunctionCallback::call(&$name, cx)
+                    move |mut cx: $crate::value::host_function::Context|
+                        -> $crate::error::Result<$crate::value::ValueRaw, ()>
+                    {
+                        let result = {
+                            let cx = cx.__unsafe_clone();
+                            $crate::module::native::NativeFunctionCallback::call(&$name, cx)
+                        };
+
+                        match result {
+                            Ok(value) => Ok(value),
+                            Err(err) => {
+                                cx.__write_error(err);
+                                Err(())
+                            }
+                        }
                     }
                 }),
             )
@@ -133,8 +172,21 @@ macro_rules! __f {
                 $name,
                 $crate::module::native::arity_of(&callback),
                 ::std::rc::Rc::new({
-                    move |cx: $crate::value::host_function::Context| -> $crate::error::Result<$crate::value::ValueRaw> {
-                        $crate::module::native::NativeFunctionCallback::call(&callback, cx)
+                    move |mut cx: $crate::value::host_function::Context|
+                        -> $crate::error::Result<$crate::value::ValueRaw, ()>
+                    {
+                        let result = {
+                            let cx = cx.__unsafe_clone();
+                            $crate::module::native::NativeFunctionCallback::call(&callback, cx)
+                        };
+
+                        match result {
+                            Ok(value) => Ok(value),
+                            Err(err) => {
+                                cx.__write_error(err);
+                                Err(())
+                            }
+                        }
                     }
                 })
             )
@@ -261,7 +313,7 @@ macro_rules! impl_native_function_callback {
                 );
 
                 let result = {
-                    let cx = cx.private_clone();
+                    let cx = cx.__unsafe_clone();
                     (self)(cx, $($T,)*)
                 };
 
@@ -312,7 +364,7 @@ macro_rules! impl_native_async_function_callback {
                 );
 
                 let result = {
-                    let cx = cx.private_clone();
+                    let cx = cx.__unsafe_clone();
                     (self)(cx, $($T,)*).await
                 };
 

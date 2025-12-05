@@ -1,0 +1,39 @@
+---
+source: src/vm/tests.rs
+expression: snapshot
+---
+SOURCE
+do {
+// Decimal (radix 10)
+assert_eq(to_digit(48, 10), 0)  // '0'
+assert_eq(to_digit(49, 10), 1)  // '1'
+assert_eq(to_digit(53, 10), 5)  // '5'
+assert_eq(to_digit(57, 10), 9)  // '9'
+
+// Hexadecimal (radix 16)
+assert_eq(to_digit(48, 16), 0)   // '0'
+assert_eq(to_digit(57, 16), 9)   // '9'
+assert_eq(to_digit(97, 16), 10)  // 'a'
+assert_eq(to_digit(98, 16), 11)  // 'b'
+assert_eq(to_digit(102, 16), 15) // 'f'
+assert_eq(to_digit(65, 16), 10)  // 'A'
+assert_eq(to_digit(70, 16), 15)  // 'F'
+
+// Binary (radix 2)
+assert_eq(to_digit(48, 2), 0) // '0'
+assert_eq(to_digit(49, 2), 1) // '1'
+
+// Octal (radix 8)
+assert_eq(to_digit(48, 8), 0) // '0'
+assert_eq(to_digit(55, 8), 7) // '7'
+
+// Base 36 (max radix)
+assert_eq(to_digit(48, 36), 0)  // '0'
+assert_eq(to_digit(57, 36), 9)  // '9'
+assert_eq(to_digit(97, 36), 10) // 'a'
+assert_eq(to_digit(122, 36), 35) // 'z'
+assert_eq(to_digit(90, 36), 35)  // 'Z'
+}
+
+OK
+Nil

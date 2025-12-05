@@ -498,6 +498,37 @@ impl Vm {
     // TODO: nicer error with stack trace
     #[inline]
     unsafe fn unwind(mut self) {
+        // #[cfg(debug_assertions)]
+        // if option_env!("PRINT_STACK_TRACE").is_some() {
+        //     eprintln!("===== begin trace ======");
+        //     for frame in self.call_frames().rev() {
+        //         let frame = CallFramePtr(frame);
+        //         let stack_size = frame.stack_size();
+        //         let stack_base = frame.stack_base();
+
+        //         let stack = self.stack_at(stack_base as usize);
+        //         eprintln!(
+        //             "[{name} ({kind})] stack: ",
+        //             name = frame.name().as_ref().as_str(),
+        //             kind = if frame.callee().is_host() {
+        //                 "host"
+        //             } else {
+        //                 "script"
+        //             }
+        //         );
+        //         for i in (0..stack_size).rev() {
+        //             let r = unsafe { Reg::new_unchecked(i) };
+        //             eprintln!(
+        //                 "{r} ({}) {:?}",
+        //                 stack_base + r.zx() as u32,
+        //                 (*stack.at(r)).as_ref()
+        //             );
+        //         }
+        //         eprintln!();
+        //     }
+        //     eprintln!("=====  end trace =====");
+        // }
+
         // The VM may have multiple host frames interleaved with
         // script frames. Only unwind script frames, and let the
         // host handle the error and pop its own frame.
@@ -508,37 +539,6 @@ impl Vm {
                 break;
             }
             new_len -= 1;
-        }
-
-        #[cfg(debug_assertions)]
-        if option_env!("PRINT_STACK_TRACE").is_some() {
-            eprintln!("===== begin trace ======");
-            for frame in self.call_frames().rev() {
-                let frame = CallFramePtr(frame);
-                let stack_size = frame.stack_size();
-                let stack_base = frame.stack_base();
-
-                let stack = self.stack_at(stack_base as usize);
-                eprintln!(
-                    "[{name} ({kind})] stack: ",
-                    name = frame.name().as_ref().as_str(),
-                    kind = if frame.callee().is_host() {
-                        "host"
-                    } else {
-                        "script"
-                    }
-                );
-                for i in (0..stack_size).rev() {
-                    let r = unsafe { Reg::new_unchecked(i) };
-                    eprintln!(
-                        "{r} ({}) {:?}",
-                        stack_base + r.zx() as u32,
-                        (*stack.at(r)).as_ref()
-                    );
-                }
-                eprintln!();
-            }
-            eprintln!("=====  end trace =====");
         }
 
         // At least the VM start frame should remain.
@@ -802,7 +802,7 @@ impl Control {
     }
 
     #[inline]
-    fn error(code: VmError) -> Control {
+    pub(crate) fn error(code: VmError) -> Control {
         Control(1 | ((code as u8) << 1))
     }
 
@@ -839,7 +839,7 @@ impl Control {
     }
 
     #[inline]
-    fn error(code: VmError) -> Control {
+    pub(crate) fn error(code: VmError) -> Control {
         Control::Error(code)
     }
 
@@ -2051,7 +2051,11 @@ unsafe fn hostcall(vm: Vm, ip: Ip, args: Hostcall, sp: Sp) -> Control {
     // Return addr points to the next instruction after the call instruction.
     let return_addr = 1 + ip.offset_from_unsigned(current_function_start) as u32;
 
-    do_host_call(callee, vm, sp, ip, ret, nargs, return_addr)
+    let Ok((sp, ip)) = do_host_call(vm, callee, ret, nargs, return_addr) else {
+        vm_exit!(vm, ip, Host);
+    };
+
+    dispatch_current(vm, ip, sp)
 }
 
 unsafe fn import(vm: Vm, ip: Ip, args: Import, sp: Sp) -> Control {
@@ -2165,7 +2169,11 @@ unsafe fn do_generic_call(
             return arity_mismatch_error(ip, vm);
         }
 
-        do_host_call(callee, vm, sp, ip, ret, nargs, return_addr)
+        let Ok((sp, ip)) = do_host_call(vm, callee, ret, nargs, return_addr) else {
+            vm_exit!(vm, ip, Host);
+        };
+
+        dispatch_current(vm, ip, sp)
     } else {
         not_callable_error(ip, vm)
     }
@@ -2219,17 +2227,15 @@ unsafe fn prepare_closure_call(
 /// Call a host function.
 ///
 /// This uses the native stack for the host function, which it invokes by function ptr.
-#[inline(always)]
+// DO NOT INLINE THIS FUNCTION
+#[inline(never)]
 unsafe fn do_host_call(
-    callee: GcPtr<HostFunction>,
-
     vm: Vm,
-    _sp: Sp,
-    ip: Ip,
+    callee: GcPtr<HostFunction>,
     ret: Reg,
     nargs: u8,
     return_addr: u32,
-) -> Control {
+) -> Result<(Sp, Ip), ()> {
     let stack_base = vm.current_frame().stack_base() + (ret.get() as u32);
     // NOTE: we don't need extra stack space for this call
     debug_assert!(
@@ -2238,8 +2244,9 @@ unsafe fn do_host_call(
     vm.push_frame(CallFrame::host(callee, stack_base, return_addr));
     let context = Context::new(vm, stack_base as usize, nargs);
 
-    let result = (callee.as_ref().f)(context);
+    let callback = &callee.as_ref().f;
 
+    let result = callback(context);
     match result {
         Ok(value) => {
             debug_assert!(
@@ -2252,7 +2259,7 @@ unsafe fn do_host_call(
                 vm.current_frame().name().as_ref().as_str(),
             );
 
-            let (sp, new_ip) = return_from_call(vm).unwrap_unchecked();
+            let (sp, ip) = return_from_call(vm).unwrap_unchecked();
 
             *sp.at(ret) = value;
 
@@ -2261,13 +2268,9 @@ unsafe fn do_host_call(
             // that something should be a script function:
             debug_assert!(vm.current_frame().callee().is_script());
 
-            dispatch_current(vm, new_ip, sp)
+            Ok((sp, ip))
         }
-        Err(err) => {
-            vm.set_saved_ip(ip);
-            vm.write_error(err);
-
-            vm.unwind();
+        Err(_) => {
             debug_assert!(
                 vm.current_frame()
                     .callee()
@@ -2277,11 +2280,16 @@ unsafe fn do_host_call(
                 callee.as_ref().name.as_ref().as_str(),
                 vm.current_frame().name().as_ref().as_str(),
             );
-            vm.pop_frame_unchecked();
 
-            Control::error(VmError::Host)
+            vm.pop_frame_unchecked();
+            Err(())
         }
     }
+}
+
+#[cold]
+unsafe fn host_error(vm: Vm, ip: Ip) -> Control {
+    vm_exit!(vm, ip, Host)
 }
 
 /// If the stack does not have enough space, grow it.

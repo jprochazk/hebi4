@@ -1,0 +1,24 @@
+// Basic byte_at tests
+assert_eq(byte_at("asdf", 0), 97)  // 'a'
+assert_eq(byte_at("asdf", 1), 115) // 's'
+assert_eq(byte_at("asdf", 2), 100) // 'd'
+assert_eq(byte_at("asdf", 3), 102) // 'f'
+
+// Single character
+assert_eq(byte_at("x", 0), 120) // 'x'
+
+// Various ASCII characters
+assert_eq(byte_at("Hello", 0), 72)  // 'H'
+assert_eq(byte_at("Hello", 4), 111) // 'o'
+assert_eq(byte_at("123", 0), 49)    // '1'
+assert_eq(byte_at("123", 2), 51)    // '3'
+
+// Negative indexing tests
+assert_eq(byte_at("asdf", -1), 102) // 'f' (last char)
+assert_eq(byte_at("asdf", -2), 100) // 'd' (second to last)
+assert_eq(byte_at("asdf", -3), 115) // 's'
+assert_eq(byte_at("asdf", -4), 97)  // 'a' (first char)
+
+// Negative indexing with various strings
+assert_eq(byte_at("Hello", -1), 111) // 'o'
+assert_eq(byte_at("Hello", -5), 72)  // 'H'

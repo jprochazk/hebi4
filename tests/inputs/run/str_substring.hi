@@ -1,0 +1,26 @@
+// Basic substring tests
+assert_eq(substr("hello world", 0, 5), "hello")
+assert_eq(substr("hello world", 6, 5), "world")
+assert_eq(substr("hello world", 0, 11), "hello world")
+
+// Zero length
+assert_eq(substr("hello", 0, 0), "")
+assert_eq(substr("hello", 3, 0), "")
+
+// Length extends beyond string
+assert_eq(substr("hello", 2, 100), "llo")
+assert_eq(substr("hello", 0, 100), "hello")
+
+// Start at end
+assert_eq(substr("hello", 5, 0), "")
+assert_eq(substr("hello", 5, 5), "")
+
+// Negative indexing tests
+assert_eq(substr("hello world", -5, 5), "world")
+assert_eq(substr("hello world", -5, 3), "wor")
+assert_eq(substr("hello world", -11, 5), "hello")
+assert_eq(substr("hello world", -1, 1), "d")
+
+// Negative index with length extending beyond
+assert_eq(substr("hello", -3, 100), "llo")
+assert_eq(substr("hello", -5, 100), "hello")

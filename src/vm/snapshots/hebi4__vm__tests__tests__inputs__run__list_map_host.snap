@@ -1,0 +1,26 @@
+---
+source: src/vm/tests.rs
+expression: snapshot
+---
+SOURCE
+do {
+let d2 = [[0,1,2], [3,4,5], [6,7,8]]
+
+map(d2, fn(row) { map(row, print) })
+
+nil
+}
+
+OK
+Nil
+
+STDOUT
+0
+1
+2
+3
+4
+5
+6
+7
+8

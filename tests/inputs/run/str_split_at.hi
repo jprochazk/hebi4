@@ -19,3 +19,9 @@ assert_eq_list(split_at("abcd", 1), ["a", "bcd"])
 assert_eq_list(split_at("abcd", 2), ["ab", "cd"])
 assert_eq_list(split_at("abcd", 3), ["abc", "d"])
 assert_eq_list(split_at("abcd", 4), ["abcd", ""])
+
+// Negative indexing tests
+assert_eq_list(split_at("abcd", -1), ["abc", "d"])
+assert_eq_list(split_at("abcd", -2), ["ab", "cd"])
+assert_eq_list(split_at("abcd", -3), ["a", "bcd"])
+assert_eq_list(split_at("abcd", -4), ["", "abcd"])

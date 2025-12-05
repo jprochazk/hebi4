@@ -1,6 +1,7 @@
 use std::{marker::PhantomData, rc::Rc};
 
 use crate::{
+    Error,
     codegen::opcodes::{Reg, Sp, Vm},
     error::{Result, error, error_span},
     gc::{GcRoot, GcUninitRoot, ValueRoot},
@@ -11,7 +12,7 @@ use crate::{
     span::Span,
     value::{Closure, Function},
     vm::{
-        CallFrame, Invariant, Stdio, dispatch_loop,
+        CallFrame, Invariant, Stdio, VmError, dispatch_loop,
         gc::{GcPtr, GcRef, Heap, Trace},
         maybe_grow_stack, prepare_call, prepare_closure_call,
         value::{Str, ValueRaw},
@@ -66,8 +67,9 @@ impl<'a> Context<'a> {
         self.sp().at(Reg::new_unchecked(i + 1)).read()
     }
 
+    #[doc(hidden)]
     #[inline]
-    pub(crate) fn private_clone(&self) -> Self {
+    pub unsafe fn __unsafe_clone(&self) -> Self {
         Self {
             vm: self.vm,
             stack_base: self.stack_base,
@@ -256,6 +258,7 @@ impl<'a> Context<'a> {
                                 .is_some_and(|c| { c.into_raw() == current_callee.into_raw() })
                         );
 
+                        let err = vm.take_error(VmError::Host);
                         return Err(err);
                     }
                 }
@@ -297,6 +300,12 @@ impl<'a> Context<'a> {
     pub fn stdio(&mut self) -> &mut Stdio {
         unsafe { &mut *self.vm.stdio() }
     }
+
+    #[doc(hidden)]
+    #[inline]
+    pub unsafe fn __write_error(&mut self, error: Error) {
+        unsafe { self.vm.write_error(error) }
+    }
 }
 
 impl std::ops::Deref for Context<'_> {
@@ -313,9 +322,10 @@ impl std::ops::DerefMut for Context<'_> {
     }
 }
 
-pub type HostFunctionCallback = Rc<dyn for<'a> Fn(Context<'a>) -> Result<ValueRaw> + 'static>;
+pub(crate) type HostFunctionCallback =
+    Rc<dyn for<'a> Fn(Context<'a>) -> Result<ValueRaw, ()> + 'static>;
 
-pub type HostFunctionCallbackRaw = for<'a> fn(Context<'a>) -> Result<ValueRaw>;
+pub(crate) type HostFunctionCallbackRaw = for<'a> fn(Context<'a>) -> Result<ValueRaw, ()>;
 
 pub struct HostFunction {
     pub(crate) name: GcPtr<Str>,

@@ -38,11 +38,20 @@ macro_rules! functions {
                     arity: $crate::module::native::arity_of(&$crate::core::$module::$name),
                     f: {
                         fn $name(
-                            cx: $crate::vm::value::host_function::Context<'_>,
-                        ) -> $crate::error::Result<$crate::vm::value::ValueRaw> {
+                            mut cx: $crate::value::host_function::Context<'_>,
+                        ) -> $crate::error::Result<$crate::value::ValueRaw, ()> {
                             let f = $module::$name;
-                            unsafe {
+                            let result = unsafe {
+                                let cx = cx.__unsafe_clone();
                                 $crate::module::native::NativeFunctionCallback::call(&f, cx)
+                            };
+
+                            match result {
+                                Ok(value) => Ok(value),
+                                Err(err) => {
+                                    unsafe { cx.__write_error(err); }
+                                    Err(())
+                                }
                             }
                         }
 
@@ -158,13 +167,14 @@ static CORE_LIB: CoreLibData = functions! {
     list::map,
     list::append,
     list::list_len,
-    // math::powi,
-    // math::powf,
+    math::powi,
+    math::powf,
     convert::to_str,
     convert::to_int,
     convert::to_float,
     convert::parse_int,
     convert::parse_float,
+    convert::to_digit,
     convert::type_name,
     panic::panic,
     panic::assert,
@@ -173,7 +183,11 @@ static CORE_LIB: CoreLibData = functions! {
     str::strip_prefix,
     str::starts_with,
     str::split_at,
+    str::substr,
     str::split,
     str::lines,
     str::str_len,
+    str::trim,
+    str::byte_at,
+    str::bytes,
 };

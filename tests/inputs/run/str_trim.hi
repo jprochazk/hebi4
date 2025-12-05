@@ -1,0 +1,3 @@
+assert_eq(trim("\n\n\r\tasdf\t\n"), "asdf")
+assert_eq(trim("\n\n\r\tasdf"), "asdf")
+assert_eq(trim("asdf\t\n"), "asdf")

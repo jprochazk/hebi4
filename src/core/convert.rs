@@ -63,3 +63,22 @@ pub fn type_name<'a>(cx: Context<'a>, v: Value<'a>) -> &'static str {
 
     v.type_name()
 }
+
+/// Converts an ASCII character byte to a digit in the specified radix.
+/// Similar to Rust's `char::to_digit`.
+/// Radix must be in range 2-36.
+pub fn to_digit(byte: i64, radix: i64) -> HebiResult<i64> {
+    if radix < 2 || radix > 36 {
+        return Err(error("radix must be in range 2-36"));
+    }
+
+    if byte < 0 || byte > 255 {
+        return Err(error("byte out of range"));
+    }
+
+    let ch = byte as u8 as char;
+    match ch.to_digit(radix as u32) {
+        Some(digit) => Ok(digit as i64),
+        None => Err(error("invalid digit for radix")),
+    }
+}

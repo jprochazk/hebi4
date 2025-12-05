@@ -1,5 +1,24 @@
 use crate::{prelude::*, value::ValueRaw};
 
+/// Normalizes an index by handling negative indexing and checking bounds.
+/// If `allow_end` is true, allows index == len (useful for split_at and substring start).
+/// If `allow_end` is false, only allows index < len (useful for byte_at).
+#[inline]
+fn normalize_index(index: i64, len: usize, allow_end: bool) -> HebiResult<usize> {
+    let len_i64 = len as i64;
+
+    // Handle negative indexing
+    let normalized = if index < 0 { len_i64 + index } else { index };
+
+    // Check bounds
+    let max = if allow_end { len_i64 } else { len_i64 - 1 };
+    if normalized < 0 || normalized > max {
+        return Err(error("index out of bounds"));
+    }
+
+    Ok(normalized as usize)
+}
+
 pub fn starts_with<'a>(cx: Context<'a>, str: Param<'a, Str>, with: Param<'a, Str>) -> bool {
     str.as_ref(&cx)
         .as_str()
@@ -29,7 +48,9 @@ pub fn strip_prefix<'a>(
 
 pub fn split_at<'a>(mut cx: Context<'a>, str: Param<'a, Str>, at: i64) -> HebiResult<Ret<'a>> {
     let str = str.as_ref(&cx);
-    let (first, last) = match str.as_str().split_at_checked(at as usize) {
+    let at = normalize_index(at, str.len(), true)?;
+
+    let (first, last) = match str.as_str().split_at_checked(at) {
         Some(v) => v,
         None => return Err(error("index out of bounds")),
     };
@@ -53,14 +74,22 @@ pub fn split_at<'a>(mut cx: Context<'a>, str: Param<'a, Str>, at: i64) -> HebiRe
     cx.ret(out)
 }
 
-// pub fn substring<'a>(
-//     cx: Context<'a>,
-//     str: Param<'a, Str>,
-//     at: i64,
-//     len: i64,
-// ) -> HebiResult<Ret<'a>> {
-//     todo!()
-// }
+pub fn substr<'a>(cx: Context<'a>, str: Param<'a, Str>, at: i64, len: i64) -> HebiResult<Ret<'a>> {
+    let str_ref = str.as_ref(&cx);
+
+    if len < 0 {
+        return Err(error("length cannot be negative"));
+    }
+
+    let start = normalize_index(at, str_ref.len(), true)?;
+    let end = (start + len as usize).min(str_ref.len());
+
+    let substring = &str_ref.as_str()[start..end];
+
+    let_root!(in &cx; out);
+    let out = Str::new(&cx, out, substring);
+    cx.ret(out)
+}
 
 pub fn split<'a>(
     mut cx: Context<'a>,
@@ -189,4 +218,33 @@ pub fn lines<'a>(mut cx: Context<'a>, str: Param<'a, Str>) -> HebiResult<Ret<'a>
 
 pub fn str_len(cx: Context, str: Param<Str>) -> i64 {
     str.as_ref(&cx).len() as i64
+}
+
+pub fn trim<'a>(cx: Context<'a>, str: Param<'a, Str>) -> HebiResult<Ret<'a>> {
+    let_root!(in &cx; out);
+    let out = Str::new(&cx, out, str.as_ref(&cx).trim());
+    cx.ret(out)
+}
+
+pub fn byte_at(cx: Context, str: Param<Str>, at: i64) -> HebiResult<i64> {
+    let str_ref = str.as_ref(&cx);
+    let index = normalize_index(at, str_ref.len(), false)?;
+    let byte = str_ref.as_str().as_bytes()[index];
+    Ok(byte as i64)
+}
+
+pub fn bytes<'a>(mut cx: Context<'a>, str: Param<'a, Str>) -> HebiResult<Ret<'a>> {
+    let len = str.as_ref(&cx).len();
+
+    let_root!(in &cx; out);
+    let out = List::new(&cx, out, 0);
+
+    for i in 0..len {
+        let byte = str.as_ref(&cx).as_str().as_bytes()[i];
+        unsafe {
+            out.as_mut(&mut cx).push_raw(ValueRaw::Int(byte as i64));
+        }
+    }
+
+    cx.ret(out)
 }

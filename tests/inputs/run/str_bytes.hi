@@ -1,0 +1,39 @@
+
+let text = "hello"
+let bytes_list = bytes(text)
+let expected = [104, 101, 108, 108, 111]
+
+print(bytes_list)
+print(expected)
+
+let len = list_len(bytes_list)
+assert_eq(len, list_len(expected))
+
+let i = 0
+loop {
+  if i == len {
+    break
+  }
+
+  assert_eq(bytes_list[i], expected[i])
+
+  i += 1
+}
+
+// Test with special characters
+let text2 = "a\n\r"
+let bytes2 = bytes(text2)
+let expected2 = [97, 10, 13]
+
+assert_eq(list_len(bytes2), list_len(expected2))
+
+let i = 0
+loop {
+  if i == list_len(expected2) {
+    break
+  }
+
+  assert_eq(bytes2[i], expected2[i])
+
+  i += 1
+}
