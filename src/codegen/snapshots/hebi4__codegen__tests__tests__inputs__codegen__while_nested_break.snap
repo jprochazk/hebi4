@@ -1,0 +1,45 @@
+---
+source: src/codegen/tests.rs
+expression: snapshot
+---
+SOURCE
+do {
+//
+while true {
+  let i = 0
+  while i < 5 {
+    let j = 1
+    break
+    let k = 2
+  }
+  break
+  let m = 3
+}
+}
+
+OK
+.fn @main
+  params 0
+  stack 4
+  .locals
+    i = r1
+    j = r2
+    k = r3
+    m = r2
+  .code
+   0  ltrue r1
+   1  istrue r1
+   2  jmp 12   ; to 14
+   3  lsmi r1, 0
+   4  lsmi r3, 5
+   5  islt r1, r3
+   6  jmp 5   ; to 11
+   7  lsmi r2, 1
+   8  jmp 3   ; to 11
+   9  lsmi r3, 2
+  10  jmp -6   ; to 4
+  11  jmp 3   ; to 14
+  12  lsmi r2, 3
+  13  jmp -13   ; to 0
+  14  lnil r0
+  15  ret

@@ -209,6 +209,7 @@ macro_rules! t {
     (fn) => ($crate::token::TokenKind::Fn);
     (do) => ($crate::token::TokenKind::Do);
     (loop) => ($crate::token::TokenKind::Loop);
+    (while) => ($crate::token::TokenKind::While);
     (return) => ($crate::token::TokenKind::Return);
     (break) => ($crate::token::TokenKind::Break);
     (continue) => ($crate::token::TokenKind::Continue);
@@ -343,6 +344,8 @@ pub enum TokenKind {
     Do,
     #[token("loop")]
     Loop,
+    #[token("while")]
+    While,
     #[token("return")]
     Return,
     #[token("break")]
@@ -456,6 +459,7 @@ impl TokenKind {
             TokenKind::Fn => "fn",
             TokenKind::Do => "do",
             TokenKind::Loop => "loop",
+            TokenKind::While => "while",
             TokenKind::Return => "return",
             TokenKind::Break => "break",
             TokenKind::Continue => "continue",

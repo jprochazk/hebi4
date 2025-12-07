@@ -1,0 +1,7 @@
+//
+let x = 5
+let y = 0
+while x > 0 or y < 5 {
+  x = x - 1
+  y = y + 1
+}

@@ -1749,6 +1749,7 @@ fn emit_stmt<'a>(m: &mut State<'a>, stmt: Node<'a, Stmt>, span: Span) -> Result<
     match stmt.kind() {
         ast::StmtKind::Var(node) => emit_stmt_var(m, node)?,
         ast::StmtKind::Loop(node) => emit_stmt_loop(m, node)?,
+        ast::StmtKind::While(node) => emit_stmt_while(m, node)?,
         ast::StmtKind::FuncDecl(node) => emit_stmt_func(m, node)?,
         ast::StmtKind::StmtExpr(node) => emit_stmt_expr(m, node, span)?,
         ast::StmtKind::Import(node) => emit_stmt_import(m, Import::Named(node), span)?,
@@ -1807,6 +1808,49 @@ fn emit_stmt_loop<'a>(m: &mut State<'a>, loop_: Node<'a, ast::Loop>) -> Result<(
 
     // unconditional jump back to start
     let span = loop_.body_spans().last().copied().unwrap_or_default();
+    let pos = f!(&m).code.len();
+    let rel = f!(&m)
+        .loop_
+        .as_ref()
+        .expect("some loop")
+        .entry
+        .offset(pos, span)?;
+    m.emit(asm::jmp(rel), span);
+
+    m.end_loop(prev_loop)?;
+
+    Ok(())
+}
+
+fn emit_stmt_while<'a>(m: &mut State<'a>, while_: Node<'a, ast::While>) -> Result<()> {
+    let prev_loop = m.begin_loop();
+
+    let mut loop_ = f!(m).loop_.take().expect("some loop");
+
+    let mut targets = BranchTargets {
+        next: loop_.exit,
+        body: ForwardLabel::new(m.buf),
+    };
+
+    let tmp = fresh_reg(m, while_.cond_span())?;
+    emit_if_cond(m, while_.cond(), while_.cond_span(), tmp, &mut targets)?;
+    emit_forward_jmp(m, while_.cond_span(), &mut targets.next);
+    free_reg(m, tmp);
+
+    targets.body.bind(f!(m))?;
+
+    loop_.exit = targets.next;
+    f!(m).loop_ = Some(loop_);
+
+    m.begin_scope();
+    emit_stmt_list(m, while_.body())?;
+    m.end_scope();
+
+    let span = while_
+        .body_spans()
+        .last()
+        .copied()
+        .unwrap_or(while_.cond_span());
     let pos = f!(&m).code.len();
     let rel = f!(&m)
         .loop_

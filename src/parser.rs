@@ -166,6 +166,7 @@ fn parse_stmt(p: &mut State, buf: &Bump) -> Result<Spanned<Stmt>> {
         t![let] => parse_stmt_var(p, buf),
         t![fn] => parse_stmt_func_decl(p, buf),
         t![loop] => parse_stmt_loop(p, buf),
+        t![while] => parse_stmt_while(p, buf),
         t![import] => parse_stmt_import(p, buf),
         _ => parse_stmt_expr(p, buf),
     }
@@ -213,6 +214,20 @@ fn parse_stmt_loop(p: &mut State, buf: &Bump) -> Result<Spanned<Stmt>> {
     p.loop_depth -= 1;
 
     Ok(p.close(node, Loop { body }).map_into())
+}
+
+fn parse_stmt_while(p: &mut State, buf: &Bump) -> Result<Spanned<Stmt>> {
+    let node = p.open_at(t![while])?;
+
+    p.loop_depth += 1;
+
+    let cond = parse_expr(p, buf)?;
+    let body = parse_bare_block(p, buf)?;
+    let body = body.as_slice();
+
+    p.loop_depth -= 1;
+
+    Ok(p.close(node, While { cond, body }).map_into())
 }
 
 /// - `"import" IDENT`

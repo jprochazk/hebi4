@@ -1,0 +1,27 @@
+---
+source: src/codegen/tests.rs
+expression: snapshot
+---
+SOURCE
+do {
+//
+let i = 0
+while i == 0 {
+  i = i + 1
+}
+}
+
+OK
+.fn @main
+  params 0
+  stack 3
+  .locals
+    i = r1
+  .code
+  0  lsmi r1, 0
+  1  iseqi r1, 0
+  2  jmp 3   ; to 5
+  3  add r1, r1, 1
+  4  jmp -3   ; to 1
+  5  lnil r0
+  6  ret

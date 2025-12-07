@@ -1,0 +1,11 @@
+//
+while true {
+  let i = 0
+  while i < 5 {
+    let j = 1
+    break
+    let k = 2
+  }
+  break
+  let m = 3
+}

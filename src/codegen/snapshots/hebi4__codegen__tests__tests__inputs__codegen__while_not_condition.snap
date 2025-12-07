@@ -1,0 +1,27 @@
+---
+source: src/codegen/tests.rs
+expression: snapshot
+---
+SOURCE
+do {
+//
+let done = false
+while not done {
+  done = true
+}
+}
+
+OK
+.fn @main
+  params 0
+  stack 3
+  .locals
+    done = r1
+  .code
+  0  lfalse r1
+  1  isfalse r1
+  2  jmp 3   ; to 5
+  3  ltrue r1
+  4  jmp -3   ; to 1
+  5  lnil r0
+  6  ret

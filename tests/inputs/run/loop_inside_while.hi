@@ -1,0 +1,14 @@
+let total = 0
+let i = 0
+while i < 2 {
+  let j = 0
+  loop {
+    total = total + 1
+    j = j + 1
+    if j >= 3 {
+      break
+    }
+  }
+  i = i + 1
+}
+total

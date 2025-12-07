@@ -1,0 +1,19 @@
+---
+source: src/vm/tests.rs
+expression: snapshot
+---
+SOURCE
+do {
+let x = 5
+let y = 10
+let count = 0
+while x > 0 and y < 20 {
+  count = count + 1
+  x = x - 1
+  y = y + 1
+}
+count
+}
+
+OK
+Int(5)

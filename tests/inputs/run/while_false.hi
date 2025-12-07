@@ -1,0 +1,5 @@
+let ran = false
+while false {
+  ran = true
+}
+ran

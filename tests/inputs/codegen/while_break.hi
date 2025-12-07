@@ -1,0 +1,6 @@
+//
+while true {
+  let i = 0
+  break
+  let j = 1
+}

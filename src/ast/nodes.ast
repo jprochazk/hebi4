@@ -8,6 +8,11 @@ stmt loop {
     body: [stmt],
 };
 
+stmt while {
+    cond: expr,
+    body: [stmt],
+};
+
 stmt func_decl {
     name: ident,
     body: block,
