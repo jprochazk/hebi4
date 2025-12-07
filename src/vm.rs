@@ -241,8 +241,7 @@ impl CallFrame {
 use tagged_callee_ptr::TaggedCalleePtr;
 mod tagged_callee_ptr {
     use super::*;
-    use crate::gc::GcBox;
-    use crate::tag::TaggedPtr;
+    use crate::{gc::GcBox, tag::TaggedPtr};
 
     #[derive(Clone, Copy)]
     #[repr(transparent)]
