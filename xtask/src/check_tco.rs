@@ -4,31 +4,56 @@ use super::*;
 
 const JUMP_TABLE_PREFIX: &str = "hebi4::vm::JT::";
 const TCO_EXCEPTIONS: &[&str] = &[
-    // `stop` mean stop, so it shouldn't tail call anything else.
+    // `stop` mean stop, so it should return, not tail-call
     "::stop",
-    // host calls use the machine stack, which is fine.
-    "::hostcall",
 ];
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Arch {
+    X86_64,
+    Aarch64,
+}
+
+fn detect_arch() -> Arch {
+    if cfg!(target_arch = "x86_64") {
+        Arch::X86_64
+    } else if cfg!(target_arch = "aarch64") {
+        Arch::Aarch64
+    } else {
+        panic!("Unsupported architecture")
+    }
+}
 
 pub fn disasm() {
     let c = cargo("build").with_args(["--release", "--package=hebi4-cli", "--bin=hebi4"]);
     c.run();
 
-    let c = cmd(
-        "objdump -C --no-addresses --no-show-raw-insn -j .text -M intel -d target/release/hebi4",
-    );
+    let arch = detect_arch();
+    let objdump_cmd = match arch {
+        Arch::X86_64 => {
+            "objdump -C --no-addresses --no-show-raw-insn -j .text -M intel -d target/release/hebi4"
+        }
+        Arch::Aarch64 => "objdump -C --no-addresses --no-show-raw-insn -d target/release/hebi4",
+    };
+    let c = cmd(objdump_cmd);
     c.run();
 }
 
 pub fn check_tco() {
+    let arch = detect_arch();
+
     let o = {
         let c = cargo("build").with_args(["--release", "--package=hebi4-cli", "--bin=hebi4"]);
         println!("> {c:?}");
         c.run();
 
-        let c = cmd(
-            "objdump -C --no-addresses --no-show-raw-insn -j .text -M intel -d target/release/hebi4",
-        );
+        let objdump_cmd = match arch {
+            Arch::X86_64 => {
+                "objdump -C --no-addresses --no-show-raw-insn -j .text -M intel -d target/release/hebi4"
+            }
+            Arch::Aarch64 => "objdump -C --no-addresses --no-show-raw-insn -d target/release/hebi4",
+        };
+        let c = cmd(objdump_cmd);
         println!("> {c:?}");
 
         c.output_utf8()
@@ -39,11 +64,20 @@ pub fn check_tco() {
     let mut jt = BTreeSet::new();
     let mut missing_tco = Vec::new();
     for section in parse_sections(&o, JUMP_TABLE_PREFIX) {
-        jt.insert(section.name.strip_prefix(JUMP_TABLE_PREFIX).unwrap());
+        let name_without_prefix = section.name.strip_prefix(JUMP_TABLE_PREFIX).unwrap();
+        // on arm these are additionally hashed
+        let opcode_name = name_without_prefix
+            .split_once("::")
+            .map(|(name, _)| name)
+            .unwrap_or(name_without_prefix);
+        jt.insert(opcode_name);
 
-        if !has_tail_call(&section) {
+        if !has_tail_call(&section, arch) {
             // this one is allowed to have no tail-call jump
-            if TCO_EXCEPTIONS.iter().any(|ex| section.name.ends_with(ex)) {
+            if TCO_EXCEPTIONS
+                .iter()
+                .any(|ex| ex.starts_with("::") && opcode_name == &ex[2..])
+            {
                 continue;
             }
             missing_tco.push(section.name.to_string());
@@ -90,48 +124,154 @@ pub fn check_tco() {
     }
 }
 
-fn is_register(s: &str) -> bool {
-    match s {
-        "rax" | "rbx" | "rcx" | "rdx" | "rsi" | "rdi" | "rbp" | "rsp" | "r8" | "r9" | "r10"
-        | "r11" | "r12" | "r13" | "r14" | "r15" => true,
-        _ => false,
+fn is_register(s: &str, arch: Arch) -> bool {
+    match arch {
+        Arch::X86_64 => matches!(
+            s,
+            "rax"
+                | "rbx"
+                | "rcx"
+                | "rdx"
+                | "rsi"
+                | "rdi"
+                | "rbp"
+                | "rsp"
+                | "r8"
+                | "r9"
+                | "r10"
+                | "r11"
+                | "r12"
+                | "r13"
+                | "r14"
+                | "r15"
+        ),
+        Arch::Aarch64 => {
+            // ARM64 registers: x0-x30, w0-w30, sp, lr, etc.
+            matches!(
+                s,
+                "x0" | "x1"
+                    | "x2"
+                    | "x3"
+                    | "x4"
+                    | "x5"
+                    | "x6"
+                    | "x7"
+                    | "x8"
+                    | "x9"
+                    | "x10"
+                    | "x11"
+                    | "x12"
+                    | "x13"
+                    | "x14"
+                    | "x15"
+                    | "x16"
+                    | "x17"
+                    | "x18"
+                    | "x19"
+                    | "x20"
+                    | "x21"
+                    | "x22"
+                    | "x23"
+                    | "x24"
+                    | "x25"
+                    | "x26"
+                    | "x27"
+                    | "x28"
+                    | "x29"
+                    | "x30"
+                    | "w0"
+                    | "w1"
+                    | "w2"
+                    | "w3"
+                    | "w4"
+                    | "w5"
+                    | "w6"
+                    | "w7"
+                    | "w8"
+                    | "w9"
+                    | "w10"
+                    | "w11"
+                    | "w12"
+                    | "w13"
+                    | "w14"
+                    | "w15"
+                    | "w16"
+                    | "w17"
+                    | "w18"
+                    | "w19"
+                    | "w20"
+                    | "w21"
+                    | "w22"
+                    | "w23"
+                    | "w24"
+                    | "w25"
+                    | "w26"
+                    | "w27"
+                    | "w28"
+                    | "w29"
+                    | "w30"
+                    | "sp"
+                    | "lr"
+            )
+        }
     }
 }
 
-fn has_tail_call(section: &Section) -> bool {
-    for ins in &section.code {
-        if ins.op == "jmp" {
-            let a = ins.args.trim();
-            if a.is_empty() {
-                continue;
-            }
+fn has_tail_call(section: &Section, arch: Arch) -> bool {
+    match arch {
+        Arch::X86_64 => {
+            for ins in &section.code {
+                if ins.op == "jmp" {
+                    let a = ins.args.trim();
+                    if a.is_empty() {
+                        continue;
+                    }
 
-            // Check for direct register jump: `jmp rax`
-            if !a.contains('[') && !a.contains(']') {
-                let first_arg = a.split_whitespace().next().unwrap_or("");
-                if is_register(first_arg) {
-                    return true;
+                    // Check for direct register jump: `jmp rax`
+                    if !a.contains('[') && !a.contains(']') {
+                        let first_arg = a.split_whitespace().next().unwrap_or("");
+                        if is_register(first_arg, arch) {
+                            return true;
+                        }
+                    }
+
+                    // Check for indirect memory jump with register: `jmp QWORD PTR [rsi+rax*8]`
+                    // Must contain a register to be a computed jump, not a static address
+                    if let Some(start) = a.find('[') {
+                        if let Some(end) = a.find(']') {
+                            let addr_expr = &a[start + 1..end];
+                            // Check if any register is used in the address expression
+                            if addr_expr
+                                .split(|c: char| !c.is_alphanumeric())
+                                .any(|part| is_register(part, arch))
+                            {
+                                return true;
+                            }
+                        }
+                    }
                 }
             }
+            false
+        }
+        Arch::Aarch64 => {
+            for ins in &section.code {
+                // ARM64 uses `br` for indirect branch (tail call)
+                if ins.op == "br" {
+                    let a = ins.args.trim();
+                    if a.is_empty() {
+                        continue;
+                    }
 
-            // Check for indirect memory jump with register: `jmp QWORD PTR [rsi+rax*8]`
-            // Must contain a register to be a computed jump, not a static address
-            if let Some(start) = a.find('[') {
-                if let Some(end) = a.find(']') {
-                    let addr_expr = &a[start + 1..end];
-                    // Check if any register is used in the address expression
-                    if addr_expr
-                        .split(|c: char| !c.is_alphanumeric())
-                        .any(|part| is_register(part))
-                    {
+                    // Check for register branch: `br x4`
+                    let first_arg = a.split_whitespace().next().unwrap_or("");
+                    if is_register(first_arg, arch) {
                         return true;
                     }
                 }
             }
+            false
         }
     }
-
-    false
 }
 
 fn opcodes(src: &str) -> impl Iterator<Item = &str> {
@@ -184,8 +324,16 @@ struct Instruction<'a> {
 //   ...
 //
 fn parse_sections<'a>(o: &'a str, filter_prefix: &str) -> impl Iterator<Item = Section<'a>> {
-    let (_, text) = o.split_once(".text:").unwrap();
-    let mut c = text.as_bytes();
+    // On x86_64 Linux/ELF: ".text:"
+    // On ARM64 macOS/Mach-O: "__TEXT,__text:"
+    let text_section = if let Some((_, text)) = o.split_once(".text:") {
+        text
+    } else if let Some((_, text)) = o.split_once("__TEXT,__text:") {
+        text
+    } else {
+        panic!("Could not find .text or __TEXT,__text section in objdump output");
+    };
+    let mut c = text_section.as_bytes();
 
     core::iter::from_fn(move || {
         let c = &mut c;
@@ -223,7 +371,10 @@ fn parse_op<'a>(c: &mut &'a [u8]) -> Option<Instruction<'a>> {
     }
     let line = line.trim();
 
-    let (op, rest) = line.split_once(' ').unwrap_or((line, ""));
+    // Split on any whitespace (tab or space), not just space
+    let mut parts = line.splitn(2, |c: char| c.is_whitespace());
+    let op = parts.next().unwrap_or("");
+    let rest = parts.next().unwrap_or("");
     let (args, _) = rest.split_once('#').unwrap_or((rest, ""));
 
     Some(Instruction {
