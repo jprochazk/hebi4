@@ -1,0 +1,4 @@
+//parse
+for v in iter {}
+for v in [] {}
+for v in do { [] } {}

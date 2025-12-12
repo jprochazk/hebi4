@@ -96,6 +96,15 @@ pub enum PrefixOp {
     Not,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum RangeKind {
+    // a..=b
+    Inclusive,
+    // a..b
+    Exclusive,
+}
+
 macro_rules! roundtrip_u24_op {
     ($T:ident) => {
         impl $T {
@@ -179,6 +188,7 @@ impl std::ops::Rem<f64n> for f64n {
 roundtrip_u24_op!(AssignOp);
 roundtrip_u24_op!(InfixOp);
 roundtrip_u24_op!(PrefixOp);
+roundtrip_u24_op!(RangeKind);
 
 declare_intern_id!(pub StrId);
 declare_intern_id!(pub IdentId);
@@ -360,6 +370,7 @@ delegate_value_debug!(bool);
 delegate_value_debug!(InfixOp);
 delegate_value_debug!(PrefixOp);
 delegate_value_debug!(AssignOp);
+delegate_value_debug!(RangeKind);
 
 impl std::fmt::Debug for Packed {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

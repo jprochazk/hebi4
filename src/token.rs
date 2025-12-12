@@ -210,6 +210,8 @@ macro_rules! t {
     (do) => ($crate::token::TokenKind::Do);
     (loop) => ($crate::token::TokenKind::Loop);
     (while) => ($crate::token::TokenKind::While);
+    (for) => ($crate::token::TokenKind::For);
+    (in) => ($crate::token::TokenKind::In);
     (return) => ($crate::token::TokenKind::Return);
     (break) => ($crate::token::TokenKind::Break);
     (continue) => ($crate::token::TokenKind::Continue);
@@ -228,6 +230,8 @@ macro_rules! t {
     (,) => ($crate::token::TokenKind::Comma);
     (:) => ($crate::token::TokenKind::Colon);
     (=) => ($crate::token::TokenKind::Eq);
+    (..) => ($crate::token::TokenKind::DotDot);
+    (..=) => ($crate::token::TokenKind::DotDotEq);
     (+=) => ($crate::token::TokenKind::PlusEq);
     (-=) => ($crate::token::TokenKind::MinusEq);
     (*=) => ($crate::token::TokenKind::StarEq);
@@ -346,6 +350,10 @@ pub enum TokenKind {
     Loop,
     #[token("while")]
     While,
+    #[token("for")]
+    For,
+    #[token("in")]
+    In,
     #[token("return")]
     Return,
     #[token("break")]
@@ -377,6 +385,10 @@ pub enum TokenKind {
     BracketR,
     #[token(".")]
     Dot,
+    #[token("..")]
+    DotDot,
+    #[token("..=")]
+    DotDotEq,
     #[token(",")]
     Comma,
     #[token(":")]
@@ -460,6 +472,8 @@ impl TokenKind {
             TokenKind::Do => "do",
             TokenKind::Loop => "loop",
             TokenKind::While => "while",
+            TokenKind::For => "for",
+            TokenKind::In => "in",
             TokenKind::Return => "return",
             TokenKind::Break => "break",
             TokenKind::Continue => "continue",
@@ -475,6 +489,8 @@ impl TokenKind {
             TokenKind::BracketL => "[",
             TokenKind::BracketR => "]",
             TokenKind::Dot => ".",
+            TokenKind::DotDot => "..",
+            TokenKind::DotDotEq => "..=",
             TokenKind::Comma => ",",
             TokenKind::Colon => ":",
             TokenKind::Eq => "=",

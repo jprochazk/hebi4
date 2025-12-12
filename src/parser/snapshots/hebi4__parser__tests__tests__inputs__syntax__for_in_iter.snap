@@ -1,0 +1,50 @@
+---
+source: src/parser/tests.rs
+expression: snapshot
+---
+SOURCE
+//parse
+for v in iter {}
+for v in [] {}
+for v in do { [] } {}
+
+OK
+Root(
+    [
+        ForIn(
+            Ident(
+                "v",
+            ),
+            GetVar(
+                Ident(
+                    "iter",
+                ),
+            ),
+            [],
+        ),
+        ForIn(
+            Ident(
+                "v",
+            ),
+            List(
+                [],
+            ),
+            [],
+        ),
+        ForIn(
+            Ident(
+                "v",
+            ),
+            Block(
+                [
+                    StmtExpr(
+                        List(
+                            [],
+                        ),
+                    ),
+                ],
+            ),
+            [],
+        ),
+    ],
+)

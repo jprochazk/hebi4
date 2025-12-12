@@ -7,7 +7,8 @@ use bumpalo::{
 
 use crate::{
     ast::{
-        self, AssignOp, Ast, Expr, InfixOp, NodeKind, Opt, Pack, Packed, PrefixOp, Stmt, spanned::*,
+        self, AssignOp, Ast, Expr, InfixOp, NodeKind, Opt, Pack, Packed, PrefixOp, RangeKind, Stmt,
+        spanned::*,
     },
     error::{Result, error_span},
     span::{Span, Spanned},
@@ -167,6 +168,7 @@ fn parse_stmt(p: &mut State, buf: &Bump) -> Result<Spanned<Stmt>> {
         t![fn] => parse_stmt_func_decl(p, buf),
         t![loop] => parse_stmt_loop(p, buf),
         t![while] => parse_stmt_while(p, buf),
+        t![for] => parse_stmt_for(p, buf),
         t![import] => parse_stmt_import(p, buf),
         _ => parse_stmt_expr(p, buf),
     }
@@ -219,15 +221,34 @@ fn parse_stmt_loop(p: &mut State, buf: &Bump) -> Result<Spanned<Stmt>> {
 fn parse_stmt_while(p: &mut State, buf: &Bump) -> Result<Spanned<Stmt>> {
     let node = p.open_at(t![while])?;
 
+    let cond = parse_expr(p, buf)?;
+
     p.loop_depth += 1;
 
-    let cond = parse_expr(p, buf)?;
     let body = parse_bare_block(p, buf)?;
     let body = body.as_slice();
 
     p.loop_depth -= 1;
 
     Ok(p.close(node, While { cond, body }).map_into())
+}
+
+/// - "for" IDENT "in" EXPR BLOCK
+fn parse_stmt_for(p: &mut State, buf: &Bump) -> Result<Spanned<Stmt>> {
+    let node = p.open_at(t![for])?;
+
+    let item = parse_ident(p, buf)?;
+    p.must(t![in])?;
+    let iter = parse_expr_range(p, buf)?;
+
+    p.loop_depth += 1;
+
+    let body = parse_bare_block(p, buf)?;
+    let body = body.as_slice();
+
+    p.loop_depth -= 1;
+
+    Ok(p.close(node, ForIn { item, iter, body }).map_into())
 }
 
 /// - `"import" IDENT`
@@ -528,6 +549,35 @@ fn parse_bare_func<'bump>(p: &mut State, buf: &'bump Bump) -> Result<Spanned<Bar
 
     let end = p.cursor.span(p.cursor.prev()).end();
     Ok(Spanned::new(BareFunc { name, params, body }, start..end))
+}
+
+// range is only allowed in `stmt_for`
+fn parse_expr_range(p: &mut State, buf: &Bump) -> Result<Spanned<Expr>> {
+    let node = p.open();
+
+    // note: we exclude `{}` from allowed range start/end
+    // it doesn't work anyway, and is ambiguous at the end
+
+    let start = if p.at(t!["{"]) {
+        return error_span(format!("unexpected token {:?}", p.lexeme()), p.span()).into();
+    } else {
+        parse_expr(p, buf)?
+    };
+
+    let kind = match p.kind() {
+        t![..] => RangeKind::Exclusive,
+        t![..=] => RangeKind::Inclusive,
+        _ => return Ok(start),
+    };
+    p.advance(); // bump op
+
+    let end = if p.at(t!["{"]) {
+        return error_span(format!("unexpected token {:?}", p.lexeme()), p.span()).into();
+    } else {
+        parse_expr(p, buf)?
+    };
+
+    Ok(p.close(node, Range { start, end, kind }).map_into())
 }
 
 fn parse_expr_assign(p: &mut State, buf: &Bump) -> Result<Spanned<Expr>> {

@@ -1750,6 +1750,7 @@ fn emit_stmt<'a>(m: &mut State<'a>, stmt: Node<'a, Stmt>, span: Span) -> Result<
         ast::StmtKind::Var(node) => emit_stmt_var(m, node)?,
         ast::StmtKind::Loop(node) => emit_stmt_loop(m, node)?,
         ast::StmtKind::While(node) => emit_stmt_while(m, node)?,
+        ast::StmtKind::ForIn(node) => emit_stmt_for(m, node)?,
         ast::StmtKind::FuncDecl(node) => emit_stmt_func(m, node)?,
         ast::StmtKind::StmtExpr(node) => emit_stmt_expr(m, node, span)?,
         ast::StmtKind::Import(node) => emit_stmt_import(m, Import::Named(node), span)?,
@@ -1846,11 +1847,7 @@ fn emit_stmt_while<'a>(m: &mut State<'a>, while_: Node<'a, ast::While>) -> Resul
     emit_stmt_list(m, while_.body())?;
     m.end_scope();
 
-    let span = while_
-        .body_spans()
-        .last()
-        .copied()
-        .unwrap_or(while_.cond_span());
+    let span = while_.cond_span();
     let pos = f!(&m).code.len();
     let rel = f!(&m)
         .loop_
@@ -1863,6 +1860,21 @@ fn emit_stmt_while<'a>(m: &mut State<'a>, while_: Node<'a, ast::While>) -> Resul
     m.end_loop(prev_loop)?;
 
     Ok(())
+}
+
+fn emit_stmt_for<'a>(m: &mut State<'a>, while_: Node<'a, ast::ForIn>) -> Result<()> {
+    // for v in RANGE
+    //   let i = eval(RANGE.start)
+    //   let end = eval(RANGE.end)
+    //   while i < end { ... }
+    //
+    // for v in EXPR
+    //   let iter = @iter(eval(EXPR))
+    //   let item = @next(iter)
+    //   while item != nil { ... }
+    //
+
+    todo!()
 }
 
 fn emit_stmt_func<'a>(m: &mut State<'a>, func: Node<'a, ast::FuncDecl>) -> Result<()> {
@@ -2012,6 +2024,7 @@ fn eval_expr_maybe_reuse<'a>(
         ast::ExprKind::Bool(node) => Ok(eval_expr_bool(m, node, span)),
         ast::ExprKind::Str(node) => Ok(eval_expr_str(m, node, span)),
         ast::ExprKind::Nil(node) => Ok(eval_expr_nil(m, node, span)),
+        ast::ExprKind::Range(_) => unreachable!("range appears outside of for-in"),
     };
 
     #[cfg(debug_assertions)]
@@ -2953,7 +2966,8 @@ impl ExprInfo for Node<'_, ast::Expr> {
             | ast::ExprKind::Float64(..)
             | ast::ExprKind::Bool(..)
             | ast::ExprKind::Str(..)
-            | ast::ExprKind::Nil(..) => false,
+            | ast::ExprKind::Nil(..)
+            | ast::ExprKind::Range(..) => false,
         }
     }
 }
