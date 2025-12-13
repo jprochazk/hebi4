@@ -287,13 +287,13 @@ struct FunctionState<'a> {
     options: EmitOptions,
 
     name: Cow<'a, str>,
+    kind: FunctionKind,
     scopes: Vec<'a, Scope<'a>>,
     ra: RegAlloc,
     code: Vec<'a, Insn>,
     literals: Literals<'a>,
     loop_: Option<Loop<'a>>,
 
-    top_level: bool,
     upvalues: Vec<'a, Upvalue<'a>>,
 
     /// Tracking basic block boundaries
@@ -320,11 +320,19 @@ impl<'a> Scope<'a> {
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Mutability {
+    Mutable,
+    Immutable,
+}
+use Mutability::*;
+
 enum Variable<'a> {
     Local {
         name: Cow<'a, str>,
         span: Span,
         reg: Reg,
+        mutability: Mutability,
     },
     Function {
         name: Cow<'a, str>,
@@ -337,7 +345,12 @@ enum Variable<'a> {
 impl<'a> Variable<'a> {
     fn name(&self) -> &str {
         match self {
-            Variable::Local { name, span, reg } => name,
+            Variable::Local {
+                name,
+                span,
+                reg,
+                mutability,
+            } => name,
             Variable::Function {
                 name,
                 arity,
@@ -349,9 +362,15 @@ impl<'a> Variable<'a> {
 
     fn symbol(&self) -> Symbol {
         match self {
-            Variable::Local { name, span, reg } => Symbol::Local {
+            Variable::Local {
+                name,
+                span,
+                reg,
+                mutability,
+            } => Symbol::Local {
                 span: *span,
                 reg: *reg,
+                mutability: *mutability,
             },
             Variable::Function {
                 name,
@@ -992,12 +1011,20 @@ impl BackwardLabel {
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum FunctionKind {
+    TopLevelFn,
+    InnerFn,
+}
+use FunctionKind::*;
+
 impl<'a> FunctionState<'a> {
-    fn new(options: EmitOptions, name: Cow<'a, str>, top_level: bool, buf: &'a Bump) -> Self {
+    fn new(options: EmitOptions, name: Cow<'a, str>, kind: FunctionKind, buf: &'a Bump) -> Self {
         Self {
             options,
 
             name,
+            kind,
             scopes: vec![in buf],
             ra: RegAlloc::new(),
             code: vec![in buf],
@@ -1005,7 +1032,6 @@ impl<'a> FunctionState<'a> {
             loop_: None,
             in_block: true,
 
-            top_level,
             upvalues: vec![in buf],
 
             dbg: FunctionDebug {
@@ -1045,7 +1071,7 @@ impl<'a> FunctionState<'a> {
         loop_.exit.bind(self)
     }
 
-    fn declare_local(&mut self, name: &'a str, reg: Reg, span: Span) {
+    fn declare_local(&mut self, name: &'a str, reg: Reg, span: Span, mutability: Mutability) {
         let scope = self
             .scopes
             .last_mut()
@@ -1054,6 +1080,7 @@ impl<'a> FunctionState<'a> {
             name: name.into(),
             span,
             reg,
+            mutability,
         });
         self.dbg.locals.push(Local { span, reg });
     }
@@ -1113,7 +1140,7 @@ impl<'a> FunctionState<'a> {
 
         // to support function recursion in inner scopes, we treat the function
         // or closure itself as an upvalue:
-        if !self.top_level && name == self.name {
+        if self.kind != TopLevelFn && name == self.name {
             // next time around this will be picked up by `resolve` above,
             // yielding the same upvalue
             let id = self.declare_upvalue(name, UpvalueDescriptor::Rec, span)?;
@@ -1193,14 +1220,20 @@ impl<'a> State<'a> {
         self.func_stack.len() == 1 && f!(&self).scopes.len() == 1
     }
 
-    fn declare_local(&mut self, name: &'a str, span: Span) -> Result<Reg> {
+    fn declare_local(&mut self, name: &'a str, span: Span, mutability: Mutability) -> Result<Reg> {
         let reg = fresh_var(self, span)?;
-        f!(self).declare_local(name, reg, span);
+        f!(self).declare_local(name, reg, span, mutability);
         Ok(reg)
     }
 
-    fn declare_local_in(&mut self, name: &'a str, reg: Reg, span: Span) -> Result<Reg> {
-        f!(self).declare_local(name, reg, span);
+    fn declare_local_in(
+        &mut self,
+        name: &'a str,
+        reg: Reg,
+        span: Span,
+        mutability: Mutability,
+    ) -> Result<Reg> {
+        f!(self).declare_local(name, reg, span, mutability);
         Ok(reg)
     }
 
@@ -1372,11 +1405,28 @@ enum FreshVar {
 
 #[repr(align(16))]
 enum Symbol {
-    Local { span: Span, reg: Reg },
-    Upvalue { span: Span, idx: Uv },
-    ModuleVar { span: Span, idx: Mvar },
-    Function { arity: u8, span: Span, id: FnId },
-    HostFunction { arity: u8, id: HostId },
+    Local {
+        span: Span,
+        reg: Reg,
+        mutability: Mutability,
+    },
+    Upvalue {
+        span: Span,
+        idx: Uv,
+    },
+    ModuleVar {
+        span: Span,
+        idx: Mvar,
+    },
+    Function {
+        arity: u8,
+        span: Span,
+        id: FnId,
+    },
+    HostFunction {
+        arity: u8,
+        id: HostId,
+    },
 }
 
 fn emit_closure<'a>(
@@ -1453,8 +1503,12 @@ fn emit_func_inner<'a>(
         eprintln!("new func {name}");
     }
 
-    let top_level = m.is_top_level();
-    let f = FunctionState::new(m.options.clone(), name, top_level, m.buf);
+    let kind = if m.is_top_level() {
+        TopLevelFn
+    } else {
+        InnerFn
+    };
+    let f = FunctionState::new(m.options.clone(), name, kind, m.buf);
     m.func_stack.push(f);
 
     {
@@ -1463,7 +1517,7 @@ fn emit_func_inner<'a>(
         //       will be freed in `end_scope`.
         let r0 = fresh_var(m, span)?;
         for (param, &span) in params.iter().zip(param_spans.iter()) {
-            let _ = m.declare_local(param.get(), span)?;
+            let _ = m.declare_local(param.get(), span, Mutable)?;
         }
 
         let ret = eval_block(m, body, Some(r0))?;
@@ -1789,13 +1843,13 @@ fn emit_stmt_var<'a>(m: &mut State<'a>, var: Node<'a, ast::Var>) -> Result<()> {
         // variable shadowing, reuse `reg`
         let value = eval_expr_reuse(m, var.value(), var.value_span(), dst)?;
         value_force_reg(m, value, dst)?;
-        let _ = m.declare_local_in(var.name().get(), dst, var.name_span())?;
+        let _ = m.declare_local_in(var.name().get(), dst, var.name_span(), Mutable)?;
     } else {
         // fresh variable in some local scope
         let tmp = fresh_var(m, var.value_span())?;
         let value = eval_expr_reuse(m, var.value(), var.value_span(), tmp)?;
         value_force_reg(m, value, tmp)?;
-        let _ = m.declare_local_in(var.name().get(), tmp, var.name_span())?;
+        let _ = m.declare_local_in(var.name().get(), tmp, var.name_span(), Mutable)?;
     }
 
     Ok(())
@@ -1863,16 +1917,35 @@ fn emit_stmt_while<'a>(m: &mut State<'a>, while_: Node<'a, ast::While>) -> Resul
 }
 
 fn emit_stmt_for<'a>(m: &mut State<'a>, while_: Node<'a, ast::ForIn>) -> Result<()> {
-    // for v in RANGE
-    //   let i = eval(RANGE.start)
-    //   let end = eval(RANGE.end)
-    //   while i < end { ... }
-    //
-    // for v in EXPR
-    //   let iter = @iter(eval(EXPR))
-    //   let item = @next(iter)
-    //   while item != nil { ... }
-    //
+    if let ast::ExprKind::Range(range) = while_.iter().kind() {
+        // for v in RANGE
+        //   let i = eval(RANGE.start)
+        //   let end = eval(RANGE.end)
+        //   while i < end {  // or `<=` for inclusive
+        //     do { body }
+        //     i += 1
+        //   }
+    } else {
+
+        // for v in EXPR
+        //   let iter = iter(eval(EXPR)) // returns `fn() -> T?`
+        //   let item = next(iter) // returns `T?`
+        //   while item != nil {
+        //     do { body }
+        //     item = next(iter)
+        //   }
+        //
+        // `iter` and `next` are instructions
+        //
+        // `iter dst, target`:
+        // - for built-in types like lists, returns an iterator directly
+        // - otherwise calls `target["iter"]`, and checks that the return value
+        //   is a function with zero arguments
+        //
+        // `next dst, iter`:
+        // - exactly like a zero-argument `call dst, iter`, but no arity checking
+        //
+    }
 
     todo!()
 }
@@ -1920,7 +1993,7 @@ fn emit_stmt_func<'a>(m: &mut State<'a>, func: Node<'a, ast::FuncDecl>) -> Resul
         m.func_table.define(id, func);
         let id = f!(m).literals.closure(closure, span)?;
 
-        let reg = m.declare_local(name, span)?;
+        let reg = m.declare_local(name, span, Immutable)?;
         m.emit(asm::lclosure(reg, id), span);
         Ok(())
     }
@@ -1957,7 +2030,7 @@ fn emit_stmt_import<'a>(m: &mut State<'a>, node: Import<'a>, span: Span) -> Resu
                     let id = m.expect_module_var(name).id;
                     bindings.push((name.to_string(), ImportBinding::Mvar(id)))
                 } else {
-                    let reg = m.declare_local(alias, item.alias_span())?;
+                    let reg = m.declare_local(alias, item.alias_span(), Immutable)?;
                     bindings.push((name.to_string(), ImportBinding::Reg(reg)))
                 }
             }
@@ -1973,7 +2046,7 @@ fn emit_stmt_import<'a>(m: &mut State<'a>, node: Import<'a>, span: Span) -> Resu
                 let id = m.expect_module_var(binding).id;
                 ImportBinding::Mvar(id)
             } else {
-                let reg = m.declare_local(binding, node.binding_span())?;
+                let reg = m.declare_local(binding, node.binding_span(), Immutable)?;
                 ImportBinding::Reg(reg)
             };
 
@@ -2542,6 +2615,9 @@ fn eval_expr_set_var<'a>(
     {
         // when adding other symbols, remember to error out here,
         // only local variables may be assigned to
+        Symbol::Local { mutability, .. } if mutability != Mutable => {
+            return error_span("cannot assign to immutable binding", span).into();
+        }
         Symbol::Local { reg, .. } => Id::Reg(reg),
         Symbol::Upvalue { idx, .. } => Id::Uv(fresh_reg(m, span)?, idx),
         Symbol::ModuleVar { idx, .. } => Id::Mvar(fresh_reg(m, span)?, idx),
