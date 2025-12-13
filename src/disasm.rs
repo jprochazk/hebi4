@@ -152,6 +152,9 @@ impl std::fmt::Display for DisasmInsnWithSrc<'_> {
             I::Llist { dst, cap } => writeln!(f, "llist {dst}, {cap}")?,
             I::Ltable { dst, cap } => writeln!(f, "ltable {dst}, {cap}")?,
             I::Jmp { rel } => writeln!(f, "jmp {rel}   ; to {}", (i as isize) + rel.sz())?,
+            I::Forloop { dst, rel } => {
+                writeln!(f, "forloop {dst}, {rel}   ; to {}", (i as isize) + rel.sz())?
+            }
             I::Islt { lhs, rhs } => writeln!(f, "islt {lhs}, {rhs}")?,
             I::Isle { lhs, rhs } => writeln!(f, "isle {lhs}, {rhs}")?,
             I::Isgt { lhs, rhs } => writeln!(f, "isgt {lhs}, {rhs}")?,
@@ -186,7 +189,6 @@ impl std::fmt::Display for DisasmInsnWithSrc<'_> {
             I::Isgev { dst, lhs, rhs } => writeln!(f, "isgev {dst}, {lhs}, {rhs}")?,
             I::Iseqv { dst, lhs, rhs } => writeln!(f, "iseqv {dst}, {lhs}, {rhs}")?,
             I::Isnev { dst, lhs, rhs } => writeln!(f, "isnev {dst}, {lhs}, {rhs}")?,
-            I::Inc { dst } => writeln!(f, "inc {dst}")?,
             I::Addvv { dst, lhs, rhs } => writeln!(f, "add {dst}, {lhs}, {rhs}")?,
             I::Addvn { dst, lhs, rhs } => {
                 writeln!(f, "add {dst}, {lhs}, {rhs}", rhs = func.literal(rhs.zx()))?
@@ -278,6 +280,7 @@ impl std::fmt::Display for DecodedInsn {
             I::Llist { dst, cap } => write!(f, "llist {dst}, {cap}"),
             I::Ltable { dst, cap } => write!(f, "ltable {dst}, {cap}"),
             I::Jmp { rel } => write!(f, "jmp {rel}"),
+            I::Forloop { dst, rel } => write!(f, "forloop {dst}, {rel}"),
             I::Islt { lhs, rhs } => write!(f, "islt {lhs}, {rhs}"),
             I::Isle { lhs, rhs } => write!(f, "isle {lhs}, {rhs}"),
             I::Isgt { lhs, rhs } => write!(f, "isgt {lhs}, {rhs}"),
@@ -300,7 +303,6 @@ impl std::fmt::Display for DecodedInsn {
             I::Isgev { dst, lhs, rhs } => write!(f, "isgev {dst}, {lhs}, {rhs}"),
             I::Iseqv { dst, lhs, rhs } => write!(f, "iseqv {dst}, {lhs}, {rhs}"),
             I::Isnev { dst, lhs, rhs } => write!(f, "isnev {dst}, {lhs}, {rhs}"),
-            I::Inc { dst } => write!(f, "inc {dst}"),
             I::Addvv { dst, lhs, rhs } => write!(f, "add {dst}, {lhs}, {rhs}"),
             I::Addvn { dst, lhs, rhs } => write!(f, "add {dst}, {lhs}, {rhs}"),
             I::Addnv { dst, lhs, rhs } => write!(f, "add {dst}, {lhs}, {rhs}"),

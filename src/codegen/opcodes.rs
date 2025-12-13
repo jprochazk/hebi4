@@ -532,29 +532,29 @@ pub enum DecodedInsn {
     Llist { dst: Reg, cap: Imm16 } = 24,
     Ltable { dst: Reg, cap: Imm16 } = 25,
     Jmp { rel: Imm24s } = 26,
-    Islt { lhs: Reg, rhs: Reg } = 27,
-    Isle { lhs: Reg, rhs: Reg } = 28,
-    Isgt { lhs: Reg, rhs: Reg } = 29,
-    Isge { lhs: Reg, rhs: Reg } = 30,
-    Iseq { lhs: Reg, rhs: Reg } = 31,
-    Isne { lhs: Reg, rhs: Reg } = 32,
-    Isnil { v: Reg } = 33,
-    Isnotnil { v: Reg } = 34,
-    Istrue { v: Reg } = 35,
-    Isfalse { v: Reg } = 36,
-    Iseqs { lhs: Reg, rhs: Lit } = 37,
-    Isnes { lhs: Reg, rhs: Lit } = 38,
-    Iseqi { lhs: Reg, rhs: Lit } = 39,
-    Isnei { lhs: Reg, rhs: Lit } = 40,
-    Iseqf { lhs: Reg, rhs: Lit } = 41,
-    Isnef { lhs: Reg, rhs: Lit } = 42,
-    Isltv { dst: Reg, lhs: Reg, rhs: Reg } = 43,
-    Islev { dst: Reg, lhs: Reg, rhs: Reg } = 44,
-    Isgtv { dst: Reg, lhs: Reg, rhs: Reg } = 45,
-    Isgev { dst: Reg, lhs: Reg, rhs: Reg } = 46,
-    Iseqv { dst: Reg, lhs: Reg, rhs: Reg } = 47,
-    Isnev { dst: Reg, lhs: Reg, rhs: Reg } = 48,
-    Inc { dst: Reg } = 49,
+    Forloop { dst: Reg, rel: Imm16s } = 27,
+    Islt { lhs: Reg, rhs: Reg } = 28,
+    Isle { lhs: Reg, rhs: Reg } = 29,
+    Isgt { lhs: Reg, rhs: Reg } = 30,
+    Isge { lhs: Reg, rhs: Reg } = 31,
+    Iseq { lhs: Reg, rhs: Reg } = 32,
+    Isne { lhs: Reg, rhs: Reg } = 33,
+    Isnil { v: Reg } = 34,
+    Isnotnil { v: Reg } = 35,
+    Istrue { v: Reg } = 36,
+    Isfalse { v: Reg } = 37,
+    Iseqs { lhs: Reg, rhs: Lit } = 38,
+    Isnes { lhs: Reg, rhs: Lit } = 39,
+    Iseqi { lhs: Reg, rhs: Lit } = 40,
+    Isnei { lhs: Reg, rhs: Lit } = 41,
+    Iseqf { lhs: Reg, rhs: Lit } = 42,
+    Isnef { lhs: Reg, rhs: Lit } = 43,
+    Isltv { dst: Reg, lhs: Reg, rhs: Reg } = 44,
+    Islev { dst: Reg, lhs: Reg, rhs: Reg } = 45,
+    Isgtv { dst: Reg, lhs: Reg, rhs: Reg } = 46,
+    Isgev { dst: Reg, lhs: Reg, rhs: Reg } = 47,
+    Iseqv { dst: Reg, lhs: Reg, rhs: Reg } = 48,
+    Isnev { dst: Reg, lhs: Reg, rhs: Reg } = 49,
     Addvv { dst: Reg, lhs: Reg, rhs: Reg } = 50,
     Addvn { dst: Reg, lhs: Reg, rhs: Lit8 } = 51,
     Addnv { dst: Reg, lhs: Lit8, rhs: Reg } = 52,
@@ -694,6 +694,10 @@ impl Insn {
             Opcode::Jmp => DecodedInsn::Jmp {
                 rel: Jmp(self).rel(),
             },
+            Opcode::Forloop => DecodedInsn::Forloop {
+                dst: Forloop(self).dst(),
+                rel: Forloop(self).rel(),
+            },
             Opcode::Islt => DecodedInsn::Islt {
                 lhs: Islt(self).lhs(),
                 rhs: Islt(self).rhs(),
@@ -781,9 +785,6 @@ impl Insn {
                 dst: Isnev(self).dst(),
                 lhs: Isnev(self).lhs(),
                 rhs: Isnev(self).rhs(),
-            },
-            Opcode::Inc => DecodedInsn::Inc {
-                dst: Inc(self).dst(),
             },
             Opcode::Addvv => DecodedInsn::Addvv {
                 dst: Addvv(self).dst(),
@@ -923,29 +924,29 @@ pub enum Opcode {
     Llist = 24,
     Ltable = 25,
     Jmp = 26,
-    Islt = 27,
-    Isle = 28,
-    Isgt = 29,
-    Isge = 30,
-    Iseq = 31,
-    Isne = 32,
-    Isnil = 33,
-    Isnotnil = 34,
-    Istrue = 35,
-    Isfalse = 36,
-    Iseqs = 37,
-    Isnes = 38,
-    Iseqi = 39,
-    Isnei = 40,
-    Iseqf = 41,
-    Isnef = 42,
-    Isltv = 43,
-    Islev = 44,
-    Isgtv = 45,
-    Isgev = 46,
-    Iseqv = 47,
-    Isnev = 48,
-    Inc = 49,
+    Forloop = 27,
+    Islt = 28,
+    Isle = 29,
+    Isgt = 30,
+    Isge = 31,
+    Iseq = 32,
+    Isne = 33,
+    Isnil = 34,
+    Isnotnil = 35,
+    Istrue = 36,
+    Isfalse = 37,
+    Iseqs = 38,
+    Isnes = 39,
+    Iseqi = 40,
+    Isnei = 41,
+    Iseqf = 42,
+    Isnef = 43,
+    Isltv = 44,
+    Islev = 45,
+    Isgtv = 46,
+    Isgev = 47,
+    Iseqv = 48,
+    Isnev = 49,
     Addvv = 50,
     Addvn = 51,
     Addnv = 52,
@@ -1448,6 +1449,23 @@ impl Jmp {
     }
 }
 
+#[doc = "`dst = dst + 1` (register) and adjust IP by `rel`"]
+#[derive(Clone, Copy)]
+#[repr(transparent)]
+pub struct Forloop(Insn);
+
+impl Forloop {
+    #[allow(unnecessary_transmutes)]
+    pub fn dst(self) -> Reg {
+        Reg(unsafe { ::core::mem::transmute(self.0.a()) })
+    }
+
+    #[allow(unnecessary_transmutes)]
+    pub fn rel(self) -> Imm16s {
+        Imm16s(unsafe { ::core::mem::transmute(self.0.B()) })
+    }
+}
+
 #[doc = "Skip `jmp` if `lhs < rhs` (register, register)"]
 #[derive(Clone, Copy)]
 #[repr(transparent)]
@@ -1829,18 +1847,6 @@ impl Isnev {
     #[allow(unnecessary_transmutes)]
     pub fn rhs(self) -> Reg {
         Reg(unsafe { ::core::mem::transmute(self.0.c()) })
-    }
-}
-
-#[doc = "`dst = dst + 1` (register)"]
-#[derive(Clone, Copy)]
-#[repr(transparent)]
-pub struct Inc(Insn);
-
-impl Inc {
-    #[allow(unnecessary_transmutes)]
-    pub fn dst(self) -> Reg {
-        Reg(unsafe { ::core::mem::transmute(self.0.a()) })
     }
 }
 
@@ -2342,6 +2348,7 @@ pub mod __operands {
     pub type llist = super::Llist;
     pub type ltable = super::Ltable;
     pub type jmp = super::Jmp;
+    pub type forloop = super::Forloop;
     pub type islt = super::Islt;
     pub type isle = super::Isle;
     pub type isgt = super::Isgt;
@@ -2364,7 +2371,6 @@ pub mod __operands {
     pub type isgev = super::Isgev;
     pub type iseqv = super::Iseqv;
     pub type isnev = super::Isnev;
-    pub type inc = super::Inc;
     pub type addvv = super::Addvv;
     pub type addvn = super::Addvn;
     pub type addnv = super::Addnv;
@@ -2501,6 +2507,10 @@ pub mod asm {
     pub const fn jmp(rel: Imm24s) -> Insn {
         op_S(Opcode::Jmp, rel.0)
     }
+    #[doc = "`dst = dst + 1` (register) and adjust IP by `rel`"]
+    pub const fn forloop(dst: Reg, rel: Imm16s) -> Insn {
+        op_aS(Opcode::Forloop, dst.0, rel.0)
+    }
     #[doc = "Skip `jmp` if `lhs < rhs` (register, register)"]
     pub const fn islt(lhs: Reg, rhs: Reg) -> Insn {
         op_abc(Opcode::Islt, lhs.0, rhs.0, 0)
@@ -2588,10 +2598,6 @@ pub mod asm {
     #[doc = "`dst = lhs != rhs` (register, register)"]
     pub const fn isnev(dst: Reg, lhs: Reg, rhs: Reg) -> Insn {
         op_abc(Opcode::Isnev, dst.0, lhs.0, rhs.0)
-    }
-    #[doc = "`dst = dst + 1` (register)"]
-    pub const fn inc(dst: Reg) -> Insn {
-        op_abc(Opcode::Inc, dst.0, 0, 0)
     }
     #[doc = "`dst = lhs + rhs` (register, register)"]
     pub const fn addvv(dst: Reg, lhs: Reg, rhs: Reg) -> Insn {
@@ -2719,6 +2725,7 @@ pub struct JumpTable {
     pub llist: OpaqueHandler,
     pub ltable: OpaqueHandler,
     pub jmp: OpaqueHandler,
+    pub forloop: OpaqueHandler,
     pub islt: OpaqueHandler,
     pub isle: OpaqueHandler,
     pub isgt: OpaqueHandler,
@@ -2741,7 +2748,6 @@ pub struct JumpTable {
     pub isgev: OpaqueHandler,
     pub iseqv: OpaqueHandler,
     pub isnev: OpaqueHandler,
-    pub inc: OpaqueHandler,
     pub addvv: OpaqueHandler,
     pub addvn: OpaqueHandler,
     pub addnv: OpaqueHandler,

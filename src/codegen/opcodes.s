@@ -113,6 +113,9 @@ ltable dst:reg cap:imm16;
 /* Adjust instruction pointer by `rel`. */
 jmp rel:imm24s;
 
+/* `dst = dst + 1` (register) and adjust IP by `rel` */
+forloop dst:reg rel:imm16s;
+
 /* Skip `jmp` if `lhs < rhs` (register, register) */
 islt lhs:reg rhs:reg;
 /* Skip `jmp` if `lhs <= rhs` (register, register) */
@@ -174,9 +177,6 @@ isnev dst:reg lhs:reg rhs:reg;
 #
 # When the compiler runs out of 8-bit literal slots, it falls back
 # to using `vv` variants by emitting a load of the literal first.
-
-/* `dst = dst + 1` (register) */
-inc dst:reg;
 
 /* `dst = lhs + rhs` (register, register) */
 addvv dst:reg lhs:reg rhs:reg;

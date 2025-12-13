@@ -2039,8 +2039,14 @@ fn emit_stmt_for_range<'a>(
     loop_.bind_entry(f!(m))?;
     f!(m).loop_ = Some(loop_);
 
-    m.emit(asm::inc(control), for_.iter_span());
-    emit_backward_jmp(m, for_.iter_span(), condition_label)?;
+    let span = for_.iter_span();
+    let pos = f!(m).code.len();
+    let offset = condition_label.offset(pos, span)?;
+    if offset.get().get() >= i16::MAX as i32 {
+        return error_span("jump offset is too large", span).into();
+    }
+    let offset = unsafe { Imm16s::new_unchecked(offset.get().get() as i16) };
+    m.emit(asm::forloop(control, offset), span);
 
     m.end_loop(prev_loop)?;
 
@@ -3907,6 +3913,9 @@ fn is_basic_block_exit(prev: Insn, insn: Insn) -> bool {
         Opcode::Jmp if is_jump_condition(prev) => false,
         Opcode::Jmp => true,
 
+        // always a backward jump
+        Opcode::Forloop => false,
+
         Opcode::Ret | Opcode::Retv | Opcode::Stop => true,
 
         Opcode::Nop
@@ -3957,7 +3966,6 @@ fn is_basic_block_exit(prev: Insn, insn: Insn) -> bool {
         | Opcode::Isgev
         | Opcode::Iseqv
         | Opcode::Isnev
-        | Opcode::Inc
         | Opcode::Addvv
         | Opcode::Addvn
         | Opcode::Addnv
@@ -4028,13 +4036,13 @@ fn is_jump_condition(insn: Insn) -> bool {
         | Opcode::Llist
         | Opcode::Ltable
         | Opcode::Jmp
+        | Opcode::Forloop
         | Opcode::Isltv
         | Opcode::Islev
         | Opcode::Isgtv
         | Opcode::Isgev
         | Opcode::Iseqv
         | Opcode::Isnev
-        | Opcode::Inc
         | Opcode::Addvv
         | Opcode::Addvn
         | Opcode::Addnv
