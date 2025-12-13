@@ -554,30 +554,31 @@ pub enum DecodedInsn {
     Isgev { dst: Reg, lhs: Reg, rhs: Reg } = 46,
     Iseqv { dst: Reg, lhs: Reg, rhs: Reg } = 47,
     Isnev { dst: Reg, lhs: Reg, rhs: Reg } = 48,
-    Addvv { dst: Reg, lhs: Reg, rhs: Reg } = 49,
-    Addvn { dst: Reg, lhs: Reg, rhs: Lit8 } = 50,
-    Addnv { dst: Reg, lhs: Lit8, rhs: Reg } = 51,
-    Subvv { dst: Reg, lhs: Reg, rhs: Reg } = 52,
-    Subvn { dst: Reg, lhs: Reg, rhs: Lit8 } = 53,
-    Subnv { dst: Reg, lhs: Lit8, rhs: Reg } = 54,
-    Mulvv { dst: Reg, lhs: Reg, rhs: Reg } = 55,
-    Mulvn { dst: Reg, lhs: Reg, rhs: Lit8 } = 56,
-    Mulnv { dst: Reg, lhs: Lit8, rhs: Reg } = 57,
-    Divvv { dst: Reg, lhs: Reg, rhs: Reg } = 58,
-    Divvn { dst: Reg, lhs: Reg, rhs: Lit8 } = 59,
-    Divnv { dst: Reg, lhs: Lit8, rhs: Reg } = 60,
-    Remvv { dst: Reg, lhs: Reg, rhs: Reg } = 61,
-    Remvn { dst: Reg, lhs: Reg, rhs: Lit8 } = 62,
-    Remnv { dst: Reg, lhs: Lit8, rhs: Reg } = 63,
-    Unm { dst: Reg, rhs: Reg } = 64,
-    Not { dst: Reg, rhs: Reg } = 65,
-    Call { dst: Reg, callee: Reg, args: Imm8 } = 66,
-    Fastcall { dst: Reg, id: FnId } = 67,
-    Hostcall { dst: Reg, id: HostId } = 68,
-    Import { _unused: Reg, id: Lit } = 69,
-    Ret {} = 70,
-    Retv { src: Reg } = 71,
-    Stop {} = 72,
+    Inc { dst: Reg } = 49,
+    Addvv { dst: Reg, lhs: Reg, rhs: Reg } = 50,
+    Addvn { dst: Reg, lhs: Reg, rhs: Lit8 } = 51,
+    Addnv { dst: Reg, lhs: Lit8, rhs: Reg } = 52,
+    Subvv { dst: Reg, lhs: Reg, rhs: Reg } = 53,
+    Subvn { dst: Reg, lhs: Reg, rhs: Lit8 } = 54,
+    Subnv { dst: Reg, lhs: Lit8, rhs: Reg } = 55,
+    Mulvv { dst: Reg, lhs: Reg, rhs: Reg } = 56,
+    Mulvn { dst: Reg, lhs: Reg, rhs: Lit8 } = 57,
+    Mulnv { dst: Reg, lhs: Lit8, rhs: Reg } = 58,
+    Divvv { dst: Reg, lhs: Reg, rhs: Reg } = 59,
+    Divvn { dst: Reg, lhs: Reg, rhs: Lit8 } = 60,
+    Divnv { dst: Reg, lhs: Lit8, rhs: Reg } = 61,
+    Remvv { dst: Reg, lhs: Reg, rhs: Reg } = 62,
+    Remvn { dst: Reg, lhs: Reg, rhs: Lit8 } = 63,
+    Remnv { dst: Reg, lhs: Lit8, rhs: Reg } = 64,
+    Unm { dst: Reg, rhs: Reg } = 65,
+    Not { dst: Reg, rhs: Reg } = 66,
+    Call { dst: Reg, callee: Reg, args: Imm8 } = 67,
+    Fastcall { dst: Reg, id: FnId } = 68,
+    Hostcall { dst: Reg, id: HostId } = 69,
+    Import { _unused: Reg, id: Lit } = 70,
+    Ret {} = 71,
+    Retv { src: Reg } = 72,
+    Stop {} = 73,
 }
 
 impl Insn {
@@ -781,6 +782,9 @@ impl Insn {
                 lhs: Isnev(self).lhs(),
                 rhs: Isnev(self).rhs(),
             },
+            Opcode::Inc => DecodedInsn::Inc {
+                dst: Inc(self).dst(),
+            },
             Opcode::Addvv => DecodedInsn::Addvv {
                 dst: Addvv(self).dst(),
                 lhs: Addvv(self).lhs(),
@@ -941,30 +945,31 @@ pub enum Opcode {
     Isgev = 46,
     Iseqv = 47,
     Isnev = 48,
-    Addvv = 49,
-    Addvn = 50,
-    Addnv = 51,
-    Subvv = 52,
-    Subvn = 53,
-    Subnv = 54,
-    Mulvv = 55,
-    Mulvn = 56,
-    Mulnv = 57,
-    Divvv = 58,
-    Divvn = 59,
-    Divnv = 60,
-    Remvv = 61,
-    Remvn = 62,
-    Remnv = 63,
-    Unm = 64,
-    Not = 65,
-    Call = 66,
-    Fastcall = 67,
-    Hostcall = 68,
-    Import = 69,
-    Ret = 70,
-    Retv = 71,
-    Stop = 72,
+    Inc = 49,
+    Addvv = 50,
+    Addvn = 51,
+    Addnv = 52,
+    Subvv = 53,
+    Subvn = 54,
+    Subnv = 55,
+    Mulvv = 56,
+    Mulvn = 57,
+    Mulnv = 58,
+    Divvv = 59,
+    Divvn = 60,
+    Divnv = 61,
+    Remvv = 62,
+    Remvn = 63,
+    Remnv = 64,
+    Unm = 65,
+    Not = 66,
+    Call = 67,
+    Fastcall = 68,
+    Hostcall = 69,
+    Import = 70,
+    Ret = 71,
+    Retv = 72,
+    Stop = 73,
 }
 #[doc = "Do nothing."]
 #[derive(Clone, Copy)]
@@ -1827,6 +1832,18 @@ impl Isnev {
     }
 }
 
+#[doc = "`dst = dst + 1` (register)"]
+#[derive(Clone, Copy)]
+#[repr(transparent)]
+pub struct Inc(Insn);
+
+impl Inc {
+    #[allow(unnecessary_transmutes)]
+    pub fn dst(self) -> Reg {
+        Reg(unsafe { ::core::mem::transmute(self.0.a()) })
+    }
+}
+
 #[doc = "`dst = lhs + rhs` (register, register)"]
 #[derive(Clone, Copy)]
 #[repr(transparent)]
@@ -2347,6 +2364,7 @@ pub mod __operands {
     pub type isgev = super::Isgev;
     pub type iseqv = super::Iseqv;
     pub type isnev = super::Isnev;
+    pub type inc = super::Inc;
     pub type addvv = super::Addvv;
     pub type addvn = super::Addvn;
     pub type addnv = super::Addnv;
@@ -2571,6 +2589,10 @@ pub mod asm {
     pub const fn isnev(dst: Reg, lhs: Reg, rhs: Reg) -> Insn {
         op_abc(Opcode::Isnev, dst.0, lhs.0, rhs.0)
     }
+    #[doc = "`dst = dst + 1` (register)"]
+    pub const fn inc(dst: Reg) -> Insn {
+        op_abc(Opcode::Inc, dst.0, 0, 0)
+    }
     #[doc = "`dst = lhs + rhs` (register, register)"]
     pub const fn addvv(dst: Reg, lhs: Reg, rhs: Reg) -> Insn {
         op_abc(Opcode::Addvv, dst.0, lhs.0, rhs.0)
@@ -2719,6 +2741,7 @@ pub struct JumpTable {
     pub isgev: OpaqueHandler,
     pub iseqv: OpaqueHandler,
     pub isnev: OpaqueHandler,
+    pub inc: OpaqueHandler,
     pub addvv: OpaqueHandler,
     pub addvn: OpaqueHandler,
     pub addnv: OpaqueHandler,

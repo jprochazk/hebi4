@@ -1,13 +1,11 @@
 let tests = 0
 
-// Test ==
 let i = 0
 while i == 0 {
   tests = tests + 1
   i = i + 1
 }
 
-// Test !=
 let i = 0
 while i != 3 {
   tests = tests + 1

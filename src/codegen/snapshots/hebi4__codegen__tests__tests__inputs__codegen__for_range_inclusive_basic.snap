@@ -1,0 +1,27 @@
+---
+source: src/codegen/tests.rs
+expression: snapshot
+---
+SOURCE
+do {
+for i in 0..=10 {
+  i
+}
+}
+
+OK
+.fn @main
+  params 0
+  stack 3
+  .locals
+    i = r1
+    i = r2
+  .code
+  0  lsmi r1, 0
+  1  lsmi r2, 10
+  2  isle r1, r2
+  3  jmp 3   ; to 6
+  4  inc r1
+  5  jmp -3   ; to 2
+  6  lnil r0
+  7  ret

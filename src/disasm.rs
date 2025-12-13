@@ -186,6 +186,7 @@ impl std::fmt::Display for DisasmInsnWithSrc<'_> {
             I::Isgev { dst, lhs, rhs } => writeln!(f, "isgev {dst}, {lhs}, {rhs}")?,
             I::Iseqv { dst, lhs, rhs } => writeln!(f, "iseqv {dst}, {lhs}, {rhs}")?,
             I::Isnev { dst, lhs, rhs } => writeln!(f, "isnev {dst}, {lhs}, {rhs}")?,
+            I::Inc { dst } => writeln!(f, "inc {dst}")?,
             I::Addvv { dst, lhs, rhs } => writeln!(f, "add {dst}, {lhs}, {rhs}")?,
             I::Addvn { dst, lhs, rhs } => {
                 writeln!(f, "add {dst}, {lhs}, {rhs}", rhs = func.literal(rhs.zx()))?
@@ -299,6 +300,7 @@ impl std::fmt::Display for DecodedInsn {
             I::Isgev { dst, lhs, rhs } => write!(f, "isgev {dst}, {lhs}, {rhs}"),
             I::Iseqv { dst, lhs, rhs } => write!(f, "iseqv {dst}, {lhs}, {rhs}"),
             I::Isnev { dst, lhs, rhs } => write!(f, "isnev {dst}, {lhs}, {rhs}"),
+            I::Inc { dst } => write!(f, "inc {dst}"),
             I::Addvv { dst, lhs, rhs } => write!(f, "add {dst}, {lhs}, {rhs}"),
             I::Addvn { dst, lhs, rhs } => write!(f, "add {dst}, {lhs}, {rhs}"),
             I::Addnv { dst, lhs, rhs } => write!(f, "add {dst}, {lhs}, {rhs}"),

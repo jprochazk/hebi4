@@ -762,6 +762,7 @@ static JT: JumpTable = jump_table! {
     isgev,
     iseqv,
     isnev,
+    inc,
     addvv,
     addvn,
     addnv,
@@ -1744,6 +1745,22 @@ macro_rules! try_arith_eval {
             }
         }
     };
+}
+
+#[inline(always)]
+unsafe fn inc(vm: Vm, ip: Ip, args: Inc, sp: Sp) -> Control {
+    let dst = sp.at(args.dst());
+
+    use ValueRaw::*;
+    match *dst {
+        Int(v) => *dst = ValueRaw::Int(v + 1),
+        Float(v) => *dst = ValueRaw::Float(v + 1.0),
+        _ => {
+            vm_exit!(vm, ip, ArithTypeError);
+        }
+    }
+
+    dispatch_next(vm, ip, sp)
 }
 
 #[inline(always)]

@@ -1,0 +1,6 @@
+let count = 0
+for i in 0..5 {
+  print(i)
+  count += 1
+}
+assert_eq(count, 5)
