@@ -2089,7 +2089,54 @@ exit:
 
 */
 fn emit_stmt_for_iter<'a>(m: &mut State<'a>, for_: Node<'a, ast::ForIn>) -> Result<()> {
-    todo!()
+    m.begin_scope();
+
+    let iterable_v = eval_expr(m, for_.iter(), for_.iter_span())?;
+    let iterable = value_to_reg(m, iterable_v)?;
+
+    // NOTE: variables must be at bottom of frame, freeing `iterable` before allocating `iterator` and `control`.
+    // This is fine because we're not evaluating any other expressions which may clobber `iterable`.
+    free_reg(m, iterable);
+
+    let iterator = fresh_var(m, for_.iter_span())?;
+    let _ = m.declare_local_in("@iterator", iterator, for_.iter_span(), Immutable)?;
+    let control = fresh_var(m, for_.iter_span())?;
+    let _ = m.declare_local_in(for_.item().get(), control, for_.item_span(), Immutable)?;
+
+    m.emit(asm::iter(iterator, iterable), for_.iter_span());
+
+    let prev_loop = m.begin_loop(BackwardLoopEntry);
+
+    m.emit(
+        asm::call(control, iterator, unsafe { Imm8::new_unchecked(0) }),
+        for_.iter_span(),
+    );
+    m.emit(asm::isnotnil(control), for_.iter_span());
+    let mut loop_ = f!(m).loop_.take().expect("some loop");
+    emit_forward_jmp(m, for_.iter_span(), &mut loop_.exit);
+    f!(m).loop_ = Some(loop_);
+
+    m.begin_scope();
+    emit_stmt_list(m, for_.body())?;
+    m.end_scope();
+
+    let start = match f!(&m)
+        .loop_
+        .as_ref()
+        .expect("some loop")
+        .entry
+        .as_ref()
+        .expect("entry")
+    {
+        LoopEntry::Backward(label) => *label,
+        LoopEntry::Forward(_) => unreachable!("for-in-iter loop should have backward entry"),
+    };
+    emit_backward_jmp(m, for_.iter_span(), start)?;
+
+    m.end_loop(prev_loop)?;
+    m.end_scope();
+
+    Ok(())
 }
 
 fn emit_stmt_func<'a>(m: &mut State<'a>, func: Node<'a, ast::FuncDecl>) -> Result<()> {

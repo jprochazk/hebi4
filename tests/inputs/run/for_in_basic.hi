@@ -1,0 +1,7 @@
+//module
+let count = 0
+for v in [1, 2, 3, 4, 5] {
+  print(v)
+  count += 1
+}
+assert_eq(count, 5)

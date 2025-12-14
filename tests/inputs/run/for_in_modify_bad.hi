@@ -1,0 +1,6 @@
+//module
+// Modifying list during iteration should always error
+let list = [1, 2, 3]
+for v in list {
+  append(list, 4)
+}

@@ -1,0 +1,14 @@
+---
+source: src/vm/tests.rs
+expression: snapshot
+---
+SOURCE
+//module
+let sum = 0
+for v in [10, 20, 30, 40] {
+  sum += v
+}
+assert_eq(sum, 100)
+
+OK
+Nil

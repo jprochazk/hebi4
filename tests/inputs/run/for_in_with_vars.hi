@@ -1,0 +1,8 @@
+//module
+let list = [1, 2, 3]
+let sum = 0
+for v in list {
+  let doubled = v * 2
+  sum += doubled
+}
+assert_eq(sum, 12)  // (1*2)+(2*2)+(3*2) = 12
