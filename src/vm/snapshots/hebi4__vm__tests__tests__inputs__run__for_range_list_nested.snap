@@ -1,0 +1,30 @@
+---
+source: src/vm/tests.rs
+expression: snapshot
+---
+SOURCE
+do {
+let matrix = [[1, 2], [3, 4], [5, 6]]
+let sum = 0
+for i in 0..list_len(matrix) {
+  let row = matrix[i]
+  for j in 0..list_len(row) {
+    print(row[j])
+    sum += row[j]
+  }
+}
+print(sum)
+assert_eq(sum, 21)  // 1+2+3+4+5+6 = 21
+}
+
+OK
+Nil
+
+STDOUT
+1
+2
+3
+4
+5
+6
+21

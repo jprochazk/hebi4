@@ -113,6 +113,9 @@ ltable dst:reg cap:imm16;
 /* Adjust instruction pointer by `rel`. */
 jmp rel:imm24s;
 
+/* `dst = dst + 1` (register) and adjust IP by `rel` */
+forloop dst:reg rel:imm16s;
+
 /* Skip `jmp` if `lhs < rhs` (register, register) */
 islt lhs:reg rhs:reg;
 /* Skip `jmp` if `lhs <= rhs` (register, register) */
@@ -301,6 +304,13 @@ hostcall dst:reg id:hostid;
  * and the mapping of module names to local registers.
  */
 import _unused:reg id:lit;
+
+/*
+ * Retrieve the iterator for `target`.
+ *
+ * `dst = builtin_get_iterator(target)`
+ */
+iter dst:reg target:reg;
 
 # Note that `ret` and `stop` are separate, to avoid a branch in `ret` which
 # would otherwise be required to check if there are any call frames left to

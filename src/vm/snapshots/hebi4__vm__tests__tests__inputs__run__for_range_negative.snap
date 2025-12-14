@@ -1,0 +1,26 @@
+---
+source: src/vm/tests.rs
+expression: snapshot
+---
+SOURCE
+do {
+let sum = 0
+for i in -3..3 {
+  sum += i
+  print(i)
+}
+print(sum)
+assert_eq(sum, -3)  // -3+-2+-1+0+1+2 = -3
+}
+
+OK
+Nil
+
+STDOUT
+-3
+-2
+-1
+0
+1
+2
+-3

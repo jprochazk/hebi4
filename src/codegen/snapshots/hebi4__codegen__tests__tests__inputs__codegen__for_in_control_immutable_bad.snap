@@ -1,0 +1,16 @@
+---
+source: src/codegen/tests.rs
+expression: snapshot
+---
+SOURCE
+do {
+for v in [1, 2, 3] {
+  // control variable should be immutable
+  v = 10
+}
+}
+
+ERROR
+cannot assign to immutable binding
+4 |    v = 10
+  |    ^^^^^^

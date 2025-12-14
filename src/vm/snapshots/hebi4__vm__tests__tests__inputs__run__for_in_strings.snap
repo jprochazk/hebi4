@@ -1,0 +1,17 @@
+---
+source: src/vm/tests.rs
+expression: snapshot
+---
+SOURCE
+//module
+let result = []
+for s in ["hello", "world"] {
+  append(result, s)
+}
+// Verify by checking length and elements
+assert_eq(list_len(result), 2)
+assert_eq(result[0], "hello")
+assert_eq(result[1], "world")
+
+OK
+Nil

@@ -532,52 +532,54 @@ pub enum DecodedInsn {
     Llist { dst: Reg, cap: Imm16 } = 24,
     Ltable { dst: Reg, cap: Imm16 } = 25,
     Jmp { rel: Imm24s } = 26,
-    Islt { lhs: Reg, rhs: Reg } = 27,
-    Isle { lhs: Reg, rhs: Reg } = 28,
-    Isgt { lhs: Reg, rhs: Reg } = 29,
-    Isge { lhs: Reg, rhs: Reg } = 30,
-    Iseq { lhs: Reg, rhs: Reg } = 31,
-    Isne { lhs: Reg, rhs: Reg } = 32,
-    Isnil { v: Reg } = 33,
-    Isnotnil { v: Reg } = 34,
-    Istrue { v: Reg } = 35,
-    Isfalse { v: Reg } = 36,
-    Iseqs { lhs: Reg, rhs: Lit } = 37,
-    Isnes { lhs: Reg, rhs: Lit } = 38,
-    Iseqi { lhs: Reg, rhs: Lit } = 39,
-    Isnei { lhs: Reg, rhs: Lit } = 40,
-    Iseqf { lhs: Reg, rhs: Lit } = 41,
-    Isnef { lhs: Reg, rhs: Lit } = 42,
-    Isltv { dst: Reg, lhs: Reg, rhs: Reg } = 43,
-    Islev { dst: Reg, lhs: Reg, rhs: Reg } = 44,
-    Isgtv { dst: Reg, lhs: Reg, rhs: Reg } = 45,
-    Isgev { dst: Reg, lhs: Reg, rhs: Reg } = 46,
-    Iseqv { dst: Reg, lhs: Reg, rhs: Reg } = 47,
-    Isnev { dst: Reg, lhs: Reg, rhs: Reg } = 48,
-    Addvv { dst: Reg, lhs: Reg, rhs: Reg } = 49,
-    Addvn { dst: Reg, lhs: Reg, rhs: Lit8 } = 50,
-    Addnv { dst: Reg, lhs: Lit8, rhs: Reg } = 51,
-    Subvv { dst: Reg, lhs: Reg, rhs: Reg } = 52,
-    Subvn { dst: Reg, lhs: Reg, rhs: Lit8 } = 53,
-    Subnv { dst: Reg, lhs: Lit8, rhs: Reg } = 54,
-    Mulvv { dst: Reg, lhs: Reg, rhs: Reg } = 55,
-    Mulvn { dst: Reg, lhs: Reg, rhs: Lit8 } = 56,
-    Mulnv { dst: Reg, lhs: Lit8, rhs: Reg } = 57,
-    Divvv { dst: Reg, lhs: Reg, rhs: Reg } = 58,
-    Divvn { dst: Reg, lhs: Reg, rhs: Lit8 } = 59,
-    Divnv { dst: Reg, lhs: Lit8, rhs: Reg } = 60,
-    Remvv { dst: Reg, lhs: Reg, rhs: Reg } = 61,
-    Remvn { dst: Reg, lhs: Reg, rhs: Lit8 } = 62,
-    Remnv { dst: Reg, lhs: Lit8, rhs: Reg } = 63,
-    Unm { dst: Reg, rhs: Reg } = 64,
-    Not { dst: Reg, rhs: Reg } = 65,
-    Call { dst: Reg, callee: Reg, args: Imm8 } = 66,
-    Fastcall { dst: Reg, id: FnId } = 67,
-    Hostcall { dst: Reg, id: HostId } = 68,
-    Import { _unused: Reg, id: Lit } = 69,
-    Ret {} = 70,
-    Retv { src: Reg } = 71,
-    Stop {} = 72,
+    Forloop { dst: Reg, rel: Imm16s } = 27,
+    Islt { lhs: Reg, rhs: Reg } = 28,
+    Isle { lhs: Reg, rhs: Reg } = 29,
+    Isgt { lhs: Reg, rhs: Reg } = 30,
+    Isge { lhs: Reg, rhs: Reg } = 31,
+    Iseq { lhs: Reg, rhs: Reg } = 32,
+    Isne { lhs: Reg, rhs: Reg } = 33,
+    Isnil { v: Reg } = 34,
+    Isnotnil { v: Reg } = 35,
+    Istrue { v: Reg } = 36,
+    Isfalse { v: Reg } = 37,
+    Iseqs { lhs: Reg, rhs: Lit } = 38,
+    Isnes { lhs: Reg, rhs: Lit } = 39,
+    Iseqi { lhs: Reg, rhs: Lit } = 40,
+    Isnei { lhs: Reg, rhs: Lit } = 41,
+    Iseqf { lhs: Reg, rhs: Lit } = 42,
+    Isnef { lhs: Reg, rhs: Lit } = 43,
+    Isltv { dst: Reg, lhs: Reg, rhs: Reg } = 44,
+    Islev { dst: Reg, lhs: Reg, rhs: Reg } = 45,
+    Isgtv { dst: Reg, lhs: Reg, rhs: Reg } = 46,
+    Isgev { dst: Reg, lhs: Reg, rhs: Reg } = 47,
+    Iseqv { dst: Reg, lhs: Reg, rhs: Reg } = 48,
+    Isnev { dst: Reg, lhs: Reg, rhs: Reg } = 49,
+    Addvv { dst: Reg, lhs: Reg, rhs: Reg } = 50,
+    Addvn { dst: Reg, lhs: Reg, rhs: Lit8 } = 51,
+    Addnv { dst: Reg, lhs: Lit8, rhs: Reg } = 52,
+    Subvv { dst: Reg, lhs: Reg, rhs: Reg } = 53,
+    Subvn { dst: Reg, lhs: Reg, rhs: Lit8 } = 54,
+    Subnv { dst: Reg, lhs: Lit8, rhs: Reg } = 55,
+    Mulvv { dst: Reg, lhs: Reg, rhs: Reg } = 56,
+    Mulvn { dst: Reg, lhs: Reg, rhs: Lit8 } = 57,
+    Mulnv { dst: Reg, lhs: Lit8, rhs: Reg } = 58,
+    Divvv { dst: Reg, lhs: Reg, rhs: Reg } = 59,
+    Divvn { dst: Reg, lhs: Reg, rhs: Lit8 } = 60,
+    Divnv { dst: Reg, lhs: Lit8, rhs: Reg } = 61,
+    Remvv { dst: Reg, lhs: Reg, rhs: Reg } = 62,
+    Remvn { dst: Reg, lhs: Reg, rhs: Lit8 } = 63,
+    Remnv { dst: Reg, lhs: Lit8, rhs: Reg } = 64,
+    Unm { dst: Reg, rhs: Reg } = 65,
+    Not { dst: Reg, rhs: Reg } = 66,
+    Call { dst: Reg, callee: Reg, args: Imm8 } = 67,
+    Fastcall { dst: Reg, id: FnId } = 68,
+    Hostcall { dst: Reg, id: HostId } = 69,
+    Import { _unused: Reg, id: Lit } = 70,
+    Iter { dst: Reg, target: Reg } = 71,
+    Ret {} = 72,
+    Retv { src: Reg } = 73,
+    Stop {} = 74,
 }
 
 impl Insn {
@@ -692,6 +694,10 @@ impl Insn {
             },
             Opcode::Jmp => DecodedInsn::Jmp {
                 rel: Jmp(self).rel(),
+            },
+            Opcode::Forloop => DecodedInsn::Forloop {
+                dst: Forloop(self).dst(),
+                rel: Forloop(self).rel(),
             },
             Opcode::Islt => DecodedInsn::Islt {
                 lhs: Islt(self).lhs(),
@@ -881,6 +887,10 @@ impl Insn {
                 _unused: Import(self)._unused(),
                 id: Import(self).id(),
             },
+            Opcode::Iter => DecodedInsn::Iter {
+                dst: Iter(self).dst(),
+                target: Iter(self).target(),
+            },
             Opcode::Ret => DecodedInsn::Ret {},
             Opcode::Retv => DecodedInsn::Retv {
                 src: Retv(self).src(),
@@ -919,52 +929,54 @@ pub enum Opcode {
     Llist = 24,
     Ltable = 25,
     Jmp = 26,
-    Islt = 27,
-    Isle = 28,
-    Isgt = 29,
-    Isge = 30,
-    Iseq = 31,
-    Isne = 32,
-    Isnil = 33,
-    Isnotnil = 34,
-    Istrue = 35,
-    Isfalse = 36,
-    Iseqs = 37,
-    Isnes = 38,
-    Iseqi = 39,
-    Isnei = 40,
-    Iseqf = 41,
-    Isnef = 42,
-    Isltv = 43,
-    Islev = 44,
-    Isgtv = 45,
-    Isgev = 46,
-    Iseqv = 47,
-    Isnev = 48,
-    Addvv = 49,
-    Addvn = 50,
-    Addnv = 51,
-    Subvv = 52,
-    Subvn = 53,
-    Subnv = 54,
-    Mulvv = 55,
-    Mulvn = 56,
-    Mulnv = 57,
-    Divvv = 58,
-    Divvn = 59,
-    Divnv = 60,
-    Remvv = 61,
-    Remvn = 62,
-    Remnv = 63,
-    Unm = 64,
-    Not = 65,
-    Call = 66,
-    Fastcall = 67,
-    Hostcall = 68,
-    Import = 69,
-    Ret = 70,
-    Retv = 71,
-    Stop = 72,
+    Forloop = 27,
+    Islt = 28,
+    Isle = 29,
+    Isgt = 30,
+    Isge = 31,
+    Iseq = 32,
+    Isne = 33,
+    Isnil = 34,
+    Isnotnil = 35,
+    Istrue = 36,
+    Isfalse = 37,
+    Iseqs = 38,
+    Isnes = 39,
+    Iseqi = 40,
+    Isnei = 41,
+    Iseqf = 42,
+    Isnef = 43,
+    Isltv = 44,
+    Islev = 45,
+    Isgtv = 46,
+    Isgev = 47,
+    Iseqv = 48,
+    Isnev = 49,
+    Addvv = 50,
+    Addvn = 51,
+    Addnv = 52,
+    Subvv = 53,
+    Subvn = 54,
+    Subnv = 55,
+    Mulvv = 56,
+    Mulvn = 57,
+    Mulnv = 58,
+    Divvv = 59,
+    Divvn = 60,
+    Divnv = 61,
+    Remvv = 62,
+    Remvn = 63,
+    Remnv = 64,
+    Unm = 65,
+    Not = 66,
+    Call = 67,
+    Fastcall = 68,
+    Hostcall = 69,
+    Import = 70,
+    Iter = 71,
+    Ret = 72,
+    Retv = 73,
+    Stop = 74,
 }
 #[doc = "Do nothing."]
 #[derive(Clone, Copy)]
@@ -1440,6 +1452,23 @@ impl Jmp {
     #[allow(unnecessary_transmutes)]
     pub fn rel(self) -> Imm24s {
         Imm24s(unsafe { ::core::mem::transmute(self.0.A()) })
+    }
+}
+
+#[doc = "`dst = dst + 1` (register) and adjust IP by `rel`"]
+#[derive(Clone, Copy)]
+#[repr(transparent)]
+pub struct Forloop(Insn);
+
+impl Forloop {
+    #[allow(unnecessary_transmutes)]
+    pub fn dst(self) -> Reg {
+        Reg(unsafe { ::core::mem::transmute(self.0.a()) })
+    }
+
+    #[allow(unnecessary_transmutes)]
+    pub fn rel(self) -> Imm16s {
+        Imm16s(unsafe { ::core::mem::transmute(self.0.B()) })
     }
 }
 
@@ -2267,6 +2296,25 @@ impl Import {
     }
 }
 
+#[doc = "Retrieve the iterator for `target`.
+
+`dst = builtin_get_iterator(target)`"]
+#[derive(Clone, Copy)]
+#[repr(transparent)]
+pub struct Iter(Insn);
+
+impl Iter {
+    #[allow(unnecessary_transmutes)]
+    pub fn dst(self) -> Reg {
+        Reg(unsafe { ::core::mem::transmute(self.0.a()) })
+    }
+
+    #[allow(unnecessary_transmutes)]
+    pub fn target(self) -> Reg {
+        Reg(unsafe { ::core::mem::transmute(self.0.b()) })
+    }
+}
+
 #[doc = "Return from the current call."]
 #[derive(Clone, Copy)]
 #[repr(transparent)]
@@ -2325,6 +2373,7 @@ pub mod __operands {
     pub type llist = super::Llist;
     pub type ltable = super::Ltable;
     pub type jmp = super::Jmp;
+    pub type forloop = super::Forloop;
     pub type islt = super::Islt;
     pub type isle = super::Isle;
     pub type isgt = super::Isgt;
@@ -2368,6 +2417,7 @@ pub mod __operands {
     pub type fastcall = super::Fastcall;
     pub type hostcall = super::Hostcall;
     pub type import = super::Import;
+    pub type iter = super::Iter;
     pub type ret = super::Ret;
     pub type retv = super::Retv;
     pub type stop = super::Stop;
@@ -2482,6 +2532,10 @@ pub mod asm {
     #[doc = "Adjust instruction pointer by `rel`."]
     pub const fn jmp(rel: Imm24s) -> Insn {
         op_S(Opcode::Jmp, rel.0)
+    }
+    #[doc = "`dst = dst + 1` (register) and adjust IP by `rel`"]
+    pub const fn forloop(dst: Reg, rel: Imm16s) -> Insn {
+        op_aS(Opcode::Forloop, dst.0, rel.0)
     }
     #[doc = "Skip `jmp` if `lhs < rhs` (register, register)"]
     pub const fn islt(lhs: Reg, rhs: Reg) -> Insn {
@@ -2655,6 +2709,10 @@ pub mod asm {
     pub const fn import(_unused: Reg, id: Lit) -> Insn {
         op_aB(Opcode::Import, _unused.0, id.0)
     }
+    #[doc = "Retrieve the iterator for `target`.\n\n`dst = builtin_get_iterator(target)`"]
+    pub const fn iter(dst: Reg, target: Reg) -> Insn {
+        op_abc(Opcode::Iter, dst.0, target.0, 0)
+    }
     #[doc = "Return from the current call."]
     pub const fn ret() -> Insn {
         op_abc(Opcode::Ret, 0, 0, 0)
@@ -2697,6 +2755,7 @@ pub struct JumpTable {
     pub llist: OpaqueHandler,
     pub ltable: OpaqueHandler,
     pub jmp: OpaqueHandler,
+    pub forloop: OpaqueHandler,
     pub islt: OpaqueHandler,
     pub isle: OpaqueHandler,
     pub isgt: OpaqueHandler,
@@ -2740,6 +2799,7 @@ pub struct JumpTable {
     pub fastcall: OpaqueHandler,
     pub hostcall: OpaqueHandler,
     pub import: OpaqueHandler,
+    pub iter: OpaqueHandler,
     pub ret: OpaqueHandler,
     pub retv: OpaqueHandler,
     pub stop: OpaqueHandler,

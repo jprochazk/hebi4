@@ -1,0 +1,13 @@
+---
+source: src/parser/tests.rs
+expression: snapshot
+---
+SOURCE
+//parse
+for i in 0..{} {}
+//          ^ unexpected token
+
+ERROR
+unexpected token "{"
+2 |  for i in 0..{} {}
+  |              ^

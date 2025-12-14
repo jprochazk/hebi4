@@ -1,0 +1,17 @@
+---
+source: src/vm/tests.rs
+expression: snapshot
+---
+SOURCE
+//module
+let sum = 0
+for v in [1, 2, 3, 4, 5] {
+  if v == 3 {
+    break
+  }
+  sum += v
+}
+assert_eq(sum, 3)  // 1+2 = 3
+
+OK
+Nil

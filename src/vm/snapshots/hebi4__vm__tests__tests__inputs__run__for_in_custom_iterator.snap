@@ -1,0 +1,28 @@
+---
+source: src/vm/tests.rs
+expression: snapshot
+---
+SOURCE
+//module
+// Custom iterator using a closure
+// Any function with zero arguments is a valid iterator
+fn make_counter(max) {
+  let count = 0
+  return (fn() {
+    if count >= max {
+      return nil
+    }
+    let value = count
+    count += 1
+    return value
+  })
+}
+
+let sum = 0
+for v in make_counter(3) {
+  sum += v
+}
+assert_eq(sum, 3)  // 0+1+2 = 3
+
+OK
+Nil

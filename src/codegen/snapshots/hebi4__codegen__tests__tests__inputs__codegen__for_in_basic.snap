@@ -1,0 +1,35 @@
+---
+source: src/codegen/tests.rs
+expression: snapshot
+---
+SOURCE
+do {
+for v in [1, 2, 3] {
+  print(v)
+}
+}
+
+OK
+.fn @main
+  params 0
+  stack 5
+  .locals
+    [1, 2, 3] = r1
+    v = r2
+  .code
+   0  llist r1, 3
+   1  lsmi r2, 1
+   2  sidxn r1, 0, r2
+   3  lsmi r2, 2
+   4  sidxn r1, 1, r2
+   5  lsmi r2, 3
+   6  sidxn r1, 2, r2
+   7  iter r1, r1
+   8  call r2, r1, 0   ; dyn
+   9  isnotnil r2
+  10  jmp 4   ; to 14
+  11  mov r4, r2
+  12  call r3, print
+  13  jmp -5   ; to 8
+  14  lnil r0
+  15  ret

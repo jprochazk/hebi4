@@ -1,0 +1,7 @@
+//module
+// Using an explicit iterator
+let sum = 0
+for v in list_iter([10, 20, 30]) {
+  sum += v
+}
+assert_eq(sum, 60)

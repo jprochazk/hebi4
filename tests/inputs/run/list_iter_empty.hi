@@ -1,0 +1,7 @@
+//module
+// Iteration over an empty list should immediately return nil
+let list = []
+let iter = list_iter(list)
+
+assert_eq(iter(), nil)
+assert_eq(iter(), nil)

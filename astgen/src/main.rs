@@ -727,7 +727,7 @@ fn emit_prelude(out: &mut String) {
         use super::{{
             Ast,
             IdentId, StrId, IntId, FloatId,
-            AssignOp, InfixOp, PrefixOp,
+            AssignOp, InfixOp, PrefixOp, RangeKind,
         }};
         use crate::span::{{Spanned, Span}};
         ",

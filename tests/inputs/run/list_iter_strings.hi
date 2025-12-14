@@ -1,0 +1,9 @@
+//module
+// Iteration over different types
+let list = ["hello", "world", "test"]
+let iter = list_iter(list)
+
+assert_eq(iter(), "hello")
+assert_eq(iter(), "world")
+assert_eq(iter(), "test")
+assert_eq(iter(), nil)

@@ -56,7 +56,7 @@ use value::{List, ModuleProto, Str, Table};
 
 use crate::{
     codegen::opcodes::*,
-    core::RuntimeCoreLib,
+    core::{RuntimeCoreLib, list::make_list_iter_raw},
     error::{Error, Result, error_span},
     gc::GcAnyPtr,
     module::{self, ImportBinding},
@@ -635,6 +635,7 @@ pub enum VmError {
     NotCallable,
     ModuleNotFound,
     ModuleItemNotFound,
+    NotIterable,
 
     Host,
 }
@@ -673,6 +674,7 @@ impl VmError {
             Self::NotCallable => error_span("this value cannot be called", span),
             Self::ModuleNotFound => error_span("module with this name does not exist", span),
             Self::ModuleItemNotFound => error_span("module has no such item", span),
+            Self::NotIterable => error_span("value is not an iterator or iterable", span),
 
             Self::Host => error_span("<host error>", span),
         }
@@ -680,26 +682,7 @@ impl VmError {
 
     #[inline]
     fn is_host(self) -> bool {
-        match self {
-            Self::Host => true,
-
-            Self::DivisionByZero
-            | Self::ArithTypeError
-            | Self::UnopInvalidType
-            | Self::CmpTypeError
-            | Self::NotAList
-            | Self::NotAString
-            | Self::InvalidArrayIndex
-            | Self::IndexOutOfBounds
-            | Self::NotATable
-            | Self::InvalidTableKey
-            | Self::MissingKey
-            | Self::NotIndexable
-            | Self::ArityMismatch
-            | Self::NotCallable
-            | Self::ModuleNotFound
-            | Self::ModuleItemNotFound => false,
-        }
+        matches!(self, Self::Host)
     }
 }
 
@@ -740,6 +723,7 @@ static JT: JumpTable = jump_table! {
     llist,
     ltable,
     jmp,
+    forloop,
     islt,
     isle,
     isgt,
@@ -783,6 +767,7 @@ static JT: JumpTable = jump_table! {
     fastcall,
     hostcall,
     import,
+    iter,
     ret,
     retv,
     stop,
@@ -1278,6 +1263,23 @@ unsafe fn ltable(vm: Vm, ip: Ip, args: Ltable, sp: Sp) -> Control {
 unsafe fn jmp(vm: Vm, ip: Ip, args: Jmp, sp: Sp) -> Control {
     let ip = ip.offset(args.rel().sz());
 
+    dispatch_current(vm, ip, sp)
+}
+
+#[inline(always)]
+unsafe fn forloop(vm: Vm, ip: Ip, args: Forloop, sp: Sp) -> Control {
+    let dst = sp.at(args.dst());
+
+    use ValueRaw::*;
+    match *dst {
+        Int(v) => *dst = ValueRaw::Int(v + 1),
+        Float(v) => *dst = ValueRaw::Float(v + 1.0),
+        _ => {
+            vm_exit!(vm, ip, ArithTypeError);
+        }
+    }
+
+    let ip = ip.offset(args.rel().sz());
     dispatch_current(vm, ip, sp)
 }
 
@@ -2057,6 +2059,7 @@ unsafe fn hostcall(vm: Vm, ip: Ip, args: Hostcall, sp: Sp) -> Control {
     dispatch_current(vm, ip, sp)
 }
 
+#[inline(always)]
 unsafe fn import(vm: Vm, ip: Ip, args: Import, sp: Sp) -> Control {
     let info = vm.current_literals().import_proto_unchecked(args.id());
 
@@ -2100,6 +2103,45 @@ unsafe fn module_not_found_error(ip: Ip, vm: Vm) -> Control {
 #[cold]
 unsafe fn module_item_not_found_error(ip: Ip, vm: Vm) -> Control {
     vm_exit!(vm, ip, ModuleItemNotFound);
+}
+
+#[inline(always)]
+unsafe fn iter(vm: Vm, ip: Ip, args: Iter, sp: Sp) -> Control {
+    let dst = sp.at(args.dst());
+    let target = *sp.at(args.target());
+
+    if let Some(list) = target.into_object::<List>() {
+        let iterator = make_list_iter_raw(&*vm.heap(), list);
+
+        *dst = ValueRaw::Object(iterator.as_any());
+    } else if let Some(func) = target.into_object::<Function>() {
+        if func.as_ref().arity() != 0 {
+            return not_iterable_error(ip, vm);
+        }
+
+        *dst = ValueRaw::Object(func.as_any());
+    } else if let Some(closure) = target.into_object::<Closure>() {
+        if closure.as_ref().func.as_ref().arity() != 0 {
+            return not_iterable_error(ip, vm);
+        }
+
+        *dst = ValueRaw::Object(closure.as_any());
+    } else if let Some(func) = target.into_object::<HostFunction>() {
+        if func.as_ref().arity != 0 {
+            return not_iterable_error(ip, vm);
+        }
+
+        *dst = ValueRaw::Object(func.as_any());
+    } else {
+        return not_iterable_error(ip, vm);
+    }
+
+    dispatch_next(vm, ip, sp)
+}
+
+#[cold]
+unsafe fn not_iterable_error(ip: Ip, vm: Vm) -> Control {
+    vm_exit!(vm, ip, NotIterable);
 }
 
 #[inline(always)]

@@ -1,0 +1,8 @@
+//module
+// List with nil items - iteration stops at first nil
+let count = 0
+for v in [1, nil, 3] {
+  count += 1
+}
+// Should iterate only once (stops at nil)
+assert_eq(count, 1)

@@ -13,6 +13,17 @@ stmt while {
     body: [stmt],
 };
 
+expr range(kind: RangeKind as u24) {
+    start: expr,
+    end: expr,
+};
+
+stmt for_in {
+    item: ident,
+    iter: expr,
+    body: [stmt],
+};
+
 stmt func_decl {
     name: ident,
     body: block,

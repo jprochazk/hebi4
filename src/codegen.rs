@@ -287,13 +287,13 @@ struct FunctionState<'a> {
     options: EmitOptions,
 
     name: Cow<'a, str>,
+    kind: FunctionKind,
     scopes: Vec<'a, Scope<'a>>,
     ra: RegAlloc,
     code: Vec<'a, Insn>,
     literals: Literals<'a>,
     loop_: Option<Loop<'a>>,
 
-    top_level: bool,
     upvalues: Vec<'a, Upvalue<'a>>,
 
     /// Tracking basic block boundaries
@@ -320,11 +320,19 @@ impl<'a> Scope<'a> {
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Mutability {
+    Mutable,
+    Immutable,
+}
+use Mutability::*;
+
 enum Variable<'a> {
     Local {
         name: Cow<'a, str>,
         span: Span,
         reg: Reg,
+        mutability: Mutability,
     },
     Function {
         name: Cow<'a, str>,
@@ -337,7 +345,12 @@ enum Variable<'a> {
 impl<'a> Variable<'a> {
     fn name(&self) -> &str {
         match self {
-            Variable::Local { name, span, reg } => name,
+            Variable::Local {
+                name,
+                span,
+                reg,
+                mutability,
+            } => name,
             Variable::Function {
                 name,
                 arity,
@@ -349,9 +362,15 @@ impl<'a> Variable<'a> {
 
     fn symbol(&self) -> Symbol {
         match self {
-            Variable::Local { name, span, reg } => Symbol::Local {
+            Variable::Local {
+                name,
+                span,
+                reg,
+                mutability,
+            } => Symbol::Local {
                 span: *span,
                 reg: *reg,
+                mutability: *mutability,
             },
             Variable::Function {
                 name,
@@ -878,16 +897,36 @@ impl<'a> Literals<'a> {
     }
 }
 
-struct Loop<'a> {
-    /// Points to first instruction in the loop body.
-    entry: BackwardLabel,
+enum LoopEntry<'a> {
+    Backward(BackwardLabel),
+    Forward(ForwardLabel<'a>),
+}
 
-    /// Points to after the last instruction in the loop body.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum LoopEntryKind {
+    BackwardLoopEntry,
+    ForwardLoopEntry,
+}
+use LoopEntryKind::*;
+
+struct Loop<'a> {
+    entry: Option<LoopEntry<'a>>,
     exit: ForwardLabel<'a>,
 }
 
+impl<'a> Loop<'a> {
+    fn bind_entry(&mut self, func: &mut FunctionState<'a>) -> Result<()> {
+        if let Some(LoopEntry::Forward(label)) = self.entry.take() {
+            label.bind(func)?;
+        } else {
+            unreachable!("double bind_entry");
+        }
+        Ok(())
+    }
+}
+
 struct ForwardLabel<'a> {
-    /// Position of targets to patch
+    /// Positions of targets to patch
     patch_targets: Vec<'a, usize>,
 }
 
@@ -975,6 +1014,7 @@ impl BasicForwardLabel {
     }
 }
 
+#[derive(Clone, Copy)]
 struct BackwardLabel {
     /// Instruction position
     pos: usize,
@@ -992,12 +1032,20 @@ impl BackwardLabel {
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum FunctionKind {
+    TopLevelFn,
+    InnerFn,
+}
+use FunctionKind::*;
+
 impl<'a> FunctionState<'a> {
-    fn new(options: EmitOptions, name: Cow<'a, str>, top_level: bool, buf: &'a Bump) -> Self {
+    fn new(options: EmitOptions, name: Cow<'a, str>, kind: FunctionKind, buf: &'a Bump) -> Self {
         Self {
             options,
 
             name,
+            kind,
             scopes: vec![in buf],
             ra: RegAlloc::new(),
             code: vec![in buf],
@@ -1005,7 +1053,6 @@ impl<'a> FunctionState<'a> {
             loop_: None,
             in_block: true,
 
-            top_level,
             upvalues: vec![in buf],
 
             dbg: FunctionDebug {
@@ -1033,8 +1080,11 @@ impl<'a> FunctionState<'a> {
         self.ra.end_scope(scope.reg_scope);
     }
 
-    fn begin_loop(&mut self, buf: &'a Bump) -> Option<Loop<'a>> {
-        let entry = BackwardLabel::bind(self);
+    fn begin_loop(&mut self, buf: &'a Bump, kind: LoopEntryKind) -> Option<Loop<'a>> {
+        let entry = Some(match kind {
+            ForwardLoopEntry => LoopEntry::Forward(ForwardLabel::new(buf)),
+            BackwardLoopEntry => LoopEntry::Backward(BackwardLabel::bind(self)),
+        });
         let exit = ForwardLabel::new(buf);
         self.loop_.replace(Loop { entry, exit })
     }
@@ -1045,7 +1095,7 @@ impl<'a> FunctionState<'a> {
         loop_.exit.bind(self)
     }
 
-    fn declare_local(&mut self, name: &'a str, reg: Reg, span: Span) {
+    fn declare_local(&mut self, name: &'a str, reg: Reg, span: Span, mutability: Mutability) {
         let scope = self
             .scopes
             .last_mut()
@@ -1054,6 +1104,7 @@ impl<'a> FunctionState<'a> {
             name: name.into(),
             span,
             reg,
+            mutability,
         });
         self.dbg.locals.push(Local { span, reg });
     }
@@ -1113,7 +1164,7 @@ impl<'a> FunctionState<'a> {
 
         // to support function recursion in inner scopes, we treat the function
         // or closure itself as an upvalue:
-        if !self.top_level && name == self.name {
+        if self.kind != TopLevelFn && name == self.name {
             // next time around this will be picked up by `resolve` above,
             // yielding the same upvalue
             let id = self.declare_upvalue(name, UpvalueDescriptor::Rec, span)?;
@@ -1181,8 +1232,8 @@ impl<'a> State<'a> {
         f!(self).end_scope()
     }
 
-    fn begin_loop(&mut self) -> Option<Loop<'a>> {
-        f!(self).begin_loop(self.buf)
+    fn begin_loop(&mut self, kind: LoopEntryKind) -> Option<Loop<'a>> {
+        f!(self).begin_loop(self.buf, kind)
     }
 
     fn end_loop(&mut self, prev: Option<Loop<'a>>) -> Result<()> {
@@ -1193,14 +1244,20 @@ impl<'a> State<'a> {
         self.func_stack.len() == 1 && f!(&self).scopes.len() == 1
     }
 
-    fn declare_local(&mut self, name: &'a str, span: Span) -> Result<Reg> {
+    fn declare_local(&mut self, name: &'a str, span: Span, mutability: Mutability) -> Result<Reg> {
         let reg = fresh_var(self, span)?;
-        f!(self).declare_local(name, reg, span);
+        f!(self).declare_local(name, reg, span, mutability);
         Ok(reg)
     }
 
-    fn declare_local_in(&mut self, name: &'a str, reg: Reg, span: Span) -> Result<Reg> {
-        f!(self).declare_local(name, reg, span);
+    fn declare_local_in(
+        &mut self,
+        name: &'a str,
+        reg: Reg,
+        span: Span,
+        mutability: Mutability,
+    ) -> Result<Reg> {
+        f!(self).declare_local(name, reg, span, mutability);
         Ok(reg)
     }
 
@@ -1372,11 +1429,28 @@ enum FreshVar {
 
 #[repr(align(16))]
 enum Symbol {
-    Local { span: Span, reg: Reg },
-    Upvalue { span: Span, idx: Uv },
-    ModuleVar { span: Span, idx: Mvar },
-    Function { arity: u8, span: Span, id: FnId },
-    HostFunction { arity: u8, id: HostId },
+    Local {
+        span: Span,
+        reg: Reg,
+        mutability: Mutability,
+    },
+    Upvalue {
+        span: Span,
+        idx: Uv,
+    },
+    ModuleVar {
+        span: Span,
+        idx: Mvar,
+    },
+    Function {
+        arity: u8,
+        span: Span,
+        id: FnId,
+    },
+    HostFunction {
+        arity: u8,
+        id: HostId,
+    },
 }
 
 fn emit_closure<'a>(
@@ -1453,8 +1527,12 @@ fn emit_func_inner<'a>(
         eprintln!("new func {name}");
     }
 
-    let top_level = m.is_top_level();
-    let f = FunctionState::new(m.options.clone(), name, top_level, m.buf);
+    let kind = if m.is_top_level() {
+        TopLevelFn
+    } else {
+        InnerFn
+    };
+    let f = FunctionState::new(m.options.clone(), name, kind, m.buf);
     m.func_stack.push(f);
 
     {
@@ -1463,7 +1541,7 @@ fn emit_func_inner<'a>(
         //       will be freed in `end_scope`.
         let r0 = fresh_var(m, span)?;
         for (param, &span) in params.iter().zip(param_spans.iter()) {
-            let _ = m.declare_local(param.get(), span)?;
+            let _ = m.declare_local(param.get(), span, Mutable)?;
         }
 
         let ret = eval_block(m, body, Some(r0))?;
@@ -1750,6 +1828,7 @@ fn emit_stmt<'a>(m: &mut State<'a>, stmt: Node<'a, Stmt>, span: Span) -> Result<
         ast::StmtKind::Var(node) => emit_stmt_var(m, node)?,
         ast::StmtKind::Loop(node) => emit_stmt_loop(m, node)?,
         ast::StmtKind::While(node) => emit_stmt_while(m, node)?,
+        ast::StmtKind::ForIn(node) => emit_stmt_for(m, node)?,
         ast::StmtKind::FuncDecl(node) => emit_stmt_func(m, node)?,
         ast::StmtKind::StmtExpr(node) => emit_stmt_expr(m, node, span)?,
         ast::StmtKind::Import(node) => emit_stmt_import(m, Import::Named(node), span)?,
@@ -1788,34 +1867,37 @@ fn emit_stmt_var<'a>(m: &mut State<'a>, var: Node<'a, ast::Var>) -> Result<()> {
         // variable shadowing, reuse `reg`
         let value = eval_expr_reuse(m, var.value(), var.value_span(), dst)?;
         value_force_reg(m, value, dst)?;
-        let _ = m.declare_local_in(var.name().get(), dst, var.name_span())?;
+        let _ = m.declare_local_in(var.name().get(), dst, var.name_span(), Mutable)?;
     } else {
         // fresh variable in some local scope
         let tmp = fresh_var(m, var.value_span())?;
         let value = eval_expr_reuse(m, var.value(), var.value_span(), tmp)?;
         value_force_reg(m, value, tmp)?;
-        let _ = m.declare_local_in(var.name().get(), tmp, var.name_span())?;
+        let _ = m.declare_local_in(var.name().get(), tmp, var.name_span(), Mutable)?;
     }
 
     Ok(())
 }
 
 fn emit_stmt_loop<'a>(m: &mut State<'a>, loop_: Node<'a, ast::Loop>) -> Result<()> {
-    let prev_loop = m.begin_loop();
+    let prev_loop = m.begin_loop(BackwardLoopEntry);
     m.begin_scope();
     emit_stmt_list(m, loop_.body())?;
     m.end_scope();
 
-    // unconditional jump back to start
     let span = loop_.body_spans().last().copied().unwrap_or_default();
-    let pos = f!(&m).code.len();
-    let rel = f!(&m)
+    let label = match f!(&m)
         .loop_
         .as_ref()
         .expect("some loop")
         .entry
-        .offset(pos, span)?;
-    m.emit(asm::jmp(rel), span);
+        .as_ref()
+        .expect("entry should exist")
+    {
+        LoopEntry::Backward(label) => *label,
+        LoopEntry::Forward(_) => unreachable!("loop should have backward entry"),
+    };
+    emit_backward_jmp(m, span, label)?;
 
     m.end_loop(prev_loop)?;
 
@@ -1823,7 +1905,7 @@ fn emit_stmt_loop<'a>(m: &mut State<'a>, loop_: Node<'a, ast::Loop>) -> Result<(
 }
 
 fn emit_stmt_while<'a>(m: &mut State<'a>, while_: Node<'a, ast::While>) -> Result<()> {
-    let prev_loop = m.begin_loop();
+    let prev_loop = m.begin_loop(BackwardLoopEntry);
 
     let mut loop_ = f!(m).loop_.take().expect("some loop");
 
@@ -1846,21 +1928,213 @@ fn emit_stmt_while<'a>(m: &mut State<'a>, while_: Node<'a, ast::While>) -> Resul
     emit_stmt_list(m, while_.body())?;
     m.end_scope();
 
-    let span = while_
-        .body_spans()
-        .last()
-        .copied()
-        .unwrap_or(while_.cond_span());
-    let pos = f!(&m).code.len();
-    let rel = f!(&m)
+    let label = match f!(&m)
         .loop_
         .as_ref()
         .expect("some loop")
         .entry
-        .offset(pos, span)?;
-    m.emit(asm::jmp(rel), span);
+        .as_ref()
+        .expect("entry should exist")
+    {
+        LoopEntry::Backward(label) => *label,
+        LoopEntry::Forward(_) => unreachable!("while loop should have backward entry"),
+    };
+    emit_backward_jmp(m, while_.cond_span(), label)?;
 
     m.end_loop(prev_loop)?;
+
+    Ok(())
+}
+
+fn emit_stmt_for<'a>(m: &mut State<'a>, for_: Node<'a, ast::ForIn>) -> Result<()> {
+    if let ast::ExprKind::Range(range) = for_.iter().kind() {
+        emit_stmt_for_range(m, for_, range)
+    } else {
+        emit_stmt_for_iter(m, for_)
+    }
+}
+
+/*
+for i in 0..10 {
+    print(i)
+}
+
+//   let i = eval(RANGE.start)
+//   let end = eval(RANGE.end)
+//   while i < end {  // or `<=` for inclusive
+//     do { body }
+//     i += 1
+//   }
+
+    lsmi r1, 0
+    lsmi r2, 10
+start:
+    islt r1, r2
+    jmp exit
+
+    mov r4, r1
+    call r3, print
+
+    inc r1
+    jmp start
+exit:
+*/
+
+fn emit_stmt_for_range<'a>(
+    m: &mut State<'a>,
+    for_: Node<'a, ast::ForIn>,
+    range: Node<'a, ast::Range>,
+) -> Result<()> {
+    m.begin_scope();
+
+    let control = fresh_var(m, range.start_span())?;
+    let control_v = eval_expr_reuse(m, range.start(), range.start_span(), control)?;
+    value_force_reg(m, control_v, control)?;
+    let _ = m.declare_local_in(for_.item().get(), control, for_.item_span(), Immutable)?;
+
+    let end = fresh_var(m, range.end_span())?;
+    let end_v = eval_expr_reuse(m, range.end(), range.end_span(), end)?;
+    value_force_reg(m, end_v, end)?;
+    let _ = m.declare_local_in("@end", end, for_.item_span(), Immutable)?;
+
+    let prev_loop = m.begin_loop(ForwardLoopEntry);
+
+    let condition_label = BackwardLabel::bind(f!(m));
+    let mut loop_ = f!(m).loop_.take().expect("some loop");
+    match *range.kind() {
+        ast::RangeKind::Inclusive => {
+            m.emit(asm::isle(control, end), for_.iter_span());
+        }
+        ast::RangeKind::Exclusive => {
+            m.emit(asm::islt(control, end), for_.iter_span());
+        }
+    }
+    emit_forward_jmp(m, for_.iter_span(), &mut loop_.exit);
+    f!(m).loop_ = Some(loop_);
+
+    m.begin_scope();
+    emit_stmt_list(m, for_.body())?;
+    m.end_scope();
+
+    let mut loop_ = f!(m).loop_.take().expect("some loop");
+    loop_.bind_entry(f!(m))?;
+    f!(m).loop_ = Some(loop_);
+
+    let span = for_.iter_span();
+    let pos = f!(m).code.len();
+    let offset = condition_label.offset(pos, span)?;
+    if offset.get().get() >= i16::MAX as i32 {
+        return error_span("jump offset is too large", span).into();
+    }
+    let offset = unsafe { Imm16s::new_unchecked(offset.get().get() as i16) };
+    m.emit(asm::forloop(control, offset), span);
+
+    m.end_loop(prev_loop)?;
+
+    m.end_scope();
+
+    Ok(())
+}
+
+/*
+
+// for v in EXPR
+//   let iter = iter(eval(EXPR))
+//   loop {
+//     let item = iter()
+//     if item == nil { break }
+//     do { body }
+//   }
+//
+// `iter dst, target` is an instruction:
+// - if `target` is a function, check that is 0-param, and use it
+// - for built-in types like lists, return the builtin iterator directly
+// - otherwise type error
+//
+
+
+# example:
+
+let a = [0,1,2]
+for v in a {
+  print(a)
+}
+
+# disassembly
+
+    ; a = r1
+    larr r1, 3      ; load array into r1
+    lsmi r2, 0
+    sidxn r1, 0, r2
+    lsmi r2, 1
+    sidxn r1, 0, r2
+    lsmi r2, 2
+    sidxn r1, 0, r2
+
+    ; for loop start:
+    ; iter = r2
+    ; control = r3
+    iter r2, r1     ; get iter for r1
+start:
+    call r3, r2, 0
+    isnil r3        ; to body
+    jmp exit
+
+    ; for loop body:
+    mov r5, r3
+    call r4, print
+
+    jmp start
+exit:
+
+*/
+fn emit_stmt_for_iter<'a>(m: &mut State<'a>, for_: Node<'a, ast::ForIn>) -> Result<()> {
+    m.begin_scope();
+
+    let iterable_v = eval_expr(m, for_.iter(), for_.iter_span())?;
+    let iterable = value_to_reg(m, iterable_v)?;
+
+    // NOTE: variables must be at bottom of frame, freeing `iterable` before allocating `iterator` and `control`.
+    // This is fine because we're not evaluating any other expressions which may clobber `iterable`.
+    free_reg(m, iterable);
+
+    let iterator = fresh_var(m, for_.iter_span())?;
+    let _ = m.declare_local_in("@iterator", iterator, for_.iter_span(), Immutable)?;
+    let control = fresh_var(m, for_.iter_span())?;
+    let _ = m.declare_local_in(for_.item().get(), control, for_.item_span(), Immutable)?;
+
+    m.emit(asm::iter(iterator, iterable), for_.iter_span());
+
+    let prev_loop = m.begin_loop(BackwardLoopEntry);
+
+    m.emit(
+        asm::call(control, iterator, unsafe { Imm8::new_unchecked(0) }),
+        for_.iter_span(),
+    );
+    m.emit(asm::isnotnil(control), for_.iter_span());
+    let mut loop_ = f!(m).loop_.take().expect("some loop");
+    emit_forward_jmp(m, for_.iter_span(), &mut loop_.exit);
+    f!(m).loop_ = Some(loop_);
+
+    m.begin_scope();
+    emit_stmt_list(m, for_.body())?;
+    m.end_scope();
+
+    let start = match f!(&m)
+        .loop_
+        .as_ref()
+        .expect("some loop")
+        .entry
+        .as_ref()
+        .expect("entry")
+    {
+        LoopEntry::Backward(label) => *label,
+        LoopEntry::Forward(_) => unreachable!("for-in-iter loop should have backward entry"),
+    };
+    emit_backward_jmp(m, for_.iter_span(), start)?;
+
+    m.end_loop(prev_loop)?;
+    m.end_scope();
 
     Ok(())
 }
@@ -1908,7 +2182,7 @@ fn emit_stmt_func<'a>(m: &mut State<'a>, func: Node<'a, ast::FuncDecl>) -> Resul
         m.func_table.define(id, func);
         let id = f!(m).literals.closure(closure, span)?;
 
-        let reg = m.declare_local(name, span)?;
+        let reg = m.declare_local(name, span, Immutable)?;
         m.emit(asm::lclosure(reg, id), span);
         Ok(())
     }
@@ -1945,7 +2219,7 @@ fn emit_stmt_import<'a>(m: &mut State<'a>, node: Import<'a>, span: Span) -> Resu
                     let id = m.expect_module_var(name).id;
                     bindings.push((name.to_string(), ImportBinding::Mvar(id)))
                 } else {
-                    let reg = m.declare_local(alias, item.alias_span())?;
+                    let reg = m.declare_local(alias, item.alias_span(), Immutable)?;
                     bindings.push((name.to_string(), ImportBinding::Reg(reg)))
                 }
             }
@@ -1961,7 +2235,7 @@ fn emit_stmt_import<'a>(m: &mut State<'a>, node: Import<'a>, span: Span) -> Resu
                 let id = m.expect_module_var(binding).id;
                 ImportBinding::Mvar(id)
             } else {
-                let reg = m.declare_local(binding, node.binding_span())?;
+                let reg = m.declare_local(binding, node.binding_span(), Immutable)?;
                 ImportBinding::Reg(reg)
             };
 
@@ -2012,6 +2286,7 @@ fn eval_expr_maybe_reuse<'a>(
         ast::ExprKind::Bool(node) => Ok(eval_expr_bool(m, node, span)),
         ast::ExprKind::Str(node) => Ok(eval_expr_str(m, node, span)),
         ast::ExprKind::Nil(node) => Ok(eval_expr_nil(m, node, span)),
+        ast::ExprKind::Range(_) => unreachable!("range appears outside of for-in"),
     };
 
     #[cfg(debug_assertions)]
@@ -2085,15 +2360,18 @@ fn eval_expr_continue<'a>(
     span: Span,
     dst: Option<Reg>,
 ) -> Result<Value<'a>> {
-    let Some(loop_) = f!(m).loop_.take() else {
+    let Some(mut loop_) = f!(m).loop_.take() else {
         return error_span("cannot use `continue` outside of loop", span).into();
     };
 
-    // continue = unconditional jump back to loop entry
-    let pos = f!(m).code.len();
-    let rel = loop_.entry.offset(pos, span)?;
-
-    m.emit(asm::jmp(rel), span);
+    match loop_.entry.as_mut().expect("some entry") {
+        LoopEntry::Backward(label) => {
+            emit_backward_jmp(m, span, *label)?;
+        }
+        LoopEntry::Forward(label) => {
+            emit_forward_jmp(m, span, label);
+        }
+    }
 
     f!(m).loop_ = Some(loop_);
 
@@ -2529,6 +2807,9 @@ fn eval_expr_set_var<'a>(
     {
         // when adding other symbols, remember to error out here,
         // only local variables may be assigned to
+        Symbol::Local { mutability, .. } if mutability != Mutable => {
+            return error_span("cannot assign to immutable binding", span).into();
+        }
         Symbol::Local { reg, .. } => Id::Reg(reg),
         Symbol::Upvalue { idx, .. } => Id::Uv(fresh_reg(m, span)?, idx),
         Symbol::ModuleVar { idx, .. } => Id::Mvar(fresh_reg(m, span)?, idx),
@@ -2953,7 +3234,8 @@ impl ExprInfo for Node<'_, ast::Expr> {
             | ast::ExprKind::Float64(..)
             | ast::ExprKind::Bool(..)
             | ast::ExprKind::Str(..)
-            | ast::ExprKind::Nil(..) => false,
+            | ast::ExprKind::Nil(..)
+            | ast::ExprKind::Range(..) => false,
         }
     }
 }
@@ -3699,10 +3981,20 @@ fn emit_forward_jmp<'a>(m: &mut State<'a>, span: Span, label: &mut ForwardLabel<
     }
 }
 
+fn emit_backward_jmp<'a>(m: &mut State<'a>, span: Span, label: BackwardLabel) -> Result<()> {
+    let pos = f!(m).code.len();
+    let offset = label.offset(pos, span)?;
+    m.emit(asm::jmp(offset), span);
+    Ok(())
+}
+
 fn is_basic_block_exit(prev: Insn, insn: Insn) -> bool {
     match insn.op() {
         Opcode::Jmp if is_jump_condition(prev) => false,
         Opcode::Jmp => true,
+
+        // always a backward jump
+        Opcode::Forloop => false,
 
         Opcode::Ret | Opcode::Retv | Opcode::Stop => true,
 
@@ -3774,7 +4066,8 @@ fn is_basic_block_exit(prev: Insn, insn: Insn) -> bool {
         | Opcode::Call
         | Opcode::Fastcall
         | Opcode::Hostcall
-        | Opcode::Import => false,
+        | Opcode::Import
+        | Opcode::Iter => false,
     }
 }
 
@@ -3824,6 +4117,7 @@ fn is_jump_condition(insn: Insn) -> bool {
         | Opcode::Llist
         | Opcode::Ltable
         | Opcode::Jmp
+        | Opcode::Forloop
         | Opcode::Isltv
         | Opcode::Islev
         | Opcode::Isgtv
@@ -3853,7 +4147,8 @@ fn is_jump_condition(insn: Insn) -> bool {
         | Opcode::Ret
         | Opcode::Retv
         | Opcode::Stop
-        | Opcode::Import => false,
+        | Opcode::Import
+        | Opcode::Iter => false,
     }
 }
 

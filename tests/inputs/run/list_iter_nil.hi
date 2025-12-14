@@ -1,0 +1,13 @@
+//module
+// List containing nil items
+// Cannot differentiate between nil item and end of list
+let list = [1, nil, 3, nil, 5]
+let iter = list_iter(list)
+
+assert_eq(iter(), 1)
+assert_eq(iter(), nil)
+assert_eq(iter(), 3)
+assert_eq(iter(), nil)
+assert_eq(iter(), 5)
+// After exhausting the list, still returns nil
+assert_eq(iter(), nil)

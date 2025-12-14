@@ -1,0 +1,9 @@
+let sum = 0
+for i in 0..10 {
+  if i == 5 {
+    continue
+  }
+  sum += i
+}
+print(sum)
+assert_eq(sum, 40)  // 0+1+2+3+4+6+7+8+9 = 40 (skips 5)

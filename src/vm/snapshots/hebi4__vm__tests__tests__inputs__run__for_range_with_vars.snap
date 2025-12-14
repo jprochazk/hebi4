@@ -1,0 +1,21 @@
+---
+source: src/vm/tests.rs
+expression: snapshot
+---
+SOURCE
+do {
+let start = 2
+let end = 7
+let sum = 0
+for i in start..end {
+  sum += i
+}
+print(sum)
+assert_eq(sum, 20)  // 2+3+4+5+6 = 20
+}
+
+OK
+Nil
+
+STDOUT
+20

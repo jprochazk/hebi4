@@ -1,0 +1,21 @@
+---
+source: src/vm/tests.rs
+expression: snapshot
+---
+SOURCE
+//module
+// Basic iteration over a list
+let list = [1, 2, 3, 4, 5]
+let iter = list_iter(list)
+
+assert_eq(iter(), 1)
+assert_eq(iter(), 2)
+assert_eq(iter(), 3)
+assert_eq(iter(), 4)
+assert_eq(iter(), 5)
+// Should return nil after exhausting the list
+assert_eq(iter(), nil)
+assert_eq(iter(), nil)
+
+OK
+Nil

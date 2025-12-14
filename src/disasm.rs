@@ -152,6 +152,9 @@ impl std::fmt::Display for DisasmInsnWithSrc<'_> {
             I::Llist { dst, cap } => writeln!(f, "llist {dst}, {cap}")?,
             I::Ltable { dst, cap } => writeln!(f, "ltable {dst}, {cap}")?,
             I::Jmp { rel } => writeln!(f, "jmp {rel}   ; to {}", (i as isize) + rel.sz())?,
+            I::Forloop { dst, rel } => {
+                writeln!(f, "forloop {dst}, {rel}   ; to {}", (i as isize) + rel.sz())?
+            }
             I::Islt { lhs, rhs } => writeln!(f, "islt {lhs}, {rhs}")?,
             I::Isle { lhs, rhs } => writeln!(f, "isle {lhs}, {rhs}")?,
             I::Isgt { lhs, rhs } => writeln!(f, "isgt {lhs}, {rhs}")?,
@@ -237,6 +240,7 @@ impl std::fmt::Display for DisasmInsnWithSrc<'_> {
             I::Import { _unused, id } => {
                 writeln!(f, "import {id}   ; {v}", v = func.literal(id.zx()))?
             }
+            I::Iter { dst, target } => writeln!(f, "iter {dst}, {target}")?,
             I::Ret {} => writeln!(f, "ret")?,
             I::Retv { src } => writeln!(f, "retv {src}")?,
             I::Stop {} => writeln!(f, "stop")?,
@@ -277,6 +281,7 @@ impl std::fmt::Display for DecodedInsn {
             I::Llist { dst, cap } => write!(f, "llist {dst}, {cap}"),
             I::Ltable { dst, cap } => write!(f, "ltable {dst}, {cap}"),
             I::Jmp { rel } => write!(f, "jmp {rel}"),
+            I::Forloop { dst, rel } => write!(f, "forloop {dst}, {rel}"),
             I::Islt { lhs, rhs } => write!(f, "islt {lhs}, {rhs}"),
             I::Isle { lhs, rhs } => write!(f, "isle {lhs}, {rhs}"),
             I::Isgt { lhs, rhs } => write!(f, "isgt {lhs}, {rhs}"),
@@ -320,6 +325,7 @@ impl std::fmt::Display for DecodedInsn {
             I::Fastcall { dst, id } => write!(f, "call {dst}, {id}"),
             I::Hostcall { dst, id } => write!(f, "call {dst}, {id}"),
             I::Import { _unused, id } => write!(f, "import {id}"),
+            I::Iter { dst, target } => write!(f, "iter {dst}, {target}"),
             I::Ret {} => write!(f, "ret"),
             I::Retv { src } => write!(f, "retv {src}"),
             I::Stop {} => write!(f, "stop"),

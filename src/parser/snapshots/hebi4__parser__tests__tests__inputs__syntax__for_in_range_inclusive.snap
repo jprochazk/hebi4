@@ -1,0 +1,28 @@
+---
+source: src/parser/tests.rs
+expression: snapshot
+---
+SOURCE
+//parse
+for i in 0..=1 {}
+
+OK
+Root(
+    [
+        ForIn(
+            Ident(
+                "i",
+            ),
+            Range(
+                Inclusive,
+                Int32(
+                    0,
+                ),
+                Int32(
+                    1,
+                ),
+            ),
+            [],
+        ),
+    ],
+)

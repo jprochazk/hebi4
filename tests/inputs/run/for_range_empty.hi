@@ -1,0 +1,11 @@
+let count = 0
+for i in 5..5 {
+  count += 1
+}
+print(count)
+assert_eq(count, 0)
+
+for i in 10..5 {
+  count += 1
+}
+assert_eq(count, 0)

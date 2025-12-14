@@ -1,0 +1,31 @@
+---
+source: src/vm/tests.rs
+expression: snapshot
+---
+SOURCE
+do {
+let sum = 0
+for i in 0..3 {
+  for j in 0..3 {
+    sum += i * 10 + j
+    print(i * 10 + j)
+  }
+}
+print(sum)
+assert_eq(sum, 99)  // 0+1+2+10+11+12+20+21+22 = 99
+}
+
+OK
+Nil
+
+STDOUT
+0
+1
+2
+10
+11
+12
+20
+21
+22
+99

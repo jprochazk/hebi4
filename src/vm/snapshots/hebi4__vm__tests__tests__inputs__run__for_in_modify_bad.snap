@@ -1,0 +1,46 @@
+---
+source: src/vm/tests.rs
+expression: snapshot
+---
+SOURCE
+//module
+// Modifying list during iteration should always error
+let list = [1, 2, 3]
+for v in list {
+  append(list, 4)
+}
+
+ERROR
+list size changed during iteration
+4 |  for v in list {
+  |           ^^^^
+
+
+DISASM:
+
+.fn @main
+  params 0
+  stack 6
+  .locals
+    list = r1
+    v = r2
+  .code
+   0  llist r1, 3
+   1  lsmi r2, 1
+   2  sidxn r1, 0, r2
+   3  lsmi r2, 2
+   4  sidxn r1, 1, r2
+   5  lsmi r2, 3
+   6  sidxn r1, 2, r2
+   7  smvar m0, r1
+   8  lmvar r1, m0
+   9  iter r1, r1
+  10  call r2, r1, 0   ; dyn
+  11  isnotnil r2
+  12  jmp 5   ; to 17
+  13  lmvar r4, m0
+  14  lsmi r5, 4
+  15  call r3, append
+  16  jmp -6   ; to 10
+  17  lnil r0
+  18  ret

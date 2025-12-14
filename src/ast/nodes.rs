@@ -3,7 +3,7 @@
 // See `astgen/src/main.rs` and `astgen/src/runtime.rs`
 #![allow(dead_code, unused_variables)]
 
-use super::{AssignOp, Ast, FloatId, IdentId, InfixOp, IntId, PrefixOp, StrId};
+use super::{AssignOp, Ast, FloatId, IdentId, InfixOp, IntId, PrefixOp, RangeKind, StrId};
 use crate::span::{Span, Spanned};
 
 mod private {
@@ -796,39 +796,41 @@ pub enum NodeKind {
     Var = 2,
     Loop = 3,
     While = 4,
-    FuncDecl = 5,
-    Import = 6,
-    ImportBare = 7,
-    StmtExpr = 8,
-    Return = 9,
-    Break = 10,
-    Continue = 11,
-    IfSimple = 12,
-    IfMulti = 13,
-    Block = 14,
-    FuncAnon = 15,
-    GetVar = 16,
-    SetVar = 17,
-    GetField = 18,
-    SetField = 19,
-    GetIndex = 20,
-    SetIndex = 21,
-    Call = 22,
-    Infix = 23,
-    Prefix = 24,
-    List = 25,
-    Table = 26,
-    Int32 = 27,
-    Int64 = 28,
-    Float32 = 29,
-    Float64 = 30,
-    Bool = 31,
-    Str = 32,
-    Nil = 33,
-    ImportItem = 34,
-    Branch = 35,
-    TableEntry = 36,
-    Ident = 37,
+    ForIn = 5,
+    FuncDecl = 6,
+    Import = 7,
+    ImportBare = 8,
+    StmtExpr = 9,
+    Range = 10,
+    Return = 11,
+    Break = 12,
+    Continue = 13,
+    IfSimple = 14,
+    IfMulti = 15,
+    Block = 16,
+    FuncAnon = 17,
+    GetVar = 18,
+    SetVar = 19,
+    GetField = 20,
+    SetField = 21,
+    GetIndex = 22,
+    SetIndex = 23,
+    Call = 24,
+    Infix = 25,
+    Prefix = 26,
+    List = 27,
+    Table = 28,
+    Int32 = 29,
+    Int64 = 30,
+    Float32 = 31,
+    Float64 = 32,
+    Bool = 33,
+    Str = 34,
+    Nil = 35,
+    ImportItem = 36,
+    Branch = 37,
+    TableEntry = 38,
+    Ident = 39,
     None = 255,
 }
 
@@ -839,39 +841,41 @@ impl NodeKind {
             ("Var", 2),
             ("Loop", 3),
             ("While", 4),
-            ("FuncDecl", 5),
-            ("Import", 6),
-            ("ImportBare", 7),
-            ("StmtExpr", 8),
-            ("Return", 9),
-            ("Break", 10),
-            ("Continue", 11),
-            ("IfSimple", 12),
-            ("IfMulti", 13),
-            ("Block", 14),
-            ("FuncAnon", 15),
-            ("GetVar", 16),
-            ("SetVar", 17),
-            ("GetField", 18),
-            ("SetField", 19),
-            ("GetIndex", 20),
-            ("SetIndex", 21),
-            ("Call", 22),
-            ("Infix", 23),
-            ("Prefix", 24),
-            ("List", 25),
-            ("Table", 26),
-            ("Int32", 27),
-            ("Int64", 28),
-            ("Float32", 29),
-            ("Float64", 30),
-            ("Bool", 31),
-            ("Str", 32),
-            ("Nil", 33),
-            ("ImportItem", 34),
-            ("Branch", 35),
-            ("TableEntry", 36),
-            ("Ident", 37),
+            ("ForIn", 5),
+            ("FuncDecl", 6),
+            ("Import", 7),
+            ("ImportBare", 8),
+            ("StmtExpr", 9),
+            ("Range", 10),
+            ("Return", 11),
+            ("Break", 12),
+            ("Continue", 13),
+            ("IfSimple", 14),
+            ("IfMulti", 15),
+            ("Block", 16),
+            ("FuncAnon", 17),
+            ("GetVar", 18),
+            ("SetVar", 19),
+            ("GetField", 20),
+            ("SetField", 21),
+            ("GetIndex", 22),
+            ("SetIndex", 23),
+            ("Call", 24),
+            ("Infix", 25),
+            ("Prefix", 26),
+            ("List", 27),
+            ("Table", 28),
+            ("Int32", 29),
+            ("Int64", 30),
+            ("Float32", 31),
+            ("Float64", 32),
+            ("Bool", 33),
+            ("Str", 34),
+            ("Nil", 35),
+            ("ImportItem", 36),
+            ("Branch", 37),
+            ("TableEntry", 38),
+            ("Ident", 39),
             ("None", 255),
         ]
     }
@@ -882,6 +886,7 @@ pub enum StmtKind<'a> {
     Var(Node<'a, Var>) = NodeKind::Var as u8,
     Loop(Node<'a, Loop>) = NodeKind::Loop as u8,
     While(Node<'a, While>) = NodeKind::While as u8,
+    ForIn(Node<'a, ForIn>) = NodeKind::ForIn as u8,
     FuncDecl(Node<'a, FuncDecl>) = NodeKind::FuncDecl as u8,
     Import(Node<'a, Import>) = NodeKind::Import as u8,
     ImportBare(Node<'a, ImportBare>) = NodeKind::ImportBare as u8,
@@ -904,6 +909,10 @@ impl<'a> Node<'a, Stmt> {
             NodeKind::While => StmtKind::While(Node {
                 ast: self.ast,
                 node: unsafe { *While::from_packed(&node.0) },
+            }),
+            NodeKind::ForIn => StmtKind::ForIn(Node {
+                ast: self.ast,
+                node: unsafe { *ForIn::from_packed(&node.0) },
             }),
             NodeKind::FuncDecl => StmtKind::FuncDecl(Node {
                 ast: self.ast,
@@ -928,6 +937,7 @@ impl<'a> Node<'a, Stmt> {
 }
 #[repr(u8)]
 pub enum ExprKind<'a> {
+    Range(Node<'a, Range>) = NodeKind::Range as u8,
     Return(Node<'a, Return>) = NodeKind::Return as u8,
     Break(Node<'a, Break>) = NodeKind::Break as u8,
     Continue(Node<'a, Continue>) = NodeKind::Continue as u8,
@@ -960,6 +970,10 @@ impl<'a> Node<'a, Expr> {
     pub fn kind(&self) -> ExprKind<'a> {
         let node: Expr = self.node;
         match node.0.kind() {
+            NodeKind::Range => ExprKind::Range(Node {
+                ast: self.ast,
+                node: unsafe { *Range::from_packed(&node.0) },
+            }),
             NodeKind::Return => ExprKind::Return(Node {
                 ast: self.ast,
                 node: unsafe { *Return::from_packed(&node.0) },
@@ -1145,6 +1159,19 @@ impl From<While> for Packed {
 
 #[derive(Clone, Copy)]
 #[repr(transparent)]
+pub struct ForIn(Packed);
+
+impl Sealed for ForIn {}
+
+impl From<ForIn> for Packed {
+    #[inline]
+    fn from(v: ForIn) -> Self {
+        v.0
+    }
+}
+
+#[derive(Clone, Copy)]
+#[repr(transparent)]
 pub struct FuncDecl(Packed);
 
 impl Sealed for FuncDecl {}
@@ -1191,6 +1218,19 @@ impl Sealed for StmtExpr {}
 impl From<StmtExpr> for Packed {
     #[inline]
     fn from(v: StmtExpr) -> Self {
+        v.0
+    }
+}
+
+#[derive(Clone, Copy)]
+#[repr(transparent)]
+pub struct Range(Packed);
+
+impl Sealed for Range {}
+
+impl From<Range> for Packed {
+    #[inline]
+    fn from(v: Range) -> Self {
         v.0
     }
 }
@@ -1596,7 +1636,7 @@ impl TryFrom<Packed> for Stmt {
 unsafe impl PackedAbi for Expr {
     #[inline]
     fn check_kind(kind: NodeKind) -> bool {
-        kind >= NodeKind::Return && kind <= NodeKind::Nil
+        kind >= NodeKind::Range && kind <= NodeKind::Nil
     }
 }
 
@@ -1657,6 +1697,14 @@ unsafe impl PackedAbi for While {
 }
 
 /// SAFETY: `self` is a transparent wrapper over `Packed`.
+unsafe impl PackedAbi for ForIn {
+    #[inline]
+    fn check_kind(kind: NodeKind) -> bool {
+        kind == NodeKind::ForIn
+    }
+}
+
+/// SAFETY: `self` is a transparent wrapper over `Packed`.
 unsafe impl PackedAbi for FuncDecl {
     #[inline]
     fn check_kind(kind: NodeKind) -> bool {
@@ -1685,6 +1733,14 @@ unsafe impl PackedAbi for StmtExpr {
     #[inline]
     fn check_kind(kind: NodeKind) -> bool {
         kind == NodeKind::StmtExpr
+    }
+}
+
+/// SAFETY: `self` is a transparent wrapper over `Packed`.
+unsafe impl PackedAbi for Range {
+    #[inline]
+    fn check_kind(kind: NodeKind) -> bool {
+        kind == NodeKind::Range
     }
 }
 
@@ -1977,6 +2033,25 @@ impl TryFrom<Stmt> for While {
     }
 }
 
+impl From<ForIn> for Stmt {
+    #[inline]
+    fn from(v: ForIn) -> Self {
+        Stmt(v.0)
+    }
+}
+
+impl TryFrom<Stmt> for ForIn {
+    type Error = NodeCastError;
+    #[inline]
+    fn try_from(v: Stmt) -> Result<Self, Self::Error> {
+        if !matches!(v.0.kind(), NodeKind::ForIn) {
+            return Err(NodeCastError);
+        }
+
+        Ok(Self(v.0))
+    }
+}
+
 impl From<FuncDecl> for Stmt {
     #[inline]
     fn from(v: FuncDecl) -> Self {
@@ -2046,6 +2121,25 @@ impl TryFrom<Stmt> for StmtExpr {
     #[inline]
     fn try_from(v: Stmt) -> Result<Self, Self::Error> {
         if !matches!(v.0.kind(), NodeKind::StmtExpr) {
+            return Err(NodeCastError);
+        }
+
+        Ok(Self(v.0))
+    }
+}
+
+impl From<Range> for Expr {
+    #[inline]
+    fn from(v: Range) -> Self {
+        Expr(v.0)
+    }
+}
+
+impl TryFrom<Expr> for Range {
+    type Error = NodeCastError;
+    #[inline]
+    fn try_from(v: Expr) -> Result<Self, Self::Error> {
+        if !matches!(v.0.kind(), NodeKind::Range) {
             return Err(NodeCastError);
         }
 
@@ -2544,6 +2638,11 @@ pub mod spanned {
         pub cond: Spanned<super::Expr>,
         pub body: &'a [Spanned<super::Stmt>],
     }
+    pub struct ForIn<'a> {
+        pub item: Spanned<super::Ident>,
+        pub iter: Spanned<super::Expr>,
+        pub body: &'a [Spanned<super::Stmt>],
+    }
     pub struct FuncDecl<'a> {
         pub name: Spanned<super::Ident>,
         pub body: Spanned<super::Block>,
@@ -2559,6 +2658,11 @@ pub mod spanned {
     }
     pub struct StmtExpr {
         pub inner: Spanned<super::Expr>,
+    }
+    pub struct Range {
+        pub start: Spanned<super::Expr>,
+        pub end: Spanned<super::Expr>,
+        pub kind: super::RangeKind,
     }
     pub struct Return {
         pub value: Spanned<Opt<super::Expr>>,
@@ -2734,6 +2838,28 @@ impl<'a> Pack for spanned::While<'a> {
     }
 }
 
+impl<'a> Pack for spanned::ForIn<'a> {
+    type Node = ForIn;
+
+    #[inline]
+    fn pack(self, ast: &mut Ast) -> Self::Node {
+        let Self { item, iter, body } = self;
+        let item = item.map(|v| v.0);
+        let iter = iter.map(|v| v.0);
+        let index = ast.append(&[item, iter]);
+
+        let length = body.len();
+        if length > u24::MAX.get() as usize {
+            panic!("length is out of bounds for u24");
+        }
+        let length = u24::new(length as u32);
+        let body = <_>::into_spanned_packed_slice(body);
+        let _ = ast.append(body);
+        let node = Packed::mixed_arity(NodeKind::ForIn, length, index);
+        ForIn(node)
+    }
+}
+
 impl<'a> Pack for spanned::FuncDecl<'a> {
     type Node = FuncDecl;
 
@@ -2801,6 +2927,21 @@ impl Pack for spanned::StmtExpr {
         let index = ast.append(&[inner]);
         let node = Packed::fixed_arity(NodeKind::StmtExpr, index);
         StmtExpr(node)
+    }
+}
+
+impl Pack for spanned::Range {
+    type Node = Range;
+
+    #[inline]
+    fn pack(self, ast: &mut Ast) -> Self::Node {
+        let Self { kind, start, end } = self;
+        let start = start.map(|v| v.0);
+        let end = end.map(|v| v.0);
+        let index = ast.append(&[start, end]);
+        let kind: u24 = kind.into_u24();
+        let node = Packed::fixed_arity_inline(NodeKind::Range, kind, index);
+        Range(node)
     }
 }
 
@@ -3346,6 +3487,51 @@ impl<'a> Node<'a, While> {
     }
 }
 
+impl<'a> Node<'a, ForIn> {
+    #[inline(always)]
+    pub fn item(&self) -> Node<'a, Ident> {
+        const OFFSET: usize = 0;
+        let repr = unsafe { self.node.0.as_mixed_arity() };
+        let index = repr.index as usize;
+        let node = unsafe { self.ast.nodes.get_unchecked(index + OFFSET) };
+        Node {
+            ast: self.ast,
+            node: unsafe { *<Ident>::from_packed(node) },
+        }
+    }
+
+    #[inline(always)]
+    pub fn iter(&self) -> Node<'a, Expr> {
+        const OFFSET: usize = 1;
+        let repr = unsafe { self.node.0.as_mixed_arity() };
+        let index = repr.index as usize;
+        let node = unsafe { self.ast.nodes.get_unchecked(index + OFFSET) };
+        Node {
+            ast: self.ast,
+            node: unsafe { *<Expr>::from_packed(node) },
+        }
+    }
+
+    #[inline]
+    pub fn body(&self) -> NodeList<'a, Stmt> {
+        const OFFSET: usize = 2;
+        let repr = unsafe { self.node.0.as_mixed_arity() };
+        let index = repr.index as usize;
+        let length = repr.tail_length.get() as usize;
+        let nodes = unsafe {
+            self.ast
+                .nodes
+                .get_unchecked(index + OFFSET..index + OFFSET + length)
+        };
+        NodeList {
+            ast: self.ast,
+            first_node_index: index + OFFSET,
+            len: length,
+            _type: PhantomData,
+        }
+    }
+}
+
 impl<'a> Node<'a, FuncDecl> {
     #[inline(always)]
     pub fn name(&self) -> Node<'a, Ident> {
@@ -3460,6 +3646,41 @@ impl<'a> Node<'a, StmtExpr> {
         Node {
             ast: self.ast,
             node: unsafe { *<Expr>::from_packed(node) },
+        }
+    }
+}
+
+impl<'a> Node<'a, Range> {
+    #[inline(always)]
+    pub fn start(&self) -> Node<'a, Expr> {
+        const OFFSET: usize = 0;
+        let repr = unsafe { self.node.0.as_fixed_arity_inline() };
+        let index = repr.index as usize;
+        let node = unsafe { self.ast.nodes.get_unchecked(index + OFFSET) };
+        Node {
+            ast: self.ast,
+            node: unsafe { *<Expr>::from_packed(node) },
+        }
+    }
+
+    #[inline(always)]
+    pub fn end(&self) -> Node<'a, Expr> {
+        const OFFSET: usize = 1;
+        let repr = unsafe { self.node.0.as_fixed_arity_inline() };
+        let index = repr.index as usize;
+        let node = unsafe { self.ast.nodes.get_unchecked(index + OFFSET) };
+        Node {
+            ast: self.ast,
+            node: unsafe { *<Expr>::from_packed(node) },
+        }
+    }
+
+    #[inline(always)]
+    pub fn kind(&self) -> ValueNode<'a, RangeKind> {
+        let repr = unsafe { self.node.0.as_fixed_arity_inline() };
+        ValueNode {
+            ast: self.ast,
+            value: <RangeKind>::from_u24(repr.value),
         }
     }
 }
@@ -4141,6 +4362,30 @@ impl<'a> Node<'a, While> {
     }
 }
 
+impl<'a> Node<'a, ForIn> {
+    #[inline]
+    pub fn item_span(&self) -> Span {
+        let repr = unsafe { self.0.as_mixed_arity() };
+        let index = repr.index as usize;
+        self.ast.spans[index + 0]
+    }
+
+    #[inline]
+    pub fn iter_span(&self) -> Span {
+        let repr = unsafe { self.0.as_mixed_arity() };
+        let index = repr.index as usize;
+        self.ast.spans[index + 1]
+    }
+
+    #[inline]
+    pub fn body_spans(&self) -> &'a [Span] {
+        let repr = unsafe { self.0.as_mixed_arity() };
+        let index = 2 + repr.index as usize;
+        let tail_length = repr.tail_length.get() as usize;
+        &self.ast.spans[index..index + tail_length]
+    }
+}
+
 impl<'a> Node<'a, FuncDecl> {
     #[inline]
     pub fn name_span(&self) -> Span {
@@ -4204,6 +4449,22 @@ impl<'a> Node<'a, StmtExpr> {
         let repr = unsafe { self.0.as_fixed_arity() };
         let index = repr.index as usize;
         self.ast.spans[index + 0]
+    }
+}
+
+impl<'a> Node<'a, Range> {
+    #[inline]
+    pub fn start_span(&self) -> Span {
+        let repr = unsafe { self.0.as_fixed_arity_inline() };
+        let index = repr.index as usize;
+        self.ast.spans[index + 0]
+    }
+
+    #[inline]
+    pub fn end_span(&self) -> Span {
+        let repr = unsafe { self.0.as_fixed_arity_inline() };
+        let index = repr.index as usize;
+        self.ast.spans[index + 1]
     }
 }
 
@@ -4497,6 +4758,7 @@ impl<'a> std::fmt::Debug for Node<'a, Stmt> {
             StmtKind::Var(node) => std::fmt::Debug::fmt(&node, f),
             StmtKind::Loop(node) => std::fmt::Debug::fmt(&node, f),
             StmtKind::While(node) => std::fmt::Debug::fmt(&node, f),
+            StmtKind::ForIn(node) => std::fmt::Debug::fmt(&node, f),
             StmtKind::FuncDecl(node) => std::fmt::Debug::fmt(&node, f),
             StmtKind::Import(node) => std::fmt::Debug::fmt(&node, f),
             StmtKind::ImportBare(node) => std::fmt::Debug::fmt(&node, f),
@@ -4508,6 +4770,7 @@ impl<'a> std::fmt::Debug for Node<'a, Stmt> {
 impl<'a> std::fmt::Debug for Node<'a, Expr> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.kind() {
+            ExprKind::Range(node) => std::fmt::Debug::fmt(&node, f),
             ExprKind::Return(node) => std::fmt::Debug::fmt(&node, f),
             ExprKind::Break(node) => std::fmt::Debug::fmt(&node, f),
             ExprKind::Continue(node) => std::fmt::Debug::fmt(&node, f),
@@ -4579,6 +4842,18 @@ impl<'a> std::fmt::Debug for Node<'a, While> {
     }
 }
 
+impl<'a> std::fmt::Debug for Node<'a, ForIn> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("ForIn")
+            .field(&self.item())
+            .field(&self.iter())
+            .field(&DebugIter(self.body().iter()))
+            .finish()?;
+
+        Ok(())
+    }
+}
+
 impl<'a> std::fmt::Debug for Node<'a, FuncDecl> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_tuple("FuncDecl")
@@ -4616,6 +4891,18 @@ impl<'a> std::fmt::Debug for Node<'a, ImportBare> {
 impl<'a> std::fmt::Debug for Node<'a, StmtExpr> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_tuple("StmtExpr").field(&self.inner()).finish()?;
+
+        Ok(())
+    }
+}
+
+impl<'a> std::fmt::Debug for Node<'a, Range> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("Range")
+            .field(&self.kind())
+            .field(&self.start())
+            .field(&self.end())
+            .finish()?;
 
         Ok(())
     }

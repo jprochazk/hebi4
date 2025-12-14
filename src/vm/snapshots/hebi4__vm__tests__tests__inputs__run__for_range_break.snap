@@ -1,0 +1,22 @@
+---
+source: src/vm/tests.rs
+expression: snapshot
+---
+SOURCE
+do {
+let sum = 0
+for i in 0..10 {
+  if i == 5 {
+    break
+  }
+  sum += i
+}
+print(sum)
+assert_eq(sum, 10)  // 0+1+2+3+4 = 10
+}
+
+OK
+Nil
+
+STDOUT
+10

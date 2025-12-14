@@ -20,7 +20,6 @@ loop {
   i += 1
 }
 
-// Test with special characters
 let text2 = "a\n\r"
 let bytes2 = bytes(text2)
 let expected2 = [97, 10, 13]

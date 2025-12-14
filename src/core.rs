@@ -153,12 +153,12 @@ impl RuntimeCoreLib {
     }
 }
 
-mod convert;
-mod fmt;
-mod list;
-mod math;
-mod panic;
-mod str;
+pub(crate) mod convert;
+pub(crate) mod fmt;
+pub(crate) mod list;
+pub(crate) mod math;
+pub(crate) mod panic;
+pub(crate) mod str;
 
 static CORE_LIB: CoreLibData = functions! {
     fmt::print,
@@ -167,6 +167,7 @@ static CORE_LIB: CoreLibData = functions! {
     list::map,
     list::append,
     list::list_len,
+    list::list_iter,
     math::powi,
     math::powf,
     convert::to_str,
