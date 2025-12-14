@@ -1950,25 +1950,6 @@ fn emit_stmt_for<'a>(m: &mut State<'a>, for_: Node<'a, ast::ForIn>) -> Result<()
     if let ast::ExprKind::Range(range) = for_.iter().kind() {
         emit_stmt_for_range(m, for_, range)
     } else {
-        // for v in EXPR
-        //   let iter = iter(eval(EXPR)) // returns `fn() -> T?`
-        //   let item = next(iter) // returns `T?`
-        //   while item != nil {
-        //     do { body }
-        //     item = next(iter)
-        //   }
-        //
-        // `iter` and `next` are instructions
-        //
-        // `iter dst, target`:
-        // - for built-in types like lists, returns an iterator directly
-        // - otherwise calls `target["iter"]`, and checks that the return value
-        //   is a function with zero arguments
-        //
-        // `next dst, iter`:
-        // - exactly like a zero-argument `call dst, iter`, but no arity checking
-        //
-
         emit_stmt_for_iter(m, for_)
     }
 }
@@ -2055,6 +2036,58 @@ fn emit_stmt_for_range<'a>(
     Ok(())
 }
 
+/*
+
+// for v in EXPR
+//   let iter = iter(eval(EXPR))
+//   loop {
+//     let item = iter()
+//     if item == nil { break }
+//     do { body }
+//   }
+//
+// `iter dst, target` is an instruction:
+// - if `target` is a function, check that is 0-param, and use it
+// - for built-in types like lists, return the builtin iterator directly
+// - otherwise type error
+//
+
+
+# example:
+
+let a = [0,1,2]
+for v in a {
+  print(a)
+}
+
+# disassembly
+
+    ; a = r1
+    larr r1, 3      ; load array into r1
+    lsmi r2, 0
+    sidxn r1, 0, r2
+    lsmi r2, 1
+    sidxn r1, 0, r2
+    lsmi r2, 2
+    sidxn r1, 0, r2
+
+    ; for loop start:
+    ; iter = r2
+    ; control = r3
+    iter r2, r1     ; get iter for r1
+start:
+    call r3, r2, 0
+    isnil r3        ; to body
+    jmp exit
+
+    ; for loop body:
+    mov r5, r3
+    call r4, print
+
+    jmp start
+exit:
+
+*/
 fn emit_stmt_for_iter<'a>(m: &mut State<'a>, for_: Node<'a, ast::ForIn>) -> Result<()> {
     todo!()
 }
@@ -3986,7 +4019,8 @@ fn is_basic_block_exit(prev: Insn, insn: Insn) -> bool {
         | Opcode::Call
         | Opcode::Fastcall
         | Opcode::Hostcall
-        | Opcode::Import => false,
+        | Opcode::Import
+        | Opcode::Iter => false,
     }
 }
 
@@ -4066,7 +4100,8 @@ fn is_jump_condition(insn: Insn) -> bool {
         | Opcode::Ret
         | Opcode::Retv
         | Opcode::Stop
-        | Opcode::Import => false,
+        | Opcode::Import
+        | Opcode::Iter => false,
     }
 }
 

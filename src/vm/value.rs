@@ -93,6 +93,12 @@ impl ValueRaw {
             ValueRaw::Object(v) => ValueRoot::Object(root.init_raw_any(heap, v)),
         }
     }
+
+    #[inline]
+    pub(crate) unsafe fn int_unchecked(self) -> i64 {
+        let ptr = &raw const self;
+        ptr.cast::<u64>().add(1).cast::<i64>().read()
+    }
 }
 
 pub mod closure;

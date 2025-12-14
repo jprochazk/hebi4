@@ -576,9 +576,10 @@ pub enum DecodedInsn {
     Fastcall { dst: Reg, id: FnId } = 68,
     Hostcall { dst: Reg, id: HostId } = 69,
     Import { _unused: Reg, id: Lit } = 70,
-    Ret {} = 71,
-    Retv { src: Reg } = 72,
-    Stop {} = 73,
+    Iter { dst: Reg, target: Reg } = 71,
+    Ret {} = 72,
+    Retv { src: Reg } = 73,
+    Stop {} = 74,
 }
 
 impl Insn {
@@ -886,6 +887,10 @@ impl Insn {
                 _unused: Import(self)._unused(),
                 id: Import(self).id(),
             },
+            Opcode::Iter => DecodedInsn::Iter {
+                dst: Iter(self).dst(),
+                target: Iter(self).target(),
+            },
             Opcode::Ret => DecodedInsn::Ret {},
             Opcode::Retv => DecodedInsn::Retv {
                 src: Retv(self).src(),
@@ -968,9 +973,10 @@ pub enum Opcode {
     Fastcall = 68,
     Hostcall = 69,
     Import = 70,
-    Ret = 71,
-    Retv = 72,
-    Stop = 73,
+    Iter = 71,
+    Ret = 72,
+    Retv = 73,
+    Stop = 74,
 }
 #[doc = "Do nothing."]
 #[derive(Clone, Copy)]
@@ -2290,6 +2296,25 @@ impl Import {
     }
 }
 
+#[doc = "Retrieve the iterator for `target`.
+
+`dst = builtin_get_iterator(target)`"]
+#[derive(Clone, Copy)]
+#[repr(transparent)]
+pub struct Iter(Insn);
+
+impl Iter {
+    #[allow(unnecessary_transmutes)]
+    pub fn dst(self) -> Reg {
+        Reg(unsafe { ::core::mem::transmute(self.0.a()) })
+    }
+
+    #[allow(unnecessary_transmutes)]
+    pub fn target(self) -> Reg {
+        Reg(unsafe { ::core::mem::transmute(self.0.b()) })
+    }
+}
+
 #[doc = "Return from the current call."]
 #[derive(Clone, Copy)]
 #[repr(transparent)]
@@ -2392,6 +2417,7 @@ pub mod __operands {
     pub type fastcall = super::Fastcall;
     pub type hostcall = super::Hostcall;
     pub type import = super::Import;
+    pub type iter = super::Iter;
     pub type ret = super::Ret;
     pub type retv = super::Retv;
     pub type stop = super::Stop;
@@ -2683,6 +2709,10 @@ pub mod asm {
     pub const fn import(_unused: Reg, id: Lit) -> Insn {
         op_aB(Opcode::Import, _unused.0, id.0)
     }
+    #[doc = "Retrieve the iterator for `target`.\n\n`dst = builtin_get_iterator(target)`"]
+    pub const fn iter(dst: Reg, target: Reg) -> Insn {
+        op_abc(Opcode::Iter, dst.0, target.0, 0)
+    }
     #[doc = "Return from the current call."]
     pub const fn ret() -> Insn {
         op_abc(Opcode::Ret, 0, 0, 0)
@@ -2769,6 +2799,7 @@ pub struct JumpTable {
     pub fastcall: OpaqueHandler,
     pub hostcall: OpaqueHandler,
     pub import: OpaqueHandler,
+    pub iter: OpaqueHandler,
     pub ret: OpaqueHandler,
     pub retv: OpaqueHandler,
     pub stop: OpaqueHandler,

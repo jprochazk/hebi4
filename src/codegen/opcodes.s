@@ -305,6 +305,13 @@ hostcall dst:reg id:hostid;
  */
 import _unused:reg id:lit;
 
+/*
+ * Retrieve the iterator for `target`.
+ *
+ * `dst = builtin_get_iterator(target)`
+ */
+iter dst:reg target:reg;
+
 # Note that `ret` and `stop` are separate, to avoid a branch in `ret` which
 # would otherwise be required to check if there are any call frames left to
 # return to. There is always at least one call frame on the call frame stack.

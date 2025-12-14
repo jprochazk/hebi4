@@ -1,0 +1,9 @@
+//module
+// Modifying list length during iteration is illegal
+let list = [1, 2, 3]
+let iter = list_iter(list)
+
+assert_eq(iter(), 1)
+append(list, 4)
+// This should error
+iter()

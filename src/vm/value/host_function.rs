@@ -67,6 +67,18 @@ impl<'a> Context<'a> {
         self.sp().at(Reg::new_unchecked(i + 1)).read()
     }
 
+    #[inline]
+    pub(crate) fn callee(&self) -> GcPtr<HostFunction> {
+        // SAFETY: host call always has a host frame
+        unsafe {
+            self.vm
+                .current_frame()
+                .callee()
+                .into_host()
+                .unwrap_unchecked()
+        }
+    }
+
     #[doc(hidden)]
     #[inline]
     pub unsafe fn __unsafe_clone(&self) -> Self {
@@ -281,9 +293,21 @@ impl<'a> Context<'a> {
         // and by stack afterwards.
         unsafe {
             let v = v.try_into_hebi_value_raw(&mut self)?;
-            *self.sp().ret() = v;
-            Ok(Ret::new())
+            self.ret_raw(v)
         }
+    }
+
+    /// Return a managed value.
+    ///
+    /// Note that just calling this is not enough: The resulting `Ret`
+    /// type _must_ be returned from the function.
+    ///
+    /// ## Safety
+    /// - If `v` holds an object, the object must still be live.
+    #[inline]
+    pub unsafe fn ret_raw(self, v: ValueRaw) -> Result<Ret<'a>> {
+        *self.sp().ret() = v;
+        Ok(Ret::new())
     }
 
     #[inline]
@@ -330,6 +354,7 @@ pub(crate) type HostFunctionCallbackRaw = for<'a> fn(Context<'a>) -> Result<Valu
 pub struct HostFunction {
     pub(crate) name: GcPtr<Str>,
     pub(crate) arity: u8,
+    pub(crate) upvalues: Box<[ValueRaw]>,
     pub(crate) f: HostFunctionCallback,
 }
 
@@ -337,7 +362,12 @@ impl HostFunction {
     #[inline(never)]
     pub fn alloc(heap: &Heap, name: GcPtr<Str>, arity: u8, f: HostFunctionCallback) -> GcPtr<Self> {
         heap.alloc_no_gc(|ptr| unsafe {
-            (*ptr).write(Self { name, arity, f });
+            (*ptr).write(Self {
+                name,
+                arity,
+                upvalues: Box::new([]),
+                f,
+            });
         })
     }
 
@@ -352,6 +382,47 @@ impl HostFunction {
         let ptr = Self::alloc(heap, name.as_ptr(), arity, f);
         unsafe { root.init_raw(ptr) }
     }
+
+    // NOTE: `upvalues` are not initialized by this function,
+    // they must be initialized manually.
+    #[inline(never)]
+    pub fn alloc_closure(
+        heap: &Heap,
+        name: GcPtr<Str>,
+        arity: u8,
+        num_upvalues: usize,
+        f: HostFunctionCallback,
+    ) -> GcPtr<Self> {
+        let upvalues = vec![ValueRaw::Nil; num_upvalues].into_boxed_slice();
+
+        heap.alloc_no_gc(|ptr| unsafe {
+            (*ptr).write(Self {
+                name,
+                arity,
+                upvalues,
+                f,
+            });
+        })
+    }
+
+    #[inline(never)]
+    pub fn new_closure<'a>(
+        heap: &Heap,
+        root: GcUninitRoot<'a>,
+        name: &GcRoot<'a, Str>,
+        arity: u8,
+        upvalues: &[ValueRoot<'a>],
+        f: HostFunctionCallback,
+    ) -> GcRoot<'a, Self> {
+        let ptr = Self::alloc_closure(heap, name.as_ptr(), arity, upvalues.len(), f);
+
+        unsafe {
+            for i in 0..upvalues.len() {
+                ptr.as_mut().upvalues[i] = upvalues[i].raw();
+            }
+        }
+        unsafe { root.init_raw(ptr) }
+    }
 }
 
 unsafe impl Trace for HostFunction {
@@ -359,6 +430,9 @@ unsafe impl Trace for HostFunction {
 
     unsafe fn trace(&self, tracer: &crate::vm::gc::Tracer) {
         tracer.visit(self.name);
+        for v in &self.upvalues {
+            tracer.visit_value(*v);
+        }
     }
 }
 

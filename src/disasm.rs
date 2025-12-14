@@ -240,6 +240,7 @@ impl std::fmt::Display for DisasmInsnWithSrc<'_> {
             I::Import { _unused, id } => {
                 writeln!(f, "import {id}   ; {v}", v = func.literal(id.zx()))?
             }
+            I::Iter { dst, target } => writeln!(f, "iter {dst}, {target}")?,
             I::Ret {} => writeln!(f, "ret")?,
             I::Retv { src } => writeln!(f, "retv {src}")?,
             I::Stop {} => writeln!(f, "stop")?,
@@ -324,6 +325,7 @@ impl std::fmt::Display for DecodedInsn {
             I::Fastcall { dst, id } => write!(f, "call {dst}, {id}"),
             I::Hostcall { dst, id } => write!(f, "call {dst}, {id}"),
             I::Import { _unused, id } => write!(f, "import {id}"),
+            I::Iter { dst, target } => write!(f, "iter {dst}, {target}"),
             I::Ret {} => write!(f, "ret"),
             I::Retv { src } => write!(f, "retv {src}"),
             I::Stop {} => write!(f, "stop"),

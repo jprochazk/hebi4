@@ -1,4 +1,8 @@
-use crate::prelude::*;
+use crate::{
+    gc::GcPtr,
+    prelude::*,
+    value::{ValueRaw, host_function::HostFunction},
+};
 
 pub fn map<'a>(
     mut cx: Context<'a>,
@@ -55,4 +59,64 @@ pub fn append<'a>(
 
 pub fn list_len(cx: Context, list: Param<List>) -> i64 {
     list.as_ref(&cx).len() as i64
+}
+
+pub fn list_iter<'a>(cx: Context<'a>, list: Param<'a, List>) -> HebiResult<Ret<'a>> {
+    let ptr = unsafe { make_list_iter_raw(&cx, list.as_ptr()) };
+    unsafe { cx.ret_raw(ValueRaw::Object(ptr.as_any())) }
+}
+
+// exposed like this so it can be directly dispatched by VM
+pub(crate) unsafe fn make_list_iter_raw(heap: &Heap, list: GcPtr<List>) -> GcPtr<HostFunction> {
+    // TODO: string interning
+    let name = Str::alloc(heap, "@list_iter");
+    let arity = 0;
+    let num_upvalues = 3; // (list, initial_len, index)
+    let func = HostFunction::alloc_closure(
+        heap,
+        name,
+        arity,
+        num_upvalues,
+        crate::__f!(list_iter_step).callback().clone(),
+    );
+
+    func.as_mut().upvalues[0] = ValueRaw::Object(list.as_any());
+    func.as_mut().upvalues[1] = ValueRaw::Int(list.as_ref().len() as i64);
+    func.as_mut().upvalues[2] = ValueRaw::Int(0);
+
+    func
+}
+
+fn list_iter_step<'a>(cx: Context<'a>) -> HebiResult<Ret<'a>> {
+    // We care greatly about the performance of this function, so we avoid using roots.
+    // SAFETY:
+    // - `list` is reachable from `cx.callee.upvalues`, which is reachable from call stack.
+    // - We have exactly 3 upvalues with types [List, Int, Int] - see `make_list_iter_raw`.
+    unsafe {
+        let callee = cx.callee();
+
+        let [list, initial_len, index]: [ValueRaw; 3] =
+            callee.as_ref().upvalues[..].try_into().unwrap_unchecked();
+
+        let list = list.into_object::<List>().unwrap_unchecked();
+        let initial_len = initial_len.int_unchecked() as usize;
+        let index = index.int_unchecked() as usize;
+
+        // List can be mutated between calls to step, which is illegal.
+        // We check this _before_ bounds checking.
+        if list.as_ref().len() != initial_len {
+            return error("list size changed during iteration").into();
+        }
+
+        // Done, signal `nil`.
+        if index >= list.as_ref().len() {
+            return cx.ret(ValueRoot::Nil);
+        }
+
+        // Not done, increment index and return current item.
+        callee.as_mut().upvalues[2] = ValueRaw::Int((index + 1) as i64);
+
+        let item = list.as_ref().get_unchecked(index).raw();
+        cx.ret_raw(item)
+    }
 }

@@ -1,0 +1,48 @@
+---
+source: src/vm/tests.rs
+expression: snapshot
+---
+SOURCE
+//module
+// Modifying list length during iteration is illegal
+let list = [1, 2, 3]
+let iter = list_iter(list)
+
+assert_eq(iter(), 1)
+append(list, 4)
+// This should error
+iter()
+
+ERROR
+list size changed during iteration
+9 |  iter()
+  |  ^^^^^^
+
+
+DISASM:
+
+.fn @main
+  params 0
+  stack 4
+  .code
+   0  llist r1, 3
+   1  lsmi r2, 1
+   2  sidxn r1, 0, r2
+   3  lsmi r2, 2
+   4  sidxn r1, 1, r2
+   5  lsmi r2, 3
+   6  sidxn r1, 2, r2
+   7  smvar m1, r1
+   8  lmvar r2, m1
+   9  call r1, list_iter
+  10  smvar m0, r1
+  11  lmvar r2, m0
+  12  call r2, r2, 0   ; dyn
+  13  lsmi r3, 1
+  14  call r1, assert_eq
+  15  lmvar r2, m1
+  16  lsmi r3, 4
+  17  call r1, append
+  18  lmvar r0, m0
+  19  call r0, r0, 0   ; dyn
+  20  ret
